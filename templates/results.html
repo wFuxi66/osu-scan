@@ -89,7 +89,11 @@
         <a href="https://osu-scan.onrender.com" class="back-link">← Scan Another User (osu-scan.onrender.com)</a>
         {% endif %}
 
+        {% if 'Nominated by' in title_prefix %}
+        <h1>{{ title_prefix }} {{ username }}</h1>
+        {% else %}
         <h1>{{ title_prefix }} Leaderboard for {{ username }}</h1>
+        {% endif %}
         {% if not leaderboard %}
         <p>No {{ title_prefix }}s found for this user.</p>
         {% else %}
