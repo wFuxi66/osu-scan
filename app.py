@@ -103,6 +103,7 @@ def cancel_scan(job_id):
     return jsonify({'error': 'Job not found'}), 404
 
 @app.route('/api/status/<job_id>')
+@limiter.exempt  # Status polling must not be rate-limited
 def job_status(job_id):
     job = JOBS.get(job_id)
     if not job:
