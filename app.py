@@ -4,10 +4,20 @@ import threading
 import time
 import uuid
 import gder_logic
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 load_dotenv()
 
 app = Flask(__name__)
+
+# Rate Limiter Configuration
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
 
 # JOBS storage: { 'job_id': { 'status', 'message', 'result', 'cancel_event' } }
 JOBS = {}
@@ -59,6 +69,7 @@ def run_scan_job(job_id, username, mode, cancel_event):
         JOBS[job_id]['error'] = str(e)
 
 @app.route('/api/start_scan', methods=['POST'])
+@limiter.limit("10 per minute") # Max 10 scans per minute per IP
 def start_scan():
     username = request.form.get('username')
     mode = request.form.get('mode', 'gd')
