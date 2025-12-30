@@ -96,7 +96,10 @@ def job_status(job_id):
     job = JOBS.get(job_id)
     if not job:
         return jsonify({'status': 'unknown'}), 404
-    return jsonify(job)
+    
+    # Return a safe copy without non-serializable objects (like threading.Event)
+    safe_job = {k: v for k, v in job.items() if k != 'cancel_event'}
+    return jsonify(safe_job)
 
 @app.route('/results_view/<cache_id>')
 def results_view(cache_id):
