@@ -19,9 +19,31 @@ limiter = Limiter(
     storage_uri="memory://"
 )
 
-# JOBS storage: { 'job_id': { 'status', 'message', 'result', 'cancel_event' } }
+# JOBS storage: { 'job_id': { 'status', 'message', 'result', 'cancel_event', 'created_at' } }
 JOBS = {}
 RESULTS_CACHE = {}
+
+# TTL for cleanup (10 minutes)
+CACHE_TTL_SECONDS = 600
+
+def cleanup_old_entries():
+    """Remove jobs and results older than CACHE_TTL_SECONDS."""
+    now = time.time()
+    
+    # Cleanup old jobs
+    old_jobs = [jid for jid, job in JOBS.items() 
+                if now - job.get('created_at', now) > CACHE_TTL_SECONDS]
+    for jid in old_jobs:
+        del JOBS[jid]
+    
+    # Cleanup old results
+    old_results = [cid for cid, result in RESULTS_CACHE.items() 
+                   if now - result.get('created_at', now) > CACHE_TTL_SECONDS]
+    for cid in old_results:
+        del RESULTS_CACHE[cid]
+    
+    if old_jobs or old_results:
+        print(f"Cleanup: removed {len(old_jobs)} jobs, {len(old_results)} cached results")
 
 @app.route('/', methods=['GET'])
 def index():
@@ -59,7 +81,8 @@ def run_scan_job(job_id, username, mode, cancel_event):
             RESULTS_CACHE[job_id] = {
                 'username': result['username'], 
                 'leaderboard': result['leaderboard'],
-                'title_prefix': title_prefix
+                'title_prefix': title_prefix,
+                'created_at': time.time()
             }
             JOBS[job_id]['status'] = 'done'
             JOBS[job_id]['result_id'] = job_id
@@ -71,6 +94,9 @@ def run_scan_job(job_id, username, mode, cancel_event):
 @app.route('/api/start_scan', methods=['POST'])
 @limiter.limit("30 per minute") # Max 30 scans per minute per IP
 def start_scan():
+    # Run cleanup before starting new scan
+    cleanup_old_entries()
+    
     username = request.form.get('username')
     mode = request.form.get('mode', 'gd')
     
@@ -83,7 +109,8 @@ def start_scan():
     JOBS[job_id] = {
         'status': 'running', 
         'message': 'Starting...',
-        'cancel_event': cancel_event
+        'cancel_event': cancel_event,
+        'created_at': time.time()
     }
     
     # Start background thread

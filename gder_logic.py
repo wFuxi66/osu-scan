@@ -162,10 +162,6 @@ def process_set(bset, host_id, token):
         print(f"Error fetching deep set {bset['id']}: {e}")
         full_set = bset
 
-    # Analyze
-    if full_set['user_id'] != host_id:
-         pass
-
     beats = full_set.get('beatmaps', [])
     if not beats:
         return []
@@ -274,8 +270,7 @@ def resolve_users_parallel(user_ids, token, progress_callback=None):
     total_missing = len(missing_ids)
     
     if total_missing > 0:
-        msg = f"Resolving {total_missing} new users (Cache hit: {len(user_ids) - total_missing})..."
-        print(msg)
+        msg = f"Resolving {total_missing} usernames..."
         if progress_callback: progress_callback(msg)
 
         def fetch_user(uid):
