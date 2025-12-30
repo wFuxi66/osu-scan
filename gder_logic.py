@@ -210,7 +210,50 @@ def process_nominator_set(bset, token):
     except Exception as e:
         print(f"Error fetching set {bset['id']}: {e}")
         
-    return nominations
+def resolve_users_parallel(user_ids, token, progress_callback=None):
+    """Resolves a list of user IDs to usernames using threading."""
+    user_cache = {}
+    headers = {'Authorization': f'Bearer {token}'}
+    unique_ids = list(user_ids)
+    total = len(unique_ids)
+    
+    if total == 0:
+        return {}
+
+    msg = f"Resolving {total} users in parallel..."
+    print(msg)
+    if progress_callback: progress_callback(msg)
+
+    def fetch_user(uid):
+        if uid == 0: return (uid, None)
+        try:
+            r = requests.get(f'{API_BASE}/users/{uid}', headers=headers, timeout=5)
+            if r.status_code == 200:
+                return (uid, r.json()['username'])
+        except:
+            pass
+        return (uid, f"User_{uid}")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_uid = {executor.submit(fetch_user, uid): uid for uid in unique_ids}
+        
+        completed = 0
+        for future in concurrent.futures.as_completed(future_to_uid):
+            completed += 1
+            if completed % 10 == 0:
+                 if progress_callback: progress_callback(f"Resolving names {completed}/{total}...")
+            
+            try:
+                uid, name = future.result()
+                if name:
+                    user_cache[uid] = name
+                else:
+                    user_cache[uid] = f"User_{uid}"
+            except:
+                # Should be caught inside fetch_user mostly
+                pass
+                
+    return user_cache
 
 def analyze_nominators(beatmapsets, token, progress_callback=None):
     """Fetches nominators for the provided beatmap sets using threading."""
@@ -240,30 +283,11 @@ def analyze_nominators(beatmapsets, token, progress_callback=None):
     return all_nominations
 
 def resolve_and_aggregate_nominators(noms, token, progress_callback=None):
-    """Resolves names and builds the nominator leaderboard."""
-    headers = {'Authorization': f'Bearer {token}'}
+    """Resolves names and builds the nominator leaderboard using parallel resolution."""
     unique_ids = set(n['nominator_id'] for n in noms)
-    user_cache = {}
     
-    msg = f"Resolving {len(unique_ids)} unique Nominators..."
-    print(msg)
-    if progress_callback: progress_callback(msg)
-    
-    for i, uid in enumerate(unique_ids):
-        if i % 10 == 0:
-             msg = f"Resolving names {i}/{len(unique_ids)}..."
-             print(msg, end='\r')
-             if progress_callback: progress_callback(msg)
-             
-        try:
-            r = requests.get(f'{API_BASE}/users/{uid}', headers=headers, timeout=5)
-            if r.status_code == 200:
-                user_cache[uid] = r.json()['username']
-            else:
-                user_cache[uid] = f"User_{uid}"
-            time.sleep(0.1)
-        except:
-            user_cache[uid] = f"User_{uid}"
+    # Use the new parallel resolver
+    user_cache = resolve_users_parallel(unique_ids, token, progress_callback)
             
     stats = defaultdict(lambda: {'count': 0, 'last_date': ''})
     
@@ -314,35 +338,13 @@ def generate_nominator_leaderboard_for_user(username_input, progress_callback=No
     }
 
 def resolve_and_aggregate(gds, token, progress_callback=None):
-    """Resolves names and builds the leaderboard."""
-    headers = {'Authorization': f'Bearer {token}'}
+    """Resolves names and builds the leaderboard using parallel resolution."""
     
     # Only resolve IDs that have no name
     unique_ids_to_resolve = set(gd['mapper_id'] for gd in gds if not gd['mapper_name'])
-    user_cache = {}
     
-    if unique_ids_to_resolve:
-        msg = f"Resolving {len(unique_ids_to_resolve)} unique GDers..."
-        print(msg)
-        if progress_callback: progress_callback(msg)
-        
-        for i, uid in enumerate(unique_ids_to_resolve):
-            if uid == 0: continue
-            
-            if i % 10 == 0:
-                 msg = f"Resolving names {i}/{len(unique_ids_to_resolve)}..."
-                 print(msg, end='\r')
-                 if progress_callback: progress_callback(msg)
-            
-            try:
-                r = requests.get(f'{API_BASE}/users/{uid}', headers=headers, timeout=5)
-                if r.status_code == 200:
-                    user_cache[uid] = r.json()['username']
-                else:
-                    user_cache[uid] = f"User_{uid}"
-                time.sleep(0.1) 
-            except:
-                user_cache[uid] = f"User_{uid}"
+    # Use the new parallel resolver
+    user_cache = resolve_users_parallel(unique_ids_to_resolve, token, progress_callback)
             
     # Aggregate
     stats = defaultdict(lambda: {'count': 0, 'last_date': ''})
