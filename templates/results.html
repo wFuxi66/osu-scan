@@ -81,25 +81,48 @@
         /* Mobile Responsiveness */
         @media (max-width: 600px) {
             body {
-                padding: 20px;
+                padding: 10px;
+                /* Less padding on mobile body */
             }
 
             .container {
                 padding: 15px;
                 width: 100%;
+                box-sizing: border-box;
+                /* Ensure padding doesn't overflow width */
             }
 
             h1 {
-                font-size: 24px;
+                font-size: 22px;
+                /* Slightly smaller title */
+            }
+
+            /* Stack links vertically */
+            .back-link {
+                display: block;
+                float: none !important;
+                /* Override inline styles */
+                margin-bottom: 10px;
+                text-align: center;
+                /* Center links */
+            }
+
+            /* Table Scroll */
+            .table-wrapper {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
             }
 
             table {
                 font-size: 14px;
+                white-space: nowrap;
+                /* Prevent awkward wrapping in cells */
             }
 
             th,
             td {
-                padding: 8px;
+                padding: 8px 5px;
+                /* Compact padding */
             }
         }
     </style>
@@ -122,26 +145,28 @@
         {% if not leaderboard %}
         <p>No {{ title_prefix }}s found for this user.</p>
         {% else %}
-        <table>
-            <thead>
-                <tr>
-                    <th>#</th>
-                    <th>User</th>
-                    <th>{% if 'Nominated by' in title_prefix %}Nominations{% else %}Total{% endif %}</th>
-                    <th>Last Date</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for entry in leaderboard %}
-                <tr class="{% if loop.index <= 3 %}rank-{{ loop.index }}{% endif %}">
-                    <td>{{ loop.index }}</td>
-                    <td>{{ entry.mapper_name }}</td>
-                    <td>{{ entry.total_gds }}</td>
-                    <td>{{ entry.last_gd_date }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>User</th>
+                        <th>{% if 'Nominated by' in title_prefix %}Nominations{% else %}Total{% endif %}</th>
+                        <th>Last Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in leaderboard %}
+                    <tr class="{% if loop.index <= 3 %}rank-{{ loop.index }}{% endif %}">
+                        <td>{{ loop.index }}</td>
+                        <td>{{ entry.mapper_name }}</td>
+                        <td>{{ entry.total_gds }}</td>
+                        <td>{{ entry.last_gd_date }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
         {% endif %}
 
         <div style="margin-top: 40px; text-align: center; font-size: 12px; color: #666;">
