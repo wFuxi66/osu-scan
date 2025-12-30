@@ -148,10 +148,27 @@
             const statusText = document.getElementById('status-text');
             const scanBtn = document.getElementById('scanBtn');
             const cancelBtn = document.getElementById('cancelBtn');
+            const errorMsg = document.getElementById('error-msg');
 
             let currentJobId = null;
             let isCancelled = false;
             let pollInterval = null;
+
+            // Debug Helper
+            function logDebug(msg) {
+                console.log(msg);
+                let dbg = document.getElementById('debug-log');
+                if (!dbg) {
+                    dbg = document.createElement('div');
+                    dbg.id = 'debug-log';
+                    dbg.style.fontSize = '10px';
+                    dbg.style.color = '#888';
+                    dbg.style.marginTop = '10px';
+                    document.querySelector('.container').appendChild(dbg);
+                }
+                const time = new Date().toLocaleTimeString();
+                dbg.innerHTML = `[${time}] ${msg}<br>` + dbg.innerHTML;
+            }
 
             if (form) {
                 form.addEventListener('submit', async (e) => {
@@ -168,12 +185,15 @@
                     }
 
                     // Reset UI
-                    scanBtn.classList.add('hidden'); // Hide start button
+                    scanBtn.classList.add('hidden');
                     progressDiv.classList.remove('hidden');
                     statusText.textContent = "Initializing...";
+                    logDebug("Starting scan for " + username + " (" + mode + ")...");
+
                     isCancelled = false;
                     cancelBtn.disabled = false;
                     cancelBtn.textContent = "Cancel Scan";
+                    if (errorMsg) errorMsg.style.display = 'none';
 
                     if (pollInterval) clearInterval(pollInterval);
 
@@ -182,10 +202,17 @@
                         formData.append('username', username);
                         formData.append('mode', mode);
 
+                        logDebug("Sending POST /api/start_scan");
                         const startRes = await fetch('/api/start_scan', {
                             method: 'POST',
                             body: formData
                         });
+
+                        logDebug("Start Res Status: " + startRes.status);
+
+                        if (!startRes.ok) {
+                            throw new Error("Start Failed: " + startRes.statusText);
+                        }
 
                         const startData = await startRes.json();
 
@@ -196,11 +223,13 @@
                         }
 
                         currentJobId = startData.job_id;
+                        logDebug("Job ID: " + currentJobId);
                         pollStatus(currentJobId);
 
                     } catch (err) {
                         console.error(err);
-                        alert("Network error starting scan.");
+                        logDebug("Error: " + err.message);
+                        alert("Network error starting scan: " + err.message);
                         resetUI();
                     }
                 });
@@ -209,25 +238,15 @@
             if (cancelBtn) {
                 cancelBtn.addEventListener('click', async () => {
                     if (!currentJobId) return;
-
-                    if (confirm("Stop the current scan?")) {
-                        statusText.textContent = "Cancelling...";
+                    if (confirm("Stop scan?")) {
                         cancelBtn.disabled = true;
                         isCancelled = true;
-
-                        if (pollInterval) clearInterval(pollInterval);
-
+                        statusText.textContent = "Cancelling...";
                         try {
                             await fetch(`/api/cancel_scan/${currentJobId}`, { method: 'POST' });
-                        } catch (e) {
-                            console.error("Cancel failed", e);
-                        } finally {
-                            setTimeout(() => {
-                                if (isCancelled) {
-                                    statusText.textContent = "Scan cancelled.";
-                                    resetUI();
-                                }
-                            }, 1000);
+                        } catch (e) { logDebug("Cancel Error: " + e.message); }
+                        finally {
+                            setTimeout(() => { if (isCancelled) resetUI(); }, 1000);
                         }
                     }
                 });
@@ -245,10 +264,18 @@
 
                     try {
                         const res = await fetch(`/api/status/${jobId}`);
+
                         if (res.status === 404) {
                             clearInterval(pollInterval);
-                            alert("Job lost.");
+                            logDebug("404 Job Lost");
+                            alert("Job lost (Server Restarted). Please try again.");
                             resetUI();
+                            return;
+                        }
+
+                        if (!res.ok) {
+                            logDebug("Poll Status Error: " + res.status);
+                            // Don't stop polling immediately for 502s, network glitches
                             return;
                         }
 
@@ -258,19 +285,21 @@
                             statusText.textContent = data.message;
                         } else if (data.status === 'done') {
                             clearInterval(pollInterval);
+                            logDebug("Done. Redirecting.");
                             window.location.href = `/results_view/${jobId}`;
                         } else if (data.status === 'cancelled') {
                             clearInterval(pollInterval);
-                            statusText.textContent = "Scan cancelled.";
+                            statusText.textContent = "Cancelled.";
                             setTimeout(resetUI, 1500);
                         } else if (data.status === 'error') {
                             clearInterval(pollInterval);
+                            logDebug("Job Error: " + data.error);
                             alert("Error: " + data.error);
                             resetUI();
                         }
 
                     } catch (err) {
-                        console.warn("Polling error:", err);
+                        logDebug("Poll Exception: " + err.message);
                     }
                 }, 1000);
             }
@@ -278,7 +307,7 @@
             function resetUI() {
                 if (scanBtn) {
                     scanBtn.disabled = false;
-                    scanBtn.classList.remove('hidden'); // Show start button again
+                    scanBtn.classList.remove('hidden');
                 }
                 if (progressDiv) progressDiv.classList.add('hidden');
                 currentJobId = null;
