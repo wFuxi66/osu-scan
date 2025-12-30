@@ -90,29 +90,30 @@
         {% endif %}
 
         <h1>{{ title_prefix }} Leaderboard for {{ username }}</h1>
-        {% if leaderboard %}
+        {% if not leaderboard %}
+        <p>No {{ type }} found for this user.</p>
+        {% else %}
         <table>
             <thead>
                 <tr>
-                    <th>Rank</th>
+                    <th>#</th>
                     <th>User</th>
-                    <th>Count</th>
+                    <th>Total {{ type }}</th>
                     <th>Last Date</th>
                 </tr>
             </thead>
             <tbody>
                 {% for entry in leaderboard %}
                 <tr>
-                    <td class="rank-{{ loop.index }}">#{{ loop.index }}</td>
-                    <td class="rank-{{ loop.index }}">{{ entry.mapper_name }}</td>
+                    <td>{{ loop.index }}</td>
+                    <td><a href="https://osu.ppy.sh/users/{{ entry.mapper_id }}" target="_blank">{{ entry.mapper_name
+                            }}</a></td>
                     <td>{{ entry.total_gds }}</td>
                     <td>{{ entry.last_gd_date }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
-        {% else %}
-        <p>No Guest Difficulties found for this user.</p>
         {% endif %}
 
         <div style="margin-top: 40px; text-align: center; font-size: 12px; color: #666;">
