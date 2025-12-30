@@ -106,8 +106,7 @@
                 {% for entry in leaderboard %}
                 <tr>
                     <td>{{ loop.index }}</td>
-                    <td><a href="https://osu.ppy.sh/users/{{ entry.mapper_id }}" target="_blank">{{ entry.mapper_name
-                            }}</a></td>
+                    <td>{{ entry.mapper_name }}</td>
                     <td>{{ entry.total_gds }}</td>
                     <td>{{ entry.last_gd_date }}</td>
                 </tr>
