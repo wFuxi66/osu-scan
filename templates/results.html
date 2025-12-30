@@ -92,7 +92,7 @@
         {% if 'Nominated by' in title_prefix %}
         <h1>{{ title_prefix }} {{ username }}</h1>
         {% else %}
-        <h1>{{ title_prefix }} Leaderboard for {{ username }}</h1>
+        <h1>{{ title_prefix }} for {{ username }}</h1>
         {% endif %}
         {% if not leaderboard %}
         <p>No {{ title_prefix }}s found for this user.</p>

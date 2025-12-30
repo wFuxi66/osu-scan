@@ -30,7 +30,7 @@ def run_scan_job(job_id, username, mode, cancel_event):
     try:
         if mode == 'nominators':
             result = gder_logic.generate_nominator_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
-            title_prefix = "Nominator"
+            title_prefix = "Nominators"
         elif mode == 'bn':
             result = gder_logic.generate_bn_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
             title_prefix = "Mappers Nominated by"
