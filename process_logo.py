@@ -1,34 +1,60 @@
 from PIL import Image
 import os
 
+def remove_background(img):
+    img = img.convert("RGBA")
+    datas = img.getdata()
+    
+    new_data = []
+    # Threshold for "Black" background (the generated image has a dark grey/black bg)
+    threshold = 40 
+    
+    for item in datas:
+        # Check if pixel is dark (R, G, B are all low)
+        if item[0] < threshold and item[1] < threshold and item[2] < threshold:
+            # Make it transparent
+            new_data.append((255, 255, 255, 0))
+        else:
+            new_data.append(item)
+            
+    img.putdata(new_data)
+    return img
+
 try:
+    # 1. Open original logo (we should reload from source if possible to avoid re-processing, 
+    # but re-processing the black one is fine)
+    # Actually, let's use the one in static/logo.png which is currently the full image with black bg.
     img = Image.open("static/logo.png")
-    width, height = img.size
     
-    # crop the top 75% to get the circular icon, assuming centered
-    # The text is at the bottom.
+    # 2. Make Transparent
+    print("Removing background...")
+    img_transparent = remove_background(img)
+    img_transparent.save("static/logo.png", "PNG")
+    print("Saved transparent logo.png")
     
-    # Let's try to find the bounding box of the non-black pixels?
-    # Or just hard crop.
+    # 3. Create Favicon (Crop Only the Icon)
+    # layout: Icon is Top-Centered. Text is Bottom.
+    # Image size is likely 1024x1024.
+    width, height = img_transparent.size
     
-    # 1024x1024 image.
-    # Icon is likely in the center-top.
-    # Let's crop centered square from top.
+    # Crop a square from the top center.
+    # Let's say the icon takes up the top 65% of the image.
+    crop_size = int(height * 0.65)
     
-    icon_size = int(height * 0.70)
-    left = (width - icon_size) // 2
-    top = int(height * 0.1) # Start a bit from top
-    right = left + icon_size
-    bottom = top + icon_size
+    left = (width - crop_size) // 2
+    top = int(height * 0.05) # Slight offset from top
+    right = left + crop_size
+    bottom = top + crop_size
     
-    icon = img.crop((left, top, right, bottom))
-    icon.save("static/favicon.png")
-    print("Favicon created.")
+    favicon = img_transparent.crop((left, top, right, bottom))
+    
+    # Resize to standard favicon size (e.g. 128x128) for sharpness
+    favicon = favicon.resize((128, 128), Image.Resampling.LANCZOS)
+    
+    favicon.save("static/favicon.png", "PNG")
+    print("Saved transparent favicon.png (Icon only)")
     
 except ImportError:
-    print("PIL not installed. Installing...")
-    os.system("pip install pillow")
-    # Retry logic would be needed but for now let's just assume it works or fail gracefully
-    pass
+    print("PIL not installed.")
 except Exception as e:
     print(f"Error: {e}")
