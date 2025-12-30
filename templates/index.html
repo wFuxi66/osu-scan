@@ -330,16 +330,33 @@
         <img src="{{ url_for('static', filename='logo.png') }}" alt="osu!scan" class="logo">
         <h1>osu!scan</h1>
         <p>Scan your GDers & Nominators</p>
-        <div>
+        <form id="scanForm">
             <input type="text" id="username-input" name="username" placeholder="Username or ID" required>
-            <br><br>
-            <button id="search-btn" onclick="startScan('gd')">Scan GDers</button>
-            <button id="nom-btn" onclick="startScan('nominators')" style="background-color: #4facfe;">Scan
-                Nominators</button>
+
+            <!-- Mode Selection -->
+            <div class="mode-selection">
+                <label>
+                    <input type="radio" name="mode" value="gd" checked>
+                    <span>Find my Guest Diffs</span>
+                </label>
+                <label>
+                    <input type="radio" name="mode" value="nominators">
+                    <span>Find my Nominators</span>
+                </label>
+                <label>
+                    <input type="radio" name="mode" value="bn">
+                    <span>BN Scanner</span>
+                </label>
+            </div>
+
+            <button type="submit" id="scanBtn">Start Scan</button>
+        </form>
+
+        <div id="progress" class="hidden">
+            <div class="spinner"></div>
+            <p id="status-text">Starting scan...</p>
+            <button id="cancelBtn" class="cancel-btn">Cancel Scan</button>
         </div>
-        <div id="loader" class="loader"></div>
-        <div id="info" class="info" style="display:none; font-family: monospace; font-weight: bold;"></div>
-        <div id="error-msg" class="error" style="display:none;"></div>
 
         <div style="margin-top: 40px; font-size: 12px; color: #666;">
             Made by <a href="https://osu.ppy.sh/users/24230576"
