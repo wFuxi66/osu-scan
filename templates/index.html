@@ -25,7 +25,34 @@
             border-radius: 12px;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
             max-width: 400px;
-            width: 100%;
+            width: 90%;
+            /* Better for mobile */
+            margin: 0 auto;
+        }
+
+        /* Mobile Adjustments */
+        @media (max-width: 480px) {
+            .container {
+                padding: 20px;
+            }
+
+            h1 {
+                font-size: 2em;
+            }
+
+            input[type="text"] {
+                width: 100%;
+                /* Full width on mobile */
+                box-sizing: border-box;
+                /* Include padding in width */
+            }
+
+            .mode-selection {
+                padding-left: 0;
+                /* Center align items or remove left padding */
+                align-items: center;
+                /* Center items */
+            }
         }
 
         .logo {
