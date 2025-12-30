@@ -82,9 +82,11 @@
 
 <body>
     <div class="container">
-        <a href="/" class="back-link">← Scan Another User</a>
         {% if cache_id %}
+        <a href="/" class="back-link">← Scan Another User</a>
         <a href="/download/{{ cache_id }}" class="back-link" style="float: right; color: #4facfe;">↓ Download HTML</a>
+        {% else %}
+        <a href="https://osu-scan.onrender.com" class="back-link">← Scan Another User (osu-scan.onrender.com)</a>
         {% endif %}
 
         <h1>{{ title_prefix }} Leaderboard for {{ username }}</h1>
