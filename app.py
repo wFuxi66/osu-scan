@@ -9,7 +9,7 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# JOBS storage: { 'job_id': { 'status': 'running', 'message': '...', 'result': ... } }
+# JOBS storage: { 'job_id': { 'status', 'message', 'result', 'cancel_event' } }
 JOBS = {}
 RESULTS_CACHE = {}
 
@@ -17,21 +17,31 @@ RESULTS_CACHE = {}
 def index():
     return render_template('index.html')
 
-def run_scan_job(job_id, username, mode):
+def run_scan_job(job_id, username, mode, cancel_event):
     """Background thread function."""
     def update_progress(msg):
         if job_id in JOBS:
+            if cancel_event.is_set():
+                JOBS[job_id]['status'] = 'cancelled'
+                JOBS[job_id]['message'] = 'Cancelled.'
+                return
             JOBS[job_id]['message'] = msg
             
     try:
         if mode == 'nominators':
-            result = gder_logic.generate_nominator_leaderboard_for_user(username, progress_callback=update_progress)
+            result = gder_logic.generate_nominator_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
             title_prefix = "Nominator"
+        elif mode == 'bn':
+            result = gder_logic.generate_bn_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
+            title_prefix = "Mappers Nominated by"
         else:
-            result = gder_logic.generate_leaderboard_for_user(username, progress_callback=update_progress)
+            result = gder_logic.generate_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
             title_prefix = "Guest Difficulty"
             
-        if 'error' in result:
+        if cancel_event.is_set():
+            JOBS[job_id]['status'] = 'cancelled'
+            JOBS[job_id]['message'] = 'Scan cancelled by user.'
+        elif 'error' in result:
              JOBS[job_id]['status'] = 'error'
              JOBS[job_id]['error'] = result['error']
         else:
@@ -57,13 +67,29 @@ def start_scan():
         return jsonify({'error': 'Username required'}), 400
         
     job_id = str(uuid.uuid4())
-    JOBS[job_id] = {'status': 'running', 'message': 'Starting...'}
+    cancel_event = threading.Event()
+    
+    JOBS[job_id] = {
+        'status': 'running', 
+        'message': 'Starting...',
+        'cancel_event': cancel_event
+    }
     
     # Start background thread
-    thread = threading.Thread(target=run_scan_job, args=(job_id, username, mode))
+    thread = threading.Thread(target=run_scan_job, args=(job_id, username, mode, cancel_event))
     thread.start()
     
     return jsonify({'job_id': job_id})
+
+@app.route('/api/cancel_scan/<job_id>', methods=['POST'])
+def cancel_scan(job_id):
+    job = JOBS.get(job_id)
+    if job and 'cancel_event' in job:
+        job['cancel_event'].set()
+        job['status'] = 'cancelled'
+        job['message'] = 'Cancelling...'
+        return jsonify({'status': 'cancelled'})
+    return jsonify({'error': 'Job not found'}), 404
 
 @app.route('/api/status/<job_id>')
 def job_status(job_id):
