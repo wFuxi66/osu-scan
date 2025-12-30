@@ -184,14 +184,16 @@ def analyze_sets(beatmapsets, host_id, token, progress_callback=None):
                 
     return all_gds
 
-def process_nominator_set(bset, token):
+def process_nominator_set(bset, token, session=None):
     """Deep fetches a set to find its nominators."""
     headers = {'Authorization': f'Bearer {token}'}
     nominations = []
     
     try:
         url = f'{API_BASE}/beatmapsets/{bset["id"]}'
-        r = requests.get(url, headers=headers, timeout=10)
+        # Use session if provided, else standard request
+        req_func = session.get if session else requests.get
+        r = req_func(url, headers=headers, timeout=20) # Increased timeout to 20s
         
         if r.status_code == 200:
             data = r.json()
@@ -206,6 +208,11 @@ def process_nominator_set(bset, token):
         else:
             # If fetch fails, we skip specific nominator data for this set
             pass
+            
+    except Exception as e:
+        print(f"Error fetching set {bset['id']}: {e}")
+        
+    return nominations
             
 # Global Cache
 USER_CACHE = {}
@@ -225,7 +232,7 @@ def resolve_users_parallel(user_ids, token, progress_callback=None):
 
         def fetch_user(uid):
             try:
-                r = requests.get(f'{API_BASE}/users/{uid}', headers=headers, timeout=5)
+                r = requests.get(f'{API_BASE}/users/{uid}', headers=headers, timeout=10)
                 if r.status_code == 200:
                     return (uid, r.json()['username'])
             except:
@@ -260,8 +267,15 @@ def analyze_nominators(beatmapsets, token, progress_callback=None):
     msg = f"Scanning {total} sets for Nominators..."
     if progress_callback: progress_callback(msg)
     
+    # Create a thread-local session factory or just pass a session?
+    # Actually requests.Session is not thread-safe if shared across threads heavily?
+    # Documentation says Session is thread-safe.
+    # But for safety, we can create one session per thread if we want, but sharing is usually fine for read-only.
+    # Let's try sharing one session to reuse connections.
+    session = requests.Session()
+    
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_set = {executor.submit(process_nominator_set, bset, token): bset for bset in target_sets}
+        future_to_set = {executor.submit(process_nominator_set, bset, token, session): bset for bset in target_sets}
         
         completed = 0
         for future in concurrent.futures.as_completed(future_to_set):
@@ -275,6 +289,7 @@ def analyze_nominators(beatmapsets, token, progress_callback=None):
             except Exception as e:
                 print(f"Nominator scan exception: {e}")
             
+    session.close()
     return all_nominations
 
 def resolve_and_aggregate_nominators(noms, token, progress_callback=None):
