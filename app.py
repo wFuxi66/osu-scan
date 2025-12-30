@@ -5,15 +5,23 @@ import time
 import uuid
 import gder_logic
 from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 
 load_dotenv()
 
 app = Flask(__name__)
 
-# Rate Limiter Configuration
+# Get real IP behind Render's proxy
+def get_real_ip():
+    # X-Forwarded-For contains: "client_ip, proxy1, proxy2..."
+    forwarded = request.headers.get('X-Forwarded-For', '')
+    if forwarded:
+        # Get the first IP (real client)
+        return forwarded.split(',')[0].strip()
+    return request.remote_addr or '127.0.0.1'
+
+# Rate Limiter Configuration (per user IP)
 limiter = Limiter(
-    get_remote_address,
+    key_func=get_real_ip,
     app=app,
     default_limits=["2000 per day", "500 per hour"],
     storage_uri="memory://"
