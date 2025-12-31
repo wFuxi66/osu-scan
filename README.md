@@ -7,17 +7,22 @@
 ## Features
 
 ### 🔍 Guest Difficulty Scanner
-Find every single map you have guest difficultied (GD'ed).
+Find who made the most GD in your sets.
 -   Detects **Collaborations** hidden in the description.
 -   Recursively checks beatmaps where the set owner might not be the creator.
 
+### 🎯 GD Hosts Scanner (New!)
+Find which mapper you made the most GD for.
+-   See a leaderboard of mappers whose sets you contributed to.
+-   Perfect for seeing who you collaborate with the most!
+
 ### 🏆 Nominator Scanner
-Discover which Beatmap Nominators (BNs) have supported your work.
+Find which BN nominated your maps the most.
 -   Generates a leaderboard of your "Top Nominators".
 -   See who has nominated the most of your mapsets.
 
-### 🕵️‍♂️ BN Scanner (New!)
-Analyze a specific Beatmap Nominator's history.
+### 🕵️‍♂️ BN Scanner
+Find which mappers a BN nominated the most.
 -   Enter a BN's username to see **every map they have nominated**.
 -   View a leaderboard of which mappers they nominate the most.
 -   Perfect for finding BNs who might be interested in your style.
