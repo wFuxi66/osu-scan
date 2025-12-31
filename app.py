@@ -85,6 +85,9 @@ def run_scan_job(job_id, username, mode, cancel_event):
         elif mode == 'bn':
             result = gder_logic.generate_bn_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
             title_prefix = "Mappers Nominated by"
+        elif mode == 'gd_hosts':
+            result = gder_logic.generate_gd_hosts_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
+            title_prefix = "GD Hosts for"
         else:
             result = gder_logic.generate_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
             title_prefix = "Guest Difficulties"
