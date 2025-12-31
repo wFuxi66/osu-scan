@@ -349,8 +349,8 @@
         <img src="{{ url_for('static', filename='logo.png') }}" alt="osu!scan" class="logo">
         <h1>osu!scan</h1>
         <p style="font-size: 14px; color: #aeb2b8; margin-bottom: 25px;">
-            Check who made the most gd in your maps, who nominated most of your maps and which mappers an individual bn
-            nominated the most!
+            Check who made the most gd in your maps, which mapper you made the most gd for, who nominated most of your
+            maps and which mappers an individual bn nominated the most!
         </p>
         <form id="scanForm">
             <input type="text" id="username-input" name="username" placeholder="Username or ID" required>
@@ -359,19 +359,19 @@
             <div class="mode-selection">
                 <label>
                     <input type="radio" name="mode" value="gd" checked>
-                    <span>Find my Guest Diffs</span>
+                    <span>Find who made most GD in my sets</span>
                 </label>
                 <label>
                     <input type="radio" name="mode" value="gd_hosts">
-                    <span>Find my GD Hosts</span>
+                    <span>Find which mapper I made most GD for</span>
                 </label>
                 <label>
                     <input type="radio" name="mode" value="nominators">
-                    <span>Find my Nominators</span>
+                    <span>Find which BN nominated my maps the most</span>
                 </label>
                 <label>
                     <input type="radio" name="mode" value="bn">
-                    <span>BN Scanner</span>
+                    <span>Find which mappers a BN nominated the most</span>
                 </label>
             </div>
 
