@@ -167,17 +167,9 @@
         <a href="https://osu-scan.onrender.com" class="back-link">← Scan Another User (osu-scan.onrender.com)</a>
         {% endif %}
 
-        {% if 'Nominated by' in title_prefix %}
         <h1>{{ title_prefix }} {{ username }}</h1>
-        {% else %}
-        <h1>{{ title_prefix }} for {{ username }}</h1>
-        {% endif %}
         {% if not leaderboard %}
-        {% if 'Nominated by' in title_prefix %}
-        <p>No Mappers Nominated by this user.</p>
-        {% else %}
-        <p>No {{ title_prefix }} found for this user.</p>
-        {% endif %}
+        <p>No results found for this user.</p>
         {% else %}
         <div class="table-wrapper">
             <table>
@@ -185,7 +177,7 @@
                     <tr>
                         <th>#</th>
                         <th>User</th>
-                        <th>{% if 'Nominated by' in title_prefix %}Nominations{% else %}Total{% endif %}</th>
+                        <th>{% if 'Nominated' in title_prefix %}Nominations{% else %}Total{% endif %}</th>
                         <th>Last Date</th>
                     </tr>
                 </thead>
