@@ -248,6 +248,7 @@
                         <th>#</th>
                         <th>BN 1</th>
                         <th>BN 2</th>
+                        <th>Maps Together</th>
                         <th>Last Collab</th>
                     </tr>
                 </thead>
@@ -257,6 +258,7 @@
                         <td>{{ loop.index }}</td>
                         <td>{{ entry.bn1_name }}</td>
                         <td>{{ entry.bn2_name }}</td>
+                        <td style="font-weight: bold; color: #4facfe;">{{ entry.count }}</td>
                         <td>{{ entry.last_date }}</td>
                     </tr>
                     {% endfor %}
