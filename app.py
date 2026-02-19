@@ -272,7 +272,7 @@ def bn_duos_page():
     data = gder_logic.load_bn_duo_results()
     return render_template('bn_duos.html', data=data, scan_status=GLOBAL_SCAN_STATUS)
 
-@app.route('/api/trigger_global_scan', methods=['POST'])
+@app.route('/api/trigger_global_scan', methods=['GET', 'POST'])
 def trigger_global_scan():
     key = request.args.get('key') or request.form.get('key')
     if key != GLOBAL_SCAN_SECRET:
