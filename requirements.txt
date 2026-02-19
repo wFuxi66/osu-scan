@@ -3,3 +3,4 @@ flask
 gunicorn
 python-dotenv
 Flask-Limiter
+APScheduler

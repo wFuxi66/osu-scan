@@ -3,8 +3,11 @@ from dotenv import load_dotenv
 import threading
 import time
 import uuid
+import os
 import gder_logic
 from flask_limiter import Limiter
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 load_dotenv()
 
@@ -66,7 +69,9 @@ def cleanup_old_entries():
 
 @app.route('/', methods=['GET'])
 def index():
-    return render_template('index.html')
+    duo_data = gder_logic.load_bn_duo_results()
+    has_duos = duo_data is not None and len(duo_data.get('leaderboard', [])) > 0
+    return render_template('index.html', bn_duos_available=has_duos)
 
 def run_scan_job(job_id, username, mode, cancel_event):
     """Background thread function."""
@@ -227,6 +232,77 @@ def download_report(cache_id):
         mimetype="text/html",
         headers={"Content-Disposition": f"attachment;filename={filename}"}
     )
+
+# ============================================================
+# GLOBAL BN DUO LEADERBOARD
+# ============================================================
+
+# Secret key for admin trigger (set via env var or default)
+GLOBAL_SCAN_SECRET = os.environ.get('GLOBAL_SCAN_SECRET', 'osuscan_admin_secret')
+
+# Track global scan status
+GLOBAL_SCAN_STATUS = {'running': False, 'message': '', 'last_run': None}
+
+def run_global_bn_duo_scan():
+    """Background function for the global BN duo scan."""
+    if GLOBAL_SCAN_STATUS['running']:
+        print("Global BN duo scan already running, skipping.")
+        return
+    
+    GLOBAL_SCAN_STATUS['running'] = True
+    GLOBAL_SCAN_STATUS['message'] = 'Starting global BN duo scan...'
+    
+    def progress(msg):
+        GLOBAL_SCAN_STATUS['message'] = msg
+        print(f"[BN Duo Scan] {msg}")
+    
+    try:
+        result = gder_logic.global_bn_duo_scan(progress_callback=progress)
+        if 'error' in result:
+            print(f"Global BN duo scan failed: {result['error']}")
+        else:
+            print(f"Global BN duo scan completed successfully.")
+    except Exception as e:
+        print(f"Global BN duo scan error: {e}")
+    finally:
+        GLOBAL_SCAN_STATUS['running'] = False
+        GLOBAL_SCAN_STATUS['message'] = 'Idle'
+        GLOBAL_SCAN_STATUS['last_run'] = time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())
+
+@app.route('/bn-duos')
+def bn_duos_page():
+    data = gder_logic.load_bn_duo_results()
+    return render_template('bn_duos.html', data=data, scan_status=GLOBAL_SCAN_STATUS)
+
+@app.route('/api/trigger_global_scan', methods=['POST'])
+def trigger_global_scan():
+    key = request.args.get('key') or request.form.get('key')
+    if key != GLOBAL_SCAN_SECRET:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    if GLOBAL_SCAN_STATUS['running']:
+        return jsonify({'error': 'Scan already running', 'status': GLOBAL_SCAN_STATUS['message']})
+    
+    thread = threading.Thread(target=run_global_bn_duo_scan, daemon=True)
+    thread.start()
+    return jsonify({'status': 'Scan started'})
+
+@app.route('/api/global_scan_status')
+@limiter.exempt
+def global_scan_status():
+    return jsonify(GLOBAL_SCAN_STATUS)
+
+# Monthly scheduler - runs on the 1st of each month at 06:00 UTC
+scheduler = BackgroundScheduler(daemon=True)
+scheduler.add_job(
+    run_global_bn_duo_scan,
+    trigger=CronTrigger(day=1, hour=6, minute=0),
+    id='monthly_bn_duo_scan',
+    name='Monthly BN Duo Scan',
+    replace_existing=True
+)
+scheduler.start()
+print("APScheduler started - BN Duo scan scheduled for 1st of each month at 06:00 UTC")
 
 if __name__ == '__main__':
     print("Starting osu!scan...")

@@ -1,7 +1,9 @@
 import requests
 import time
 import os
+import json
 from collections import defaultdict
+from itertools import combinations
 
 # Configuration constants
 API_BASE = 'https://osu.ppy.sh/api/v2'
@@ -618,3 +620,197 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
         'username': username,
         'leaderboard': leaderboard
     }
+
+
+# ============================================================
+# GLOBAL BN DUO LEADERBOARD
+# ============================================================
+
+# Path for persisted results
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+BN_DUOS_FILE = os.path.join(DATA_DIR, 'bn_duos.json')
+
+def search_ranked_beatmapsets(token, progress_callback=None):
+    """Fetches ALL ranked/loved beatmapsets using the search endpoint with cursor pagination."""
+    headers = {'Authorization': f'Bearer {token}'}
+    all_sets = []
+    cursor_string = None
+    page = 0
+    
+    for status in ['ranked', 'loved']:
+        cursor_string = None
+        page = 0
+        
+        while True:
+            params = {'s': status}
+            if cursor_string:
+                params['cursor_string'] = cursor_string
+            
+            try:
+                r = requests.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=15)
+                if r.status_code != 200:
+                    print(f"Search endpoint returned {r.status_code}")
+                    break
+                
+                data = r.json()
+                sets = data.get('beatmapsets', [])
+                
+                if not sets:
+                    break
+                
+                for s in sets:
+                    all_sets.append({
+                        'id': s['id'],
+                        'artist': s.get('artist', ''),
+                        'title': s.get('title', ''),
+                        'ranked_date': s.get('ranked_date'),
+                        'last_updated': s.get('last_updated'),
+                        'status': s.get('status', status)
+                    })
+                
+                page += 1
+                if progress_callback and page % 5 == 0:
+                    progress_callback(f"Fetching {status} maps: {len(all_sets)} total so far...")
+                
+                # Get next cursor
+                cursor_string = data.get('cursor_string')
+                if not cursor_string:
+                    break
+                
+                time.sleep(0.15)  # Be gentle with rate limits
+                
+            except Exception as e:
+                print(f"Error searching {status} beatmapsets: {e}")
+                break
+    
+    return all_sets
+
+
+def global_bn_duo_scan(progress_callback=None):
+    """
+    Full global scan: fetch all ranked maps via search, deep-fetch each
+    for current_nominations, find duo pairs, count, resolve names, save to JSON.
+    """
+    if progress_callback: progress_callback("Authenticating...")
+    token = get_token()
+    if not token:
+        return {'error': 'Authentication failed'}
+    
+    # 1. Search all ranked/loved beatmapsets
+    if progress_callback: progress_callback("Fetching ranked beatmapsets...")
+    all_sets = search_ranked_beatmapsets(token, progress_callback)
+    
+    total_sets = len(all_sets)
+    if total_sets == 0:
+        return {'error': 'No ranked beatmapsets found'}
+    
+    if progress_callback: progress_callback(f"Found {total_sets} ranked/loved sets. Deep-scanning for nominators...")
+    
+    # 2. Deep-fetch each set to get current_nominations
+    session = requests.Session()
+    set_nominators = {}  # set_id -> list of nominator_ids
+    set_lookup = {s['id']: s for s in all_sets}  # for date/title lookup later
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_set = {
+            executor.submit(process_nominator_set, s, token, session): s 
+            for s in all_sets
+        }
+        
+        completed = 0
+        for future in concurrent.futures.as_completed(future_to_set):
+            completed += 1
+            if completed % 100 == 0:
+                if progress_callback: 
+                    progress_callback(f"Deep-scanning: {completed}/{total_sets} sets...")
+            
+            bset = future_to_set[future]
+            try:
+                noms = future.result()
+                if noms and len(noms) >= 2:
+                    nom_ids = [n['nominator_id'] for n in noms]
+                    set_nominators[bset['id']] = nom_ids
+            except Exception as e:
+                print(f"Error deep-fetching set {bset['id']}: {e}")
+    
+    session.close()
+    
+    if progress_callback: progress_callback("Building duo pairs...")
+    
+    # 3. Build pairs and count
+    pair_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
+    
+    for set_id, nom_ids in set_nominators.items():
+        set_data = set_lookup.get(set_id, {})
+        date = (set_data.get('ranked_date') or set_data.get('last_updated') or '').split('T')[0]
+        
+        for pair in combinations(sorted(nom_ids), 2):
+            pair_counts[pair]['count'] += 1
+            if date and date > pair_counts[pair]['last_date']:
+                pair_counts[pair]['last_date'] = date
+    
+    if not pair_counts:
+        return {'error': 'No BN duos found'}
+    
+    # 4. Resolve all nominator names
+    if progress_callback: progress_callback("Resolving BN names...")
+    all_nom_ids = set()
+    for (id1, id2) in pair_counts.keys():
+        all_nom_ids.add(id1)
+        all_nom_ids.add(id2)
+    
+    user_cache = resolve_users_parallel(all_nom_ids, token, progress_callback)
+    
+    # 5. Build leaderboard
+    if progress_callback: progress_callback("Building leaderboard...")
+    leaderboard = []
+    for (id1, id2), data in pair_counts.items():
+        name1 = user_cache.get(id1, f"User_{id1}")
+        name2 = user_cache.get(id2, f"User_{id2}")
+        
+        if name1.lower() > name2.lower():
+            name1, name2 = name2, name1
+        
+        leaderboard.append({
+            'bn1_name': name1,
+            'bn2_name': name2,
+            'count': data['count'],
+            'last_date': data['last_date']
+        })
+    
+    leaderboard.sort(key=lambda x: (-x['count'], x['bn1_name']))
+    
+    # 6. Save to JSON
+    results = {
+        'leaderboard': leaderboard,
+        'total_sets_scanned': total_sets,
+        'total_duos': len(leaderboard),
+        'updated_at': time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime()),
+        'scan_duration_note': 'Monthly automated scan'
+    }
+    
+    os.makedirs(DATA_DIR, exist_ok=True)
+    
+    try:
+        with open(BN_DUOS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+        if progress_callback: progress_callback("Scan complete! Results saved.")
+        print(f"BN Duo scan complete. {len(leaderboard)} duos found. Saved to {BN_DUOS_FILE}")
+    except Exception as e:
+        print(f"Error saving BN duo results: {e}")
+        return {'error': f'Failed to save results: {e}'}
+    
+    return results
+
+
+def load_bn_duo_results():
+    """Loads the pre-computed BN duo leaderboard from JSON file."""
+    if not os.path.exists(BN_DUOS_FILE):
+        return None
+    
+    try:
+        with open(BN_DUOS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading BN duo results: {e}")
+        return None
