@@ -69,9 +69,7 @@ def cleanup_old_entries():
 
 @app.route('/', methods=['GET'])
 def index():
-    duo_data = gder_logic.load_bn_duo_results()
-    has_duos = duo_data is not None and len(duo_data.get('leaderboard', [])) > 0
-    return render_template('index.html', bn_duos_available=has_duos)
+    return render_template('index.html')
 
 def run_scan_job(job_id, username, mode, cancel_event):
     """Background thread function."""
