@@ -353,6 +353,14 @@
                 href="{{ url_for('bn_duos_page', page=pagination.current_page + 1, mode=mode) }}" class="page-link">
                 Next</a>
                 {% endif %}
+
+                <form action="{{ url_for('bn_duos_page') }}" method="get"
+                    style="display: flex; align-items: center; gap: 8px; margin-left: 15px;">
+                    <input type="hidden" name="mode" value="{{ mode }}">
+                    <input type="number" name="page" min="1" max="{{ pagination.total_pages }}" placeholder="#"
+                        style="width: 50px; padding: 5px; border-radius: 5px; border: none; background: rgba(15, 52, 96, 0.5); color: white; text-align: center;">
+                    <button type="submit" class="page-link" style="cursor: pointer; border: none;">Go</button>
+                </form>
         </div>
         {% endif %}
 
