@@ -269,6 +269,7 @@ def run_global_bn_duo_scan():
 
 @app.route('/bn-duos')
 def bn_duos_page():
+    mode = request.args.get('mode', 'duo')
     page = request.args.get('page', 1, type=int)
     per_page = 50
     data = gder_logic.load_bn_duo_results()
@@ -276,9 +277,13 @@ def bn_duos_page():
     pagination = None
     display_data = None
 
-    if data and 'leaderboard' in data:
-        leaderboard = data['leaderboard']
-        total_entries = len(leaderboard)
+    if data:
+        if mode == 'individual':
+            full_list = data.get('individual_leaderboard', [])
+        else:
+            full_list = data.get('leaderboard', [])
+
+        total_entries = len(full_list)
         total_pages = (total_entries + per_page - 1) // per_page
         
         # Ensure page is valid
@@ -292,7 +297,7 @@ def bn_duos_page():
         
         # Create shallow copy for display
         display_data = data.copy()
-        display_data['leaderboard'] = leaderboard[start:end]
+        display_data['leaderboard'] = full_list[start:end]
         
         pagination = {
             'current_page': page,
@@ -303,7 +308,7 @@ def bn_duos_page():
     else:
         display_data = data
 
-    return render_template('bn_duos.html', data=display_data, scan_status=GLOBAL_SCAN_STATUS, pagination=pagination)
+    return render_template('bn_duos.html', data=display_data, scan_status=GLOBAL_SCAN_STATUS, pagination=pagination, mode=mode)
 
 @app.route('/api/trigger_global_scan', methods=['GET', 'POST'])
 def trigger_global_scan():

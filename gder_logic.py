@@ -721,12 +721,17 @@ def global_bn_duo_scan(progress_callback=None):
     cache = _load_cache()
     scanned_ids = set(cache.get('scanned_ids', []))
     pair_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
+    individual_counts = defaultdict(int)
     
     # Restore existing pair counts from cache (keys are stored as "id1,id2")
     for key_str, data in cache.get('pair_counts', {}).items():
         parts = key_str.split(',')
         pair_key = (int(parts[0]), int(parts[1]))
         pair_counts[pair_key] = data
+
+    # Restore individual counts
+    for uid, count in cache.get('individual_counts', {}).items():
+        individual_counts[int(uid)] = count
     
     if progress_callback: progress_callback(f"Cache loaded: {len(scanned_ids)} sets already scanned.")
     
@@ -768,28 +773,36 @@ def global_bn_duo_scan(progress_callback=None):
                     noms = future.result()
                     scanned_ids.add(bset['id'])
                     
-                    if noms and len(noms) >= 2:
+                    if noms:
                         nom_ids = [n['nominator_id'] for n in noms]
-                        set_data = set_lookup.get(bset['id'], {})
-                        date = (set_data.get('ranked_date') or set_data.get('last_updated') or '').split('T')[0]
                         
-                        for pair in combinations(sorted(nom_ids), 2):
-                            pair_counts[pair]['count'] += 1
-                            if date and date > pair_counts[pair]['last_date']:
-                                pair_counts[pair]['last_date'] = date
+                        # Count individual nominations (unique per set)
+                        unique_noms = set(nom_ids)
+                        for nid in unique_noms:
+                            individual_counts[nid] += 1
+
+                        if len(unique_noms) >= 2:
+                            set_data = set_lookup.get(bset['id'], {})
+                            date = (set_data.get('ranked_date') or set_data.get('last_updated') or '').split('T')[0]
+                            
+                            for pair in combinations(sorted(unique_noms), 2):
+                                pair_counts[pair]['count'] += 1
+                                if date and date > pair_counts[pair]['last_date']:
+                                    pair_counts[pair]['last_date'] = date
                 except Exception as e:
                     print(f"Error deep-fetching set {bset['id']}: {e}")
         
         session.close()
     
-    if not pair_counts:
-        return {'error': 'No BN duos found'}
+    if not pair_counts and not individual_counts:
+        return {'error': 'No BN data found'}
     
-    # 5. Save cache (scanned IDs + raw pair counts)
+    # 5. Save cache
     if progress_callback: progress_callback("Saving cache...")
     cache_data = {
         'scanned_ids': list(scanned_ids),
-        'pair_counts': {f"{k[0]},{k[1]}": v for k, v in pair_counts.items()}
+        'pair_counts': {f"{k[0]},{k[1]}": v for k, v in pair_counts.items()},
+        'individual_counts': individual_counts
     }
     try:
         _save_cache(cache_data)
@@ -802,6 +815,8 @@ def global_bn_duo_scan(progress_callback=None):
     for (id1, id2) in pair_counts.keys():
         all_nom_ids.add(id1)
         all_nom_ids.add(id2)
+    for uid in individual_counts.keys():
+        all_nom_ids.add(uid)
     
     user_cache = resolve_users_parallel(all_nom_ids, token, progress_callback)
     
@@ -823,12 +838,25 @@ def global_bn_duo_scan(progress_callback=None):
         })
     
     leaderboard.sort(key=lambda x: (-x['count'], x['bn1_name']))
+
+    # Individual Leaderboard
+    individual_leaderboard = []
+    for uid, count in individual_counts.items():
+        name = user_cache.get(uid, f"User_{uid}")
+        individual_leaderboard.append({
+            'username': name,
+            'count': count,
+            'user_id': uid
+        })
+    individual_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
     
     # 8. Save leaderboard JSON
     results = {
         'leaderboard': leaderboard,
+        'individual_leaderboard': individual_leaderboard,
         'total_sets_scanned': len(scanned_ids),
         'total_duos': len(leaderboard),
+        'total_individuals': len(individual_leaderboard),
         'updated_at': time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime()),
         'scan_duration_note': 'Monthly automated scan'
     }

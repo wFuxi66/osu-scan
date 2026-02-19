@@ -245,6 +245,36 @@
             font-size: 14px;
             color: #aeb2b8;
         }
+
+        .mode-toggle {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .toggle-btn {
+            background: rgba(15, 52, 96, 0.5);
+            color: #aeb2b8;
+            padding: 10px 20px;
+            border-radius: 20px;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            border: 1px solid transparent;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .toggle-btn.active {
+            background: #e94560;
+            color: white;
+            box-shadow: 0 0 10px rgba(233, 69, 96, 0.5);
+        }
+
+        .toggle-btn:hover:not(.active) {
+            background: rgba(15, 52, 96, 0.8);
+            color: white;
+        }
     </style>
 </head>
 
@@ -257,6 +287,13 @@
             Which Beatmap Nominators have nominated the most maps together?
             Updated monthly by scanning all active BN nominations.
         </p>
+
+        <div class="mode-toggle">
+            <a href="{{ url_for('bn_duos_page', mode='duo') }}"
+                class="toggle-btn {% if mode != 'individual' %}active{% endif %}">Most Iconic Duos</a>
+            <a href="{{ url_for('bn_duos_page', mode='individual') }}"
+                class="toggle-btn {% if mode == 'individual' %}active{% endif %}">Most Active BNs</a>
+        </div>
 
 
 
@@ -272,10 +309,15 @@
                 <thead>
                     <tr>
                         <th>#</th>
+                        {% if mode == 'individual' %}
+                        <th>Beatmap Nominator</th>
+                        <th>Total Nominations</th>
+                        {% else %}
                         <th>BN 1</th>
                         <th>BN 2</th>
                         <th>Maps Together</th>
                         <th>Last Collab</th>
+                        {% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -283,10 +325,15 @@
                     {% set rank = pagination.start_rank + loop.index0 %}
                     <tr class="{% if rank <= 3 %}rank-{{ rank }}{% endif %}">
                         <td>{{ rank }}</td>
+                        {% if mode == 'individual' %}
+                        <td>{{ entry.username }}</td>
+                        <td style="font-weight: bold; color: #4facfe;">{{ entry.count }}</td>
+                        {% else %}
                         <td>{{ entry.bn1_name }}</td>
                         <td>{{ entry.bn2_name }}</td>
                         <td style="font-weight: bold; color: #4facfe;">{{ entry.count }}</td>
                         <td>{{ entry.last_date }}</td>
+                        {% endif %}
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -296,13 +343,15 @@
         {% if pagination and pagination.total_pages > 1 %}
         <div class="pagination">
             {% if pagination.current_page > 1 %}
-            <a href="{{ url_for('bn_duos_page', page=pagination.current_page - 1) }}" class="page-link">Previous</a>
+            <a href="{{ url_for('bn_duos_page', page=pagination.current_page - 1, mode=mode) }}"
+                class="page-link">Previous</a>
             {% endif %}
 
             <span class="page-info">Page {{ pagination.current_page }} of {{ pagination.total_pages }}</span>
 
             {% if pagination.current_page < pagination.total_pages %} <a
-                href="{{ url_for('bn_duos_page', page=pagination.current_page + 1) }}" class="page-link">Next</a>
+                href="{{ url_for('bn_duos_page', page=pagination.current_page + 1, mode=mode) }}" class="page-link">
+                Next</a>
                 {% endif %}
         </div>
         {% endif %}
