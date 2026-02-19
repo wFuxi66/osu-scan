@@ -232,15 +232,7 @@
             Updated monthly by scanning all active BN nominations.
         </p>
 
-        {% if scan_status.running %}
-        <div class="scan-running">
-            <div class="spinner"></div>
-            <div>
-                <strong>Scan in progress...</strong><br>
-                <span style="font-size: 13px; color: #aeb2b8;">{{ scan_status.message }}</span>
-            </div>
-        </div>
-        {% endif %}
+
 
         {% if data %}
         <div class="meta-info">
@@ -274,13 +266,8 @@
 
         {% else %}
         <div class="no-data">
-            {% if scan_status.running %}
-            <p>First scan is running now!</p>
-            <small>This page will have data once the scan completes. Check back in ~15-20 minutes.</small>
-            {% else %}
             <p>No data available yet.</p>
             <small>The global BN duo scan hasn't run yet. Data will be available after the first monthly scan.</small>
-            {% endif %}
         </div>
         {% endif %}
 

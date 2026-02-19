@@ -1,0 +1,55 @@
+name: Monthly BN Duo Scan
+
+on:
+  schedule:
+    - cron: '0 6 1 * *'  # Run at 06:00 UTC on the 1st of every month
+  workflow_dispatch:      # Allow manual trigger from GitHub Actions tab
+
+permissions:
+  contents: write  # Needed to create releases and upload assets
+
+jobs:
+  scan-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install requests
+
+      - name: Download previous cache
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Try to download the cache from the 'latest-data' release
+          # If it fails (e.g. first run), we just proceed without cache
+          mkdir -p data
+          gh release download latest-data -p "bn_duos_cache.json" -D data || echo "No previous cache found, starting fresh."
+
+      - name: Run Global Scan
+        env:
+          OSU_CLIENT_ID: ${{ secrets.OSU_CLIENT_ID }}
+          OSU_CLIENT_SECRET: ${{ secrets.OSU_CLIENT_SECRET }}
+        run: |
+          python scripts/run_scan.py
+
+      - name: Publish Results to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Delete the existing 'latest-data' release/tag if it exists
+          # This ensures the release date updates to show freshness
+          gh release delete latest-data -y --cleanup-tag || true
+          
+          # Create fresh release with new data
+          gh release create latest-data data/bn_duos.json data/bn_duos_cache.json \
+            --title "Latest Data" \
+            --notes "Auto-generated BN Duo data. Updated by GitHub Actions." \
+            --latest

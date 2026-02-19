@@ -845,14 +845,36 @@ def global_bn_duo_scan(progress_callback=None):
     return results
 
 
+BN_DUOS_RELEASE_URL = "https://github.com/wFuxi66/osu-scan/releases/download/latest-data/bn_duos.json"
+_remote_cache = {'data': None, 'last_fetch': 0}
+CACHE_TTL = 3600  # 1 hour
+
 def load_bn_duo_results():
-    """Loads the pre-computed BN duo leaderboard from JSON file."""
-    if not os.path.exists(BN_DUOS_FILE):
-        return None
+    """Loads BN duo leaderboard from GitHub Release (preferred) or local file."""
+    global _remote_cache
     
+    # 1. return cached data if fresh
+    if time.time() - _remote_cache['last_fetch'] < CACHE_TTL and _remote_cache['data']:
+        return _remote_cache['data']
+        
+    # 2. Try fetching from GitHub Release
     try:
-        with open(BN_DUOS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        r = requests.get(BN_DUOS_RELEASE_URL, timeout=3)
+        if r.status_code == 200:
+            data = r.json()
+            _remote_cache['data'] = data
+            _remote_cache['last_fetch'] = time.time()
+            return data
     except Exception as e:
-        print(f"Error loading BN duo results: {e}")
-        return None
+        print(f"Error fetching remote BN duos: {e}")
+    
+    # 3. Fallback to local file (e.g. for local dev or if remote fails)
+    if os.path.exists(BN_DUOS_FILE):
+        try:
+            with open(BN_DUOS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading local BN duo results: {e}")
+            return None
+            
+    return None

@@ -10,7 +10,7 @@ A web tool for osu! mappers to analyze their beatmap nominations and guest diffi
 - **GD Hosts Scanner** — Find which mapper you made the most GD for.
 - **Nominator Scanner** — Find which BN nominated your maps the most.
 - **BN Scanner** — Enter a BN's username to see which mappers they nominated the most.
-- **BN Duo Leaderboard** — Global monthly leaderboard of BN pairs who co-nominated the most maps, available at `/bn-duos`.
+
 
 ## Running Locally
 
