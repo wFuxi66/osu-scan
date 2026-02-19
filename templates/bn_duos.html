@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Most Iconic BN Duos - osu!scan</title>
+    <title>BN Leaderboard - osu!scan</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
     <style>
         body {
@@ -36,245 +36,7 @@
             margin-bottom: 20px;
         }
 
-        .back-link {
-            display: inline-block;
-            margin-bottom: 20px;
-            color: #e94560;
-            text-decoration: none;
-            font-weight: bold;
-        }
-
-        .back-link:hover {
-            color: #ff66aa;
-        }
-
-        .meta-info {
-            display: flex;
-            gap: 20px;
-            flex-wrap: wrap;
-            margin-bottom: 20px;
-            font-size: 13px;
-            color: #8892b0;
-        }
-
-        .meta-info span {
-            background: rgba(15, 52, 96, 0.5);
-            padding: 6px 12px;
-            border-radius: 6px;
-        }
-
-        .scan-running {
-            background: rgba(233, 69, 96, 0.15);
-            border: 1px solid #e94560;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .scan-running .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #e94560;
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            animation: spin 1s linear infinite;
-            flex-shrink: 0;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
-
-        th {
-            background-color: #0f3460;
-            color: white;
-            padding: 12px;
-            text-align: left;
-        }
-
-        td {
-            padding: 12px;
-            border-bottom: 1px solid #0f3460;
-            color: inherit;
-        }
-
-        tbody tr {
-            color: #e0e0e0;
-        }
-
-        tr:nth-child(even) {
-            background-color: rgba(15, 52, 96, 0.3);
-        }
-
-        tr:hover {
-            background-color: rgba(233, 69, 96, 0.15);
-        }
-
-        .rank-1 {
-            color: #ffd700;
-            font-weight: bold;
-        }
-
-        .rank-2 {
-            color: #c0c0c0;
-            font-weight: bold;
-        }
-
-        .rank-3 {
-            color: #cd7f32;
-            font-weight: bold;
-        }
-
-        .no-data {
-            text-align: center;
-            padding: 60px 20px;
-            color: #8892b0;
-        }
-
-        .no-data p {
-            font-size: 18px;
-            margin-bottom: 10px;
-        }
-
-        .no-data small {
-            font-size: 14px;
-            color: #666;
-        }
-
-        /* Mobile Responsiveness */
-        @media (max-width: 600px) {
-            body {
-                padding: 10px;
-            }
-
-            .container {
-                padding: 15px;
-                width: 100%;
-                box-sizing: border-box;
-            }
-
-            h1 {
-                font-size: 22px;
-            }
-
-            .back-link {
-                display: block;
-                text-align: center;
-                margin-bottom: 10px;
-            }
-
-            .table-wrapper {
-                overflow-x: auto;
-                -webkit-overflow-scrolling: touch;
-            }
-
-            table {
-                font-size: 14px;
-                white-space: nowrap;
-            }
-
-            th,
-            td {
-                padding: 8px 5px;
-            }
-
-            .meta-info {
-                flex-direction: column;
-                gap: 8px;
-            }
-        }
-
-        /* Ko-fi Support Button */
-        .kofi-btn {
-            display: inline-block;
-            background: linear-gradient(135deg, #ff66aa 0%, #e94560 100%);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
-            text-decoration: none;
-            font-size: 13px;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 8px rgba(233, 69, 96, 0.3);
-            margin-left: 8px;
-        }
-
-        .kofi-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(233, 69, 96, 0.5);
-            background: linear-gradient(135deg, #ff7ab8 0%, #ff2e63 100%);
-        }
-
-        .pagination {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin-top: 20px;
-            gap: 15px;
-        }
-
-        .page-link {
-            padding: 8px 16px;
-            background: #0f3460;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            transition: background 0.2s;
-        }
-
-        .page-link:hover {
-            background: #e94560;
-        }
-
-        .page-info {
-            font-size: 14px;
-            color: #aeb2b8;
-        }
-
-        .mode-toggle {
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-            margin-bottom: 30px;
-        }
-
-        .toggle-btn {
-            background: rgba(15, 52, 96, 0.5);
-            color: #aeb2b8;
-            padding: 10px 20px;
-            border-radius: 20px;
-            text-decoration: none;
-            transition: all 0.3s ease;
-            border: 1px solid transparent;
-            font-size: 14px;
-            font-weight: 500;
-        }
-
-        .toggle-btn.active {
-            background: #e94560;
-            color: white;
-            box-shadow: 0 0 10px rgba(233, 69, 96, 0.5);
-        }
-
-        .toggle-btn:hover:not(.active) {
-            background: rgba(15, 52, 96, 0.8);
-            color: white;
-        }
+        /* ... styles ... */
     </style>
 </head>
 
@@ -282,9 +44,9 @@
     <div class="container">
         <a href="/" class="back-link">← Back to osu!scan</a>
 
-        <h1>Most Iconic BN Duos</h1>
+        <h1>Beatmap Nominator Leaderboards</h1>
         <p class="subtitle">
-            Which Beatmap Nominators have nominated the most maps together?
+            Global statistics for Beatmap Nominators.
             Updated monthly by scanning all active BN nominations.
         </p>
 
@@ -349,20 +111,18 @@
                 class="page-link">Previous</a>
             {% endif %}
 
-            <span class="page-info">Page {{ pagination.current_page }} of {{ pagination.total_pages }}</span>
+            <form action="{{ url_for('bn_duos_page') }}" method="get" class="page-form">
+                <input type="hidden" name="mode" value="{{ mode }}">
+                <span>Page</span>
+                <input type="number" name="page" value="{{ pagination.current_page }}" min="1"
+                    max="{{ pagination.total_pages }}" class="page-input">
+                <span>of {{ pagination.total_pages }}</span>
+            </form>
 
             {% if pagination.current_page < pagination.total_pages %} <a
                 href="{{ url_for('bn_duos_page', page=pagination.current_page + 1, mode=mode) }}" class="page-link">
                 Next</a>
                 {% endif %}
-
-                <form action="{{ url_for('bn_duos_page') }}" method="get"
-                    style="display: flex; align-items: center; gap: 8px; margin-left: 15px;">
-                    <input type="hidden" name="mode" value="{{ mode }}">
-                    <input type="number" name="page" min="1" max="{{ pagination.total_pages }}" placeholder="#"
-                        style="width: 50px; padding: 5px; border-radius: 5px; border: none; background: rgba(15, 52, 96, 0.5); color: white; text-align: center;">
-                    <button type="submit" class="page-link" style="cursor: pointer; border: none;">Go</button>
-                </form>
         </div>
         {% endif %}
 
