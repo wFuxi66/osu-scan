@@ -312,6 +312,7 @@
                         {% if mode == 'individual' %}
                         <th>Beatmap Nominator</th>
                         <th>Total Nominations</th>
+                        <th>Last Nomination</th>
                         {% else %}
                         <th>BN 1</th>
                         <th>BN 2</th>
@@ -328,6 +329,7 @@
                         {% if mode == 'individual' %}
                         <td>{{ entry.username }}</td>
                         <td style="font-weight: bold; color: #4facfe;">{{ entry.count }}</td>
+                        <td>{{ entry.last_date}}</td>
                         {% else %}
                         <td>{{ entry.bn1_name }}</td>
                         <td>{{ entry.bn2_name }}</td>

@@ -721,7 +721,7 @@ def global_bn_duo_scan(progress_callback=None):
     cache = _load_cache()
     scanned_ids = set(cache.get('scanned_ids', []))
     pair_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
-    individual_counts = defaultdict(int)
+    individual_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
     
     # Restore existing pair counts from cache (keys are stored as "id1,id2")
     for key_str, data in cache.get('pair_counts', {}).items():
@@ -730,8 +730,12 @@ def global_bn_duo_scan(progress_callback=None):
         pair_counts[pair_key] = data
 
     # Restore individual counts
-    for uid, count in cache.get('individual_counts', {}).items():
-        individual_counts[int(uid)] = count
+    for uid, data in cache.get('individual_counts', {}).items():
+        # Handle potential migration if cache has old int format (though we expect full rescan)
+        if isinstance(data, int):
+            individual_counts[int(uid)]['count'] = data
+        else:
+            individual_counts[int(uid)] = data
     
     if progress_callback: progress_callback(f"Cache loaded: {len(scanned_ids)} sets already scanned.")
     
@@ -776,15 +780,17 @@ def global_bn_duo_scan(progress_callback=None):
                     if noms:
                         nom_ids = [n['nominator_id'] for n in noms]
                         
+                        set_data = set_lookup.get(bset['id'], {})
+                        date = (set_data.get('ranked_date') or set_data.get('last_updated') or '').split('T')[0]
+                        
                         # Count individual nominations (unique per set)
                         unique_noms = set(nom_ids)
                         for nid in unique_noms:
-                            individual_counts[nid] += 1
+                            individual_counts[nid]['count'] += 1
+                            if date and date > individual_counts[nid]['last_date']:
+                                individual_counts[nid]['last_date'] = date
 
                         if len(unique_noms) >= 2:
-                            set_data = set_lookup.get(bset['id'], {})
-                            date = (set_data.get('ranked_date') or set_data.get('last_updated') or '').split('T')[0]
-                            
                             for pair in combinations(sorted(unique_noms), 2):
                                 pair_counts[pair]['count'] += 1
                                 if date and date > pair_counts[pair]['last_date']:
@@ -841,11 +847,12 @@ def global_bn_duo_scan(progress_callback=None):
 
     # Individual Leaderboard
     individual_leaderboard = []
-    for uid, count in individual_counts.items():
+    for uid, data in individual_counts.items():
         name = user_cache.get(uid, f"User_{uid}")
         individual_leaderboard.append({
             'username': name,
-            'count': count,
+            'count': data['count'],
+            'last_date': data['last_date'],
             'user_id': uid
         })
     individual_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
