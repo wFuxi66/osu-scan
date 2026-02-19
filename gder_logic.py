@@ -628,7 +628,7 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
 
 # Path for persisted results
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
-BN_DUOS_FILE = os.path.join(DATA_DIR, 'bn_duos.json')
+BN_DUOS_FILE = os.path.join(DATA_DIR, 'bn_leaderboard.json')
 
 def search_ranked_beatmapsets(token, progress_callback=None):
     """Fetches ALL ranked/loved beatmapsets using the search endpoint with cursor pagination."""
@@ -686,7 +686,7 @@ def search_ranked_beatmapsets(token, progress_callback=None):
     return all_sets
 
 
-BN_DUOS_CACHE_FILE = os.path.join(DATA_DIR, 'bn_duos_cache.json')
+BN_DUOS_CACHE_FILE = os.path.join(DATA_DIR, 'bn_leaderboard_cache.json')
 
 def _load_cache():
     """Loads the scan cache (scanned set IDs + raw pair counts)."""
@@ -880,7 +880,7 @@ def global_bn_duo_scan(progress_callback=None):
     return results
 
 
-BN_DUOS_RELEASE_URL = "https://github.com/wFuxi66/osu-scan/releases/download/latest-data/bn_duos.json"
+BN_DUOS_RELEASE_URL = "https://github.com/wFuxi66/osu-scan/releases/download/latest-data/bn_leaderboard.json"
 _remote_cache = {'data': None, 'last_fetch': 0}
 CACHE_TTL = 3600  # 1 hour
 

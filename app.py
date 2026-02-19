@@ -232,7 +232,7 @@ def download_report(cache_id):
     )
 
 # ============================================================
-# GLOBAL BN DUO LEADERBOARD
+# GLOBAL BN LEADERBOARD
 # ============================================================
 
 # Secret key for admin trigger (set via env var or default)
