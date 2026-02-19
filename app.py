@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, Response, jsonify
+from flask import Flask, render_template, request, Response, jsonify, redirect, url_for
 from dotenv import load_dotenv
 import threading
 import time
@@ -267,8 +267,8 @@ def run_global_bn_duo_scan():
         GLOBAL_SCAN_STATUS['message'] = 'Idle'
         GLOBAL_SCAN_STATUS['last_run'] = time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())
 
-@app.route('/bn-duos')
-def bn_duos_page():
+@app.route('/bn-leaderboard')
+def bn_leaderboard_page():
     mode = request.args.get('mode', 'duo')
     page = request.args.get('page', 1, type=int)
     per_page = 50
@@ -308,7 +308,11 @@ def bn_duos_page():
     else:
         display_data = data
 
-    return render_template('bn_duos.html', data=display_data, scan_status=GLOBAL_SCAN_STATUS, pagination=pagination, mode=mode)
+    return render_template('bn_leaderboard.html', data=display_data, scan_status=GLOBAL_SCAN_STATUS, pagination=pagination, mode=mode)
+
+@app.route('/bn-duos')
+def bn_duos_redirect():
+    return redirect(url_for('bn_leaderboard_page', **request.args))
 
 @app.route('/api/trigger_global_scan', methods=['GET', 'POST'])
 def trigger_global_scan():
