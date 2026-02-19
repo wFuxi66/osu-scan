@@ -231,15 +231,16 @@ def analyze_sets(beatmapsets, host_id, token, progress_callback=None, cancel_eve
     return all_gds
 
 def process_nominator_set(bset, token, session=None):
-    """Deep fetches a set to find its nominators."""
+    """Deep fetches a set to find its nominators and GDers."""
     headers = {'Authorization': f'Bearer {token}'}
     nominations = []
+    gd_user_ids = set()
     
     try:
         url = f'{API_BASE}/beatmapsets/{bset["id"]}'
         # Use session if provided, else standard request
         req_func = session.get if session else requests.get
-        r = req_func(url, headers=headers, timeout=20) # Increased timeout to 20s
+        r = req_func(url, headers=headers, timeout=20)
         
         if r.status_code == 200:
             data = r.json()
@@ -251,14 +252,21 @@ def process_nominator_set(bset, token, session=None):
                     'set_title': f"{bset['artist']} - {bset['title']}",
                     'date': (bset.get('ranked_date') or bset.get('last_updated')).split('T')[0]
                 })
+            
+            # Extract GDers: difficulty creators who differ from mapset host
+            mapset_host_id = data.get('user_id')
+            if mapset_host_id:
+                for beatmap in data.get('beatmaps', []):
+                    diff_creator = beatmap.get('user_id')
+                    if diff_creator and diff_creator != mapset_host_id:
+                        gd_user_ids.add(diff_creator)
         else:
-            # If fetch fails, we skip specific nominator data for this set
             pass
             
     except Exception as e:
         print(f"Error fetching set {bset['id']}: {e}")
         
-    return nominations
+    return nominations, gd_user_ids
             
 # Global Cache
 USER_CACHE = {}
@@ -628,7 +636,7 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
 
 # Path for persisted results
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
-BN_DUOS_FILE = os.path.join(DATA_DIR, 'bn_leaderboard.json')
+LEADERBOARD_FILE = os.path.join(DATA_DIR, 'leaderboard.json')
 
 def search_ranked_beatmapsets(token, progress_callback=None):
     """Fetches ALL ranked/loved beatmapsets using the search endpoint with cursor pagination."""
@@ -686,14 +694,14 @@ def search_ranked_beatmapsets(token, progress_callback=None):
     return all_sets
 
 
-BN_DUOS_CACHE_FILE = os.path.join(DATA_DIR, 'bn_leaderboard_cache.json')
+LEADERBOARD_CACHE_FILE = os.path.join(DATA_DIR, 'leaderboard_cache.json')
 
 def _load_cache():
     """Loads the scan cache (scanned set IDs + raw pair counts)."""
-    if not os.path.exists(BN_DUOS_CACHE_FILE):
+    if not os.path.exists(LEADERBOARD_CACHE_FILE):
         return {'scanned_ids': [], 'pair_counts': {}}
     try:
-        with open(BN_DUOS_CACHE_FILE, 'r', encoding='utf-8') as f:
+        with open(LEADERBOARD_CACHE_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception:
         return {'scanned_ids': [], 'pair_counts': {}}
@@ -701,7 +709,7 @@ def _load_cache():
 def _save_cache(cache):
     """Saves the scan cache to disk."""
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(BN_DUOS_CACHE_FILE, 'w', encoding='utf-8') as f:
+    with open(LEADERBOARD_CACHE_FILE, 'w', encoding='utf-8') as f:
         json.dump(cache, f, ensure_ascii=False)
 
 
@@ -722,6 +730,7 @@ def global_bn_duo_scan(progress_callback=None):
     scanned_ids = set(cache.get('scanned_ids', []))
     pair_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
     individual_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
+    gd_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
     
     # Restore existing pair counts from cache (keys are stored as "id1,id2")
     for key_str, data in cache.get('pair_counts', {}).items():
@@ -731,11 +740,17 @@ def global_bn_duo_scan(progress_callback=None):
 
     # Restore individual counts
     for uid, data in cache.get('individual_counts', {}).items():
-        # Handle potential migration if cache has old int format (though we expect full rescan)
         if isinstance(data, int):
             individual_counts[int(uid)]['count'] = data
         else:
             individual_counts[int(uid)] = data
+
+    # Restore GD counts
+    for uid, data in cache.get('gd_counts', {}).items():
+        if isinstance(data, int):
+            gd_counts[int(uid)]['count'] = data
+        else:
+            gd_counts[int(uid)] = data
     
     if progress_callback: progress_callback(f"Cache loaded: {len(scanned_ids)} sets already scanned.")
     
@@ -774,14 +789,14 @@ def global_bn_duo_scan(progress_callback=None):
                 
                 bset = future_to_set[future]
                 try:
-                    noms = future.result()
+                    noms, gd_user_ids = future.result()
                     scanned_ids.add(bset['id'])
+                    
+                    set_data = set_lookup.get(bset['id'], {})
+                    date = (set_data.get('ranked_date') or set_data.get('last_updated') or '').split('T')[0]
                     
                     if noms:
                         nom_ids = [n['nominator_id'] for n in noms]
-                        
-                        set_data = set_lookup.get(bset['id'], {})
-                        date = (set_data.get('ranked_date') or set_data.get('last_updated') or '').split('T')[0]
                         
                         # Count individual nominations (unique per set)
                         unique_noms = set(nom_ids)
@@ -795,39 +810,51 @@ def global_bn_duo_scan(progress_callback=None):
                                 pair_counts[pair]['count'] += 1
                                 if date and date > pair_counts[pair]['last_date']:
                                     pair_counts[pair]['last_date'] = date
+                    
+                    # Count GDers (+1 per set, not per difficulty)
+                    for gd_uid in gd_user_ids:
+                        gd_counts[gd_uid]['count'] += 1
+                        if date and date > gd_counts[gd_uid]['last_date']:
+                            gd_counts[gd_uid]['last_date'] = date
+
                 except Exception as e:
                     print(f"Error deep-fetching set {bset['id']}: {e}")
         
         session.close()
     
-    if not pair_counts and not individual_counts:
-        return {'error': 'No BN data found'}
+    if not pair_counts and not individual_counts and not gd_counts:
+        return {'error': 'No data found'}
     
     # 5. Save cache
     if progress_callback: progress_callback("Saving cache...")
     cache_data = {
         'scanned_ids': list(scanned_ids),
         'pair_counts': {f"{k[0]},{k[1]}": v for k, v in pair_counts.items()},
-        'individual_counts': individual_counts
+        'individual_counts': individual_counts,
+        'gd_counts': gd_counts
     }
     try:
         _save_cache(cache_data)
     except Exception as e:
         print(f"Error saving cache: {e}")
     
-    # 6. Resolve all nominator names
-    if progress_callback: progress_callback("Resolving BN names...")
-    all_nom_ids = set()
+    # 6. Resolve all user names
+    if progress_callback: progress_callback("Resolving usernames...")
+    all_user_ids = set()
     for (id1, id2) in pair_counts.keys():
-        all_nom_ids.add(id1)
-        all_nom_ids.add(id2)
+        all_user_ids.add(id1)
+        all_user_ids.add(id2)
     for uid in individual_counts.keys():
-        all_nom_ids.add(uid)
+        all_user_ids.add(uid)
+    for uid in gd_counts.keys():
+        all_user_ids.add(uid)
     
-    user_cache = resolve_users_parallel(all_nom_ids, token, progress_callback)
+    user_cache = resolve_users_parallel(all_user_ids, token, progress_callback)
     
-    # 7. Build leaderboard
-    if progress_callback: progress_callback("Building leaderboard...")
+    # 7. Build leaderboards
+    if progress_callback: progress_callback("Building leaderboards...")
+    
+    # Duo leaderboard
     leaderboard = []
     for (id1, id2), data in pair_counts.items():
         name1 = user_cache.get(id1, f"User_{id1}")
@@ -842,10 +869,9 @@ def global_bn_duo_scan(progress_callback=None):
             'count': data['count'],
             'last_date': data['last_date']
         })
-    
     leaderboard.sort(key=lambda x: (-x['count'], x['bn1_name']))
 
-    # Individual Leaderboard
+    # Individual BN leaderboard
     individual_leaderboard = []
     for uid, data in individual_counts.items():
         name = user_cache.get(uid, f"User_{uid}")
@@ -856,36 +882,50 @@ def global_bn_duo_scan(progress_callback=None):
             'user_id': uid
         })
     individual_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
+
+    # GDer leaderboard
+    gd_leaderboard = []
+    for uid, data in gd_counts.items():
+        name = user_cache.get(uid, f"User_{uid}")
+        gd_leaderboard.append({
+            'username': name,
+            'count': data['count'],
+            'last_date': data['last_date'],
+            'user_id': uid
+        })
+    gd_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
     
     # 8. Save leaderboard JSON
     results = {
         'leaderboard': leaderboard,
         'individual_leaderboard': individual_leaderboard,
+        'gd_leaderboard': gd_leaderboard,
         'total_sets_scanned': len(scanned_ids),
         'total_duos': len(leaderboard),
         'total_individuals': len(individual_leaderboard),
+        'total_gders': len(gd_leaderboard),
         'updated_at': time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime()),
         'scan_duration_note': 'Monthly automated scan'
     }
     
     try:
-        with open(BN_DUOS_FILE, 'w', encoding='utf-8') as f:
+        with open(LEADERBOARD_FILE, 'w', encoding='utf-8') as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
         if progress_callback: progress_callback("Scan complete! Results saved.")
-        print(f"BN Duo scan complete. {len(new_sets)} new sets scanned, {len(leaderboard)} duos total. Saved to {BN_DUOS_FILE}")
+        print(f"Leaderboard scan complete. {len(new_sets)} new sets scanned, {len(leaderboard)} duos, {len(gd_leaderboard)} GDers. Saved to {LEADERBOARD_FILE}")
     except Exception as e:
-        print(f"Error saving BN duo results: {e}")
+        print(f"Error saving leaderboard results: {e}")
         return {'error': f'Failed to save results: {e}'}
     
     return results
 
 
-BN_DUOS_RELEASE_URL = "https://github.com/wFuxi66/osu-scan/releases/download/latest-data/bn_leaderboard.json"
+LEADERBOARD_RELEASE_URL = "https://github.com/wFuxi66/osu-scan/releases/download/latest-data/leaderboard.json"
 _remote_cache = {'data': None, 'last_fetch': 0}
 CACHE_TTL = 3600  # 1 hour
 
-def load_bn_duo_results():
-    """Loads BN duo leaderboard from GitHub Release (preferred) or local file."""
+def load_leaderboard_results():
+    """Loads leaderboard data from GitHub Release (preferred) or local file."""
     global _remote_cache
     
     # 1. return cached data if fresh
@@ -894,22 +934,22 @@ def load_bn_duo_results():
         
     # 2. Try fetching from GitHub Release
     try:
-        r = requests.get(BN_DUOS_RELEASE_URL, timeout=3)
+        r = requests.get(LEADERBOARD_RELEASE_URL, timeout=3)
         if r.status_code == 200:
             data = r.json()
             _remote_cache['data'] = data
             _remote_cache['last_fetch'] = time.time()
             return data
     except Exception as e:
-        print(f"Error fetching remote BN duos: {e}")
+        print(f"Error fetching remote leaderboard: {e}")
     
     # 3. Fallback to local file (e.g. for local dev or if remote fails)
-    if os.path.exists(BN_DUOS_FILE):
+    if os.path.exists(LEADERBOARD_FILE):
         try:
-            with open(BN_DUOS_FILE, 'r', encoding='utf-8') as f:
+            with open(LEADERBOARD_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"Error loading local BN duo results: {e}")
+            print(f"Error loading local leaderboard results: {e}")
             return None
             
     return None

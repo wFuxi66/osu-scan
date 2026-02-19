@@ -16,6 +16,9 @@ venv/
 .DS_Store
 Thumbs.db
 
+# Data (fetched from GitHub Releases, not tracked)
+data/
+
 # Generated reports (keep templates but not generated files)
 gd_report_*.csv
 leaderboard_*.csv

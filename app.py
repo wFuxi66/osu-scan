@@ -4,7 +4,7 @@ import threading
 import time
 import uuid
 import os
-import gder_logic
+import scan_logic
 from flask_limiter import Limiter
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -83,16 +83,16 @@ def run_scan_job(job_id, username, mode, cancel_event):
             
     try:
         if mode == 'nominators':
-            result = gder_logic.generate_nominator_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
+            result = scan_logic.generate_nominator_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
             title_prefix = "Nominated for"
         elif mode == 'bn':
-            result = gder_logic.generate_bn_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
+            result = scan_logic.generate_bn_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
             title_prefix = "Nominated by"
         elif mode == 'gd_hosts':
-            result = gder_logic.generate_gd_hosts_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
+            result = scan_logic.generate_gd_hosts_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
             title_prefix = "Guest Difficulties by"
         else:
-            result = gder_logic.generate_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
+            result = scan_logic.generate_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
             title_prefix = "Guest Difficulties for"
             
         if cancel_event.is_set():
@@ -232,7 +232,7 @@ def download_report(cache_id):
     )
 
 # ============================================================
-# GLOBAL BN LEADERBOARD
+# GLOBAL LEADERBOARDS
 # ============================================================
 
 # Secret key for admin trigger (set via env var or default)
@@ -255,7 +255,7 @@ def run_global_bn_duo_scan():
         print(f"[BN Duo Scan] {msg}")
     
     try:
-        result = gder_logic.global_bn_duo_scan(progress_callback=progress)
+        result = scan_logic.global_bn_duo_scan(progress_callback=progress)
         if 'error' in result:
             print(f"Global BN duo scan failed: {result['error']}")
         else:
@@ -267,12 +267,12 @@ def run_global_bn_duo_scan():
         GLOBAL_SCAN_STATUS['message'] = 'Idle'
         GLOBAL_SCAN_STATUS['last_run'] = time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())
 
-@app.route('/bn-leaderboard')
-def bn_leaderboard_page():
+@app.route('/leaderboards')
+def leaderboards_page():
     mode = request.args.get('mode', 'duo')
     page = request.args.get('page', 1, type=int)
     per_page = 50
-    data = gder_logic.load_bn_duo_results()
+    data = scan_logic.load_leaderboard_results()
     
     pagination = None
     display_data = None
@@ -280,6 +280,8 @@ def bn_leaderboard_page():
     if data:
         if mode == 'individual':
             full_list = data.get('individual_leaderboard', [])
+        elif mode == 'gd':
+            full_list = data.get('gd_leaderboard', [])
         else:
             full_list = data.get('leaderboard', [])
 
@@ -308,11 +310,13 @@ def bn_leaderboard_page():
     else:
         display_data = data
 
-    return render_template('bn_leaderboard.html', data=display_data, scan_status=GLOBAL_SCAN_STATUS, pagination=pagination, mode=mode)
+    return render_template('leaderboards.html', data=display_data, scan_status=GLOBAL_SCAN_STATUS, pagination=pagination, mode=mode)
 
 @app.route('/bn-duos')
-def bn_duos_redirect():
-    return redirect(url_for('bn_leaderboard_page', **request.args))
+@app.route('/bn-leaderboard')
+@app.route('/gder-leaderboard')
+def legacy_redirect():
+    return redirect(url_for('leaderboards_page', **request.args))
 
 @app.route('/api/trigger_global_scan', methods=['GET', 'POST'])
 def trigger_global_scan():

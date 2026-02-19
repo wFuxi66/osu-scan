@@ -1,4 +1,4 @@
-name: Monthly BN Leaderboard Scan
+name: Monthly Leaderboard Scan
 
 on:
   schedule:
@@ -31,7 +31,7 @@ jobs:
           # Try to download the cache from the 'latest-data' release
           # If it fails (e.g. first run), we just proceed without cache
           mkdir -p data
-          gh release download latest-data -p "bn_leaderboard_cache.json" -D data || echo "No previous cache found, starting fresh."
+          gh release download latest-data -p "leaderboard_cache.json" -D data || echo "No previous cache found, starting fresh."
 
       - name: Run Global Scan
         env:
@@ -49,7 +49,7 @@ jobs:
           gh release delete latest-data -y --cleanup-tag || true
           
           # Create fresh release with new data
-          gh release create latest-data data/bn_leaderboard.json data/bn_leaderboard_cache.json \
+          gh release create latest-data data/leaderboard.json data/leaderboard_cache.json \
             --title "Latest Data" \
-            --notes "Auto-generated BN Leaderboard data. Updated by GitHub Actions." \
+            --notes "Auto-generated leaderboard data (BN Duos, Individual BNs, GDers). Updated by GitHub Actions." \
             --latest

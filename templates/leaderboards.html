@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BN Leaderboard - osu!scan</title>
+    <title>Leaderboards - osu!scan</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
     <style>
         body {
@@ -196,6 +196,16 @@
                 flex-direction: column;
                 gap: 8px;
             }
+
+            .mode-toggle {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+
+            .toggle-btn {
+                padding: 8px 14px;
+                font-size: 13px;
+            }
         }
 
         .kofi-btn {
@@ -307,24 +317,33 @@
     <div class="container">
         <a href="/" class="back-link">← Back to osu!scan</a>
 
-        <h1>Beatmap Nominator Leaderboards</h1>
+        <h1>osu!scan Leaderboards</h1>
         <p class="subtitle">
-            Global statistics for Beatmap Nominators.
-            Updated monthly by scanning all active BN nominations.
+            Global statistics for Beatmap Nominators and Guest Difficulty creators.
+            Updated monthly by scanning all ranked beatmapsets.
         </p>
 
         <div class="mode-toggle">
-            <a href="{{ url_for('bn_leaderboard_page', mode='duo') }}"
-                class="toggle-btn {% if mode != 'individual' %}active{% endif %}">Most Iconic Duos</a>
-            <a href="{{ url_for('bn_leaderboard_page', mode='individual') }}"
+            <a href="{{ url_for('leaderboards_page', mode='duo') }}"
+                class="toggle-btn {% if mode == 'duo' or mode not in ['individual', 'gd'] %}active{% endif %}">Most
+                Iconic Duos</a>
+            <a href="{{ url_for('leaderboards_page', mode='individual') }}"
                 class="toggle-btn {% if mode == 'individual' %}active{% endif %}">Most Active BNs</a>
+            <a href="{{ url_for('leaderboards_page', mode='gd') }}"
+                class="toggle-btn {% if mode == 'gd' %}active{% endif %}">Most Active GDers</a>
         </div>
 
         {% if data %}
         <div class="meta-info">
             <span>Last updated: {{ data.updated_at }}</span>
             <span>{{ data.total_sets_scanned }} sets analyzed</span>
+            {% if mode == 'gd' %}
+            <span>{{ data.total_gders }} unique GDers</span>
+            {% elif mode == 'individual' %}
+            <span>{{ data.total_individuals }} unique BNs</span>
+            {% else %}
             <span>{{ data.total_duos }} unique duos</span>
+            {% endif %}
         </div>
 
         <div class="table-wrapper">
@@ -336,6 +355,10 @@
                         <th>Beatmap Nominator</th>
                         <th>Total Nominations</th>
                         <th>Last Nomination</th>
+                        {% elif mode == 'gd' %}
+                        <th>Guest Difficulty Creator</th>
+                        <th>Sets with GDs</th>
+                        <th>Last Ranked</th>
                         {% else %}
                         <th>BN 1</th>
                         <th>BN 2</th>
@@ -352,7 +375,11 @@
                         {% if mode == 'individual' %}
                         <td>{{ entry.username }}</td>
                         <td style="font-weight: bold; color: #4facfe;">{{ entry.count }}</td>
-                        <td>{{ entry.last_date}}</td>
+                        <td>{{ entry.last_date }}</td>
+                        {% elif mode == 'gd' %}
+                        <td>{{ entry.username }}</td>
+                        <td style="font-weight: bold; color: #4facfe;">{{ entry.count }}</td>
+                        <td>{{ entry.last_date }}</td>
                         {% else %}
                         <td>{{ entry.bn1_name }}</td>
                         <td>{{ entry.bn2_name }}</td>
@@ -368,11 +395,11 @@
         {% if pagination and pagination.total_pages > 1 %}
         <div class="pagination">
             {% if pagination.current_page > 1 %}
-            <a href="{{ url_for('bn_leaderboard_page', page=pagination.current_page - 1, mode=mode) }}"
+            <a href="{{ url_for('leaderboards_page', page=pagination.current_page - 1, mode=mode) }}"
                 class="page-link">Previous</a>
             {% endif %}
 
-            <form action="{{ url_for('bn_leaderboard_page') }}" method="get" class="page-form">
+            <form action="{{ url_for('leaderboards_page') }}" method="get" class="page-form">
                 <input type="hidden" name="mode" value="{{ mode }}">
                 <span>Page</span>
                 <input type="number" name="page" value="{{ pagination.current_page }}" min="1"
@@ -381,9 +408,8 @@
             </form>
 
             {% if pagination.current_page < pagination.total_pages %} <a
-                href="{{ url_for('bn_leaderboard_page', page=pagination.current_page + 1, mode=mode) }}"
-                class="page-link">
-                Next</a>
+                href="{{ url_for('leaderboards_page', page=pagination.current_page + 1, mode=mode) }}"
+                class="page-link">Next</a>
                 {% endif %}
         </div>
         {% endif %}
@@ -391,7 +417,7 @@
         {% else %}
         <div class="no-data">
             <p>No data available yet.</p>
-            <small>The global BN duo scan hasn't run yet. Data will be available after the first monthly scan.</small>
+            <small>The leaderboard scan hasn't run yet. Data will be available after the first monthly scan.</small>
         </div>
         {% endif %}
 
