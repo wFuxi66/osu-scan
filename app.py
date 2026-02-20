@@ -290,7 +290,30 @@ def leaderboards_page():
             full_list = data.get('leaderboard', [])
 
         if game_mode:
-            full_list = [e for e in full_list if game_mode in e.get('modes', [])]
+            filtered_list = []
+            for e in full_list:
+                mode_counts = e.get('mode_counts', {})
+                specific_count = mode_counts.get(game_mode, 0)
+                if specific_count > 0:
+                    new_e = e.copy()
+                    new_e['count'] = specific_count
+                    if 'total_gds' in new_e:
+                        new_e['total_gds'] = specific_count
+                    
+                    # Hide the logos per mode-isolation request
+                    new_e['modes'] = []
+                    if 'bn1_modes' in new_e: new_e['bn1_modes'] = []
+                    if 'bn2_modes' in new_e: new_e['bn2_modes'] = []
+                    
+                    filtered_list.append(new_e)
+            
+            # Re-sort list based on the new gamemode-specific counts
+            if mode == 'duo':
+                filtered_list.sort(key=lambda x: (-x['count'], x.get('bn1_name', '')))
+            else:
+                filtered_list.sort(key=lambda x: (-x['count'], x.get('username', '')))
+                
+            full_list = filtered_list
 
         # Stamp rank based on current list (Global or Mode-specific)
         # We create a copy of each entry to avoid modifying the original data in cache

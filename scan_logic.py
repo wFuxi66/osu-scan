@@ -1,10 +1,24 @@
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import time
 import os
 import json
 import concurrent.futures
 from collections import defaultdict
 from itertools import combinations
+
+def get_session():
+    """Returns a requests Session equipped with robust retry logic."""
+    session = requests.Session()
+    # Retry on 429 (Rate Limit) and 5xx (Server Error)
+    retries = Retry(total=5, 
+                    backoff_factor=1, 
+                    status_forcelist=[429, 500, 502, 503, 504])
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount('https://', adapter)
+    session.mount('http://', adapter)
+    return session
 
 # Configuration constants
 API_BASE = 'https://osu.ppy.sh/api/v2'
@@ -39,13 +53,14 @@ def get_token():
 def get_user_id(username_or_id, token):
     """Resolves a username to an ID."""
     headers = {'Authorization': f'Bearer {token}'}
+    session = get_session()
     
     # Try assuming it's a username key
     params = {'key': 'username'}
     url = f'{API_BASE}/users/{username_or_id}/osu'
     
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=5)
+        response = session.get(url, headers=headers, params=params, timeout=10)
         if response.status_code == 200:
             return response.json()['id'], response.json()['username']
     except:
@@ -55,7 +70,7 @@ def get_user_id(username_or_id, token):
     if str(username_or_id).isdigit():
         url = f'{API_BASE}/users/{username_or_id}'
         try:
-            response = requests.get(url, headers=headers, timeout=5)
+            response = session.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 return response.json()['id'], response.json()['username']
         except:
@@ -68,7 +83,8 @@ def get_beatmapsets(user_id, token, cancel_event=None):
     """Fetches all beatmap sets for a user."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
-    set_types = ['ranked', 'loved']
+    set_types = ['ranked_and_approved', 'loved']
+    session = get_session()
     
     for s_type in set_types:
         if cancel_event and cancel_event.is_set(): return []
@@ -80,7 +96,7 @@ def get_beatmapsets(user_id, token, cancel_event=None):
             url = f'{API_BASE}/users/{user_id}/beatmapsets/{s_type}'
             
             try:
-                response = requests.get(url, headers=headers, params=params, timeout=10)
+                response = session.get(url, headers=headers, params=params, timeout=15)
                 if response.status_code == 404:
                     break 
                 
@@ -100,8 +116,8 @@ def get_beatmapsets(user_id, token, cancel_event=None):
                 offset += len(data)
                 time.sleep(0.1) 
             except Exception as e:
-                print(f"Warning: Failed to fetch {s_type} sets: {e}")
-                break
+                print(f"Error: Failed to fetch {s_type} sets: {e}")
+                raise e
                 
                 
     return all_sets
@@ -110,6 +126,7 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
     """Fetches all beatmap sets nominated by a user."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
+    session = get_session()
     
     offset = 0
     limit = 50 # Unknown limit for this endpoint, safe bet
@@ -124,7 +141,7 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
         url = f'{API_BASE}/users/{user_id}/beatmapsets/nominated'
         
         try:
-            response = requests.get(url, headers=headers, params=params, timeout=10)
+            response = session.get(url, headers=headers, params=params, timeout=15)
             if response.status_code == 404: break
             
             response.raise_for_status()
@@ -139,8 +156,8 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
             offset += len(data)
             time.sleep(0.1)
         except Exception as e:
-            print(f"Warning: Failed to fetch nominated sets: {e}")
-            break
+            print(f"Error: Failed to fetch nominated sets: {e}")
+            raise e
             
     return all_sets
 
@@ -154,7 +171,8 @@ def process_set(bset, host_id, token):
     try:
         # Full Deep Fetch
         url = f'{API_BASE}/beatmapsets/{bset["id"]}'
-        r = requests.get(url, headers=headers, timeout=10)
+        session = get_session()
+        r = session.get(url, headers=headers, timeout=10)
         
         if r.status_code == 200:
             full_set = r.json()
@@ -170,33 +188,42 @@ def process_set(bset, host_id, token):
         return []
 
     # Dedup tracker for THIS set
-    # We only want to count a mapper ONCE per set.
-    seen_mappers_in_set = set()
+    # We only want to count a mapper ONCE per set, but we collect ALL their modes.
+    mapper_data = {}
 
     for beatmap in beats:
         owners = beatmap.get('owners', [])
+        mode = beatmap.get('mode', 'osu')
         
         if owners:
             for owner in owners:
-                if owner['id'] != host_id and owner['id'] not in seen_mappers_in_set:
-                    gd_entry = {
-                        'mapper_id': owner['id'],
-                        'mapper_name': owner['username'], 
-                        'last_updated': beatmap['last_updated'].split('T')[0]
-                    }
-                    gds_in_set.append(gd_entry)
-                    seen_mappers_in_set.add(owner['id'])
+                if owner['id'] != host_id:
+                    if owner['id'] not in mapper_data:
+                        mapper_data[owner['id']] = {
+                            'name': owner['username'], 
+                            'date': beatmap['last_updated'].split('T')[0], 
+                            'modes': set()
+                        }
+                    mapper_data[owner['id']]['modes'].add(mode)
         else:
             mapper_id = beatmap['user_id']
-            if mapper_id != host_id and mapper_id not in seen_mappers_in_set:
-                gd_entry = {
-                    'mapper_id': mapper_id,
-                    'mapper_name': None, 
-                    'last_updated': beatmap['last_updated'].split('T')[0]
-                }
-                gds_in_set.append(gd_entry)
-                seen_mappers_in_set.add(mapper_id)
+            if mapper_id != host_id:
+                if mapper_id not in mapper_data:
+                    mapper_data[mapper_id] = {
+                        'name': None, 
+                        'date': beatmap['last_updated'].split('T')[0], 
+                        'modes': set()
+                    }
+                mapper_data[mapper_id]['modes'].add(mode)
                 
+    for mid, m in mapper_data.items():
+        gds_in_set.append({
+            'mapper_id': mid,
+            'mapper_name': m['name'],
+            'last_updated': m['date'],
+            'modes': list(m['modes'])
+        })
+        
     return gds_in_set
 
 def analyze_sets(beatmapsets, host_id, token, progress_callback=None, cancel_event=None):
@@ -242,7 +269,7 @@ def process_nominator_set(bset, token, session=None):
     try:
         url = f'{API_BASE}/beatmapsets/{bset["id"]}'
         # Use session if provided, else standard request
-        req_func = session.get if session else requests.get
+        req_func = session.get if session else get_session().get
         r = req_func(url, headers=headers, timeout=20)
         
         if r.status_code == 200:
@@ -253,17 +280,21 @@ def process_nominator_set(bset, token, session=None):
                 nominations.append({
                     'nominator_id': nom['user_id'],
                     'set_title': f"{bset['artist']} - {bset['title']}",
-                    'date': (bset.get('ranked_date') or bset.get('last_updated')).split('T')[0]
+                    'date': (bset.get('ranked_date') or bset.get('last_updated')).split('T')[0],
+                    'rulesets': nom.get('rulesets', [])
                 })
             
             # Extract host, GDers, and modes
             mapset_host_id = data.get('user_id')
+            host_modes = set()
             if mapset_host_id:
                 for beatmap in data.get('beatmaps', []):
                     bm_mode = beatmap.get('mode', 'osu')
                     set_modes.add(bm_mode)
                     diff_creator = beatmap.get('user_id')
-                    if diff_creator and diff_creator != mapset_host_id:
+                    if diff_creator == mapset_host_id:
+                        host_modes.add(bm_mode)
+                    elif diff_creator and diff_creator != mapset_host_id:
                         if diff_creator not in gd_user_modes:
                             gd_user_modes[diff_creator] = set()
                         gd_user_modes[diff_creator].add(bm_mode)
@@ -273,7 +304,7 @@ def process_nominator_set(bset, token, session=None):
     except Exception as e:
         print(f"Error fetching set {bset['id']}: {e}")
         
-    return nominations, gd_user_modes, set_modes, mapset_host_id
+    return nominations, gd_user_modes, set_modes, mapset_host_id, host_modes if 'host_modes' in locals() else set()
             
 # Global Cache
 USER_CACHE = {}
@@ -292,7 +323,8 @@ def resolve_users_parallel(user_ids, token, progress_callback=None):
 
         def fetch_user(uid):
             try:
-                r = requests.get(f'{API_BASE}/users/{uid}', headers=headers, timeout=10)
+                session = get_session()
+                r = session.get(f'{API_BASE}/users/{uid}', headers=headers, timeout=15)
                 if r.status_code == 200:
                     return (uid, r.json()['username'])
             except:
@@ -361,13 +393,20 @@ def resolve_and_aggregate_nominators(noms, token, progress_callback=None):
     # Use the new parallel resolver
     user_cache = resolve_users_parallel(unique_ids, token, progress_callback)
             
-    stats = defaultdict(lambda: {'count': 0, 'last_date': ''})
+    stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'modes': set(), 'mode_counts': defaultdict(int)})
     
     for n in noms:
         name = user_cache.get(n['nominator_id'], f"ID:{n['nominator_id']}")
         date = n['date']
-        
+        rulesets = n.get('rulesets', [])
+        if not rulesets:
+            rulesets = ['osu'] # fallback
+            
         stats[name]['count'] += 1
+        stats[name]['modes'].update(rulesets)
+        for r in rulesets:
+            stats[name]['mode_counts'][r] += 1
+            
         if date and date > stats[name]['last_date']:
             stats[name]['last_date'] = date
             
@@ -376,7 +415,9 @@ def resolve_and_aggregate_nominators(noms, token, progress_callback=None):
         leaderboard.append({
             'mapper_name': name, 
             'total_gds': data['count'], 
-            'last_gd_date': data['last_date']
+            'last_gd_date': data['last_date'],
+            'modes': list(data['modes']),
+            'mode_counts': dict(data['mode_counts'])
         })
         
     leaderboard.sort(key=lambda x: (-x['total_gds'], x['mapper_name']))
@@ -435,7 +476,7 @@ def generate_bn_leaderboard_for_user(username_input, progress_callback=None, can
     # 2. Count mappers (user_id field in beatmapset)
     if progress_callback: progress_callback(f"Analyzing {len(sets)} nominations...")
     
-    stats = defaultdict(lambda: {'count': 0, 'last_date': ''})
+    stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'modes': set(), 'mode_counts': defaultdict(int)})
     mappers_to_resolve = set()
     
     for bset in sets:
@@ -445,8 +486,20 @@ def generate_bn_leaderboard_for_user(username_input, progress_callback=None, can
         # Approximate date (ranked_date or last_updated)
         date = (bset.get('ranked_date') or bset.get('last_updated') or '').split('T')[0]
         
+        host_modes = set()
+        for bm in bset.get('beatmaps', []):
+            if bm.get('user_id') == mapper_id:
+                host_modes.add(bm.get('mode', 'osu'))
+                
+        if not host_modes:
+            host_modes = set(['osu'])
+            
         # We store by ID temporarily
         stats[mapper_id]['count'] += 1
+        stats[mapper_id]['modes'].update(host_modes)
+        for m in host_modes:
+            stats[mapper_id]['mode_counts'][m] += 1
+            
         if date and date > stats[mapper_id]['last_date']:
             stats[mapper_id]['last_date'] = date
             
@@ -463,7 +516,9 @@ def generate_bn_leaderboard_for_user(username_input, progress_callback=None, can
         leaderboard.append({
             'mapper_name': name,
             'total_gds': data['count'],
-            'last_gd_date': data['last_date']
+            'last_gd_date': data['last_date'],
+            'modes': list(data['modes']),
+            'mode_counts': dict(data['mode_counts'])
         })
         
     leaderboard.sort(key=lambda x: (-x['total_gds'], x['mapper_name']))
@@ -478,6 +533,7 @@ def get_guest_beatmapsets(user_id, token, cancel_event=None):
     """Fetches all beatmap sets where the user has contributed a guest difficulty."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
+    session = get_session()
     
     offset = 0
     limit = 100
@@ -489,7 +545,7 @@ def get_guest_beatmapsets(user_id, token, cancel_event=None):
         url = f'{API_BASE}/users/{user_id}/beatmapsets/guest'
         
         try:
-            response = requests.get(url, headers=headers, params=params, timeout=10)
+            response = session.get(url, headers=headers, params=params, timeout=15)
             if response.status_code == 404: break
             
             response.raise_for_status()
@@ -504,8 +560,8 @@ def get_guest_beatmapsets(user_id, token, cancel_event=None):
             offset += len(data)
             time.sleep(0.1)
         except Exception as e:
-            print(f"Warning: Failed to fetch guest sets: {e}")
-            break
+            print(f"Error: Failed to fetch guest sets: {e}")
+            raise e
             
     return all_sets
 
@@ -531,7 +587,7 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
     # 2. Count hosts (user_id field in each beatmapset = the host)
     if progress_callback: progress_callback(f"Analyzing {len(sets)} GD sets...")
     
-    stats = defaultdict(lambda: {'count': 0, 'last_date': ''})
+    stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'modes': set(), 'mode_counts': defaultdict(int)})
     hosts_to_resolve = set()
     
     for bset in sets:
@@ -541,7 +597,19 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
         # Use ranked_date or last_updated as date
         date = (bset.get('ranked_date') or bset.get('last_updated') or '').split('T')[0]
         
+        host_modes = set()
+        for bm in bset.get('beatmaps', []):
+            if bm.get('user_id') == host_id:
+                host_modes.add(bm.get('mode', 'osu'))
+                
+        if not host_modes:
+            host_modes = set(['osu'])
+            
         stats[host_id]['count'] += 1
+        stats[host_id]['modes'].update(host_modes)
+        for m in host_modes:
+            stats[host_id]['mode_counts'][m] += 1
+            
         if date and date > stats[host_id]['last_date']:
             stats[host_id]['last_date'] = date
             
@@ -558,7 +626,9 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
         leaderboard.append({
             'mapper_name': name,
             'total_gds': data['count'],
-            'last_gd_date': data['last_date']
+            'last_gd_date': data['last_date'],
+            'modes': list(data['modes']),
+            'mode_counts': dict(data['mode_counts'])
         })
         
     leaderboard.sort(key=lambda x: (-x['total_gds'], x['mapper_name']))
@@ -579,7 +649,7 @@ def resolve_and_aggregate(gds, token, progress_callback=None):
     user_cache = resolve_users_parallel(unique_ids_to_resolve, token, progress_callback)
             
     # Aggregate
-    stats = defaultdict(lambda: {'count': 0, 'last_date': ''})
+    stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'modes': set(), 'mode_counts': defaultdict(int)})
     
     for gd in gds:
         # Use provided name, or lookup in cache, or fallback to ID
@@ -589,8 +659,15 @@ def resolve_and_aggregate(gds, token, progress_callback=None):
             mapper_name = user_cache.get(gd['mapper_id'], f"ID:{gd['mapper_id']}")
             
         date = gd['last_updated']
+        modes = gd.get('modes', ['osu'])
+        if not modes:
+            modes = ['osu']
         
         stats[mapper_name]['count'] += 1
+        stats[mapper_name]['modes'].update(modes)
+        for m in modes:
+            stats[mapper_name]['mode_counts'][m] += 1
+            
         if date > stats[mapper_name]['last_date']:
             stats[mapper_name]['last_date'] = date
 
@@ -600,7 +677,9 @@ def resolve_and_aggregate(gds, token, progress_callback=None):
         leaderboard.append({
             'mapper_name': mapper,
             'total_gds': data['count'],
-            'last_gd_date': data['last_date']
+            'last_gd_date': data['last_date'],
+            'modes': list(data['modes']),
+            'mode_counts': dict(data['mode_counts'])
         })
     
     leaderboard.sort(key=lambda x: (-x['total_gds'], x['mapper_name']))
@@ -649,6 +728,7 @@ def search_ranked_beatmapsets(token, progress_callback=None):
     """Fetches ALL ranked/loved beatmapsets using the search endpoint with cursor pagination."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
+    session = get_session()
     cursor_string = None
     page = 0
     
@@ -662,7 +742,7 @@ def search_ranked_beatmapsets(token, progress_callback=None):
                 params['cursor_string'] = cursor_string
             
             try:
-                r = requests.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=15)
+                r = session.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=15)
                 if r.status_code != 200:
                     print(f"Search endpoint returned {r.status_code}")
                     break
@@ -696,7 +776,7 @@ def search_ranked_beatmapsets(token, progress_callback=None):
                 
             except Exception as e:
                 print(f"Error searching {status} beatmapsets: {e}")
-                break
+                raise e
     
     return all_sets
 
@@ -735,38 +815,36 @@ def global_bn_duo_scan(progress_callback=None):
     if progress_callback: progress_callback("Loading cache...")
     cache = _load_cache()
     scanned_ids = set(cache.get('scanned_ids', []))
-    pair_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
-    individual_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
-    gd_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
-    host_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
+    pair_counts = defaultdict(lambda: {'count': 0, 'last_date': '', 'mode_counts': defaultdict(int)})
+    individual_counts = defaultdict(lambda: {'count': 0, 'last_date': '', 'mode_counts': defaultdict(int)})
+    gd_counts = defaultdict(lambda: {'count': 0, 'last_date': '', 'mode_counts': defaultdict(int)})
+    host_counts = defaultdict(lambda: {'count': 0, 'last_date': '', 'mode_counts': defaultdict(int)})
     user_modes = defaultdict(set)  # {user_id: set of mode strings}
     
-    # Restore existing pair counts from cache (keys are stored as "id1,id2")
-    for key_str, data in cache.get('pair_counts', {}).items():
-        parts = key_str.split(',')
-        pair_key = (int(parts[0]), int(parts[1]))
-        pair_counts[pair_key] = data
+    # helper for loading counts robustly
+    def load_counts_to_dict(target_dict, cached_dict, key_cast=int, is_pair=False):
+        for k_str, data in cached_dict.items():
+            if is_pair:
+                parts = k_str.split(',')
+                if len(parts) == 2:
+                    k = (int(parts[0]), int(parts[1]))
+                else:
+                    continue
+            else:
+                k = key_cast(k_str)
 
-    # Restore individual counts
-    for uid, data in cache.get('individual_counts', {}).items():
-        if isinstance(data, int):
-            individual_counts[int(uid)]['count'] = data
-        else:
-            individual_counts[int(uid)] = data
+            if isinstance(data, int):
+                target_dict[k]['count'] = data
+            elif isinstance(data, dict):
+                target_dict[k]['count'] = data.get('count', 0)
+                target_dict[k]['last_date'] = data.get('last_date', '')
+                target_dict[k]['mode_counts'] = defaultdict(int, data.get('mode_counts', {}))
 
-    # Restore GD counts
-    for uid, data in cache.get('gd_counts', {}).items():
-        if isinstance(data, int):
-            gd_counts[int(uid)]['count'] = data
-        else:
-            gd_counts[int(uid)] = data
-
-    # Restore host counts
-    for uid, data in cache.get('host_counts', {}).items():
-        if isinstance(data, int):
-            host_counts[int(uid)]['count'] = data
-        else:
-            host_counts[int(uid)] = data
+    # Restore existing counts
+    load_counts_to_dict(pair_counts, cache.get('pair_counts', {}), is_pair=True)
+    load_counts_to_dict(individual_counts, cache.get('individual_counts', {}))
+    load_counts_to_dict(gd_counts, cache.get('gd_counts', {}))
+    load_counts_to_dict(host_counts, cache.get('host_counts', {}))
 
     # Restore user modes
     for uid, modes in cache.get('user_modes', {}).items():
@@ -816,38 +894,58 @@ def global_bn_duo_scan(progress_callback=None):
                     date = (set_data.get('ranked_date') or set_data.get('last_updated') or '').split('T')[0]
                     
                     if noms:
-                        nom_ids = [n['nominator_id'] for n in noms]
-                        
-                        # Count individual nominations (unique per set)
-                        unique_noms = set(nom_ids)
-                        for nid in unique_noms:
+                        # Count individual nominations (unique per bn per set)
+                        unique_noms = {n['nominator_id']: n for n in noms}
+                        for nid, n in unique_noms.items():
                             individual_counts[nid]['count'] += 1
                             if date and date > individual_counts[nid]['last_date']:
                                 individual_counts[nid]['last_date'] = date
-                            # BN modes = modes of maps they nominate
-                            user_modes[nid].update(set_modes)
+                            
+                            # Mode counts
+                            rulesets = n.get('rulesets', []) or ['osu']
+                            for r in rulesets:
+                                individual_counts[nid]['mode_counts'][r] += 1
+                            user_modes[nid].update(rulesets)
 
                         if len(unique_noms) >= 2:
-                            for pair in combinations(sorted(unique_noms), 2):
+                            for n1, n2 in combinations(sorted(unique_noms.values(), key=lambda x: x['nominator_id']), 2):
+                                pair = (n1['nominator_id'], n2['nominator_id'])
                                 pair_counts[pair]['count'] += 1
                                 if date and date > pair_counts[pair]['last_date']:
                                     pair_counts[pair]['last_date'] = date
+                                    
+                                r1 = set(n1.get('rulesets', []) or ['osu'])
+                                r2 = set(n2.get('rulesets', []) or ['osu'])
+                                shared_modes = r1 & r2
+                                if not shared_modes:
+                                    shared_modes = r1 | r2
+                                    
+                                for r in shared_modes:
+                                    pair_counts[pair]['mode_counts'][r] += 1
                     
                     # Count GDers (+1 per set, not per difficulty)
                     for gd_uid, gd_modes in gd_user_modes.items():
                         gd_counts[gd_uid]['count'] += 1
                         if date and date > gd_counts[gd_uid]['last_date']:
                             gd_counts[gd_uid]['last_date'] = date
-                        # GDer modes = modes of the diffs they made
+                            
                         user_modes[gd_uid].update(gd_modes)
+                        for m in gd_modes:
+                            gd_counts[gd_uid]['mode_counts'][m] += 1
                     
                     # Count host (+1 per ranked set)
                     if mapset_host_id:
+                        host_modes_set = host_modes if 'host_modes' in locals() and host_modes else set_modes
+                        if not host_modes_set:
+                            host_modes_set = {'osu'}
+                            
                         host_counts[mapset_host_id]['count'] += 1
                         if date and date > host_counts[mapset_host_id]['last_date']:
                             host_counts[mapset_host_id]['last_date'] = date
-                        # Host modes = all modes in the set
-                        user_modes[mapset_host_id].update(set_modes)
+                            
+                        user_modes[mapset_host_id].update(host_modes_set)
+                        for m in host_modes_set:
+                            host_counts[mapset_host_id]['mode_counts'][m] += 1
 
                 except Exception as e:
                     print(f"Error deep-fetching set {bset['id']}: {e}")
@@ -908,7 +1006,8 @@ def global_bn_duo_scan(progress_callback=None):
             'bn2_modes': sorted(user_modes.get(id2, set())),
             'modes': duo_modes,
             'count': data['count'],
-            'last_date': data['last_date']
+            'last_date': data['last_date'],
+            'mode_counts': dict(data.get('mode_counts', {}))
         })
     leaderboard.sort(key=lambda x: (-x['count'], x['bn1_name']))
 
@@ -921,7 +1020,8 @@ def global_bn_duo_scan(progress_callback=None):
             'count': data['count'],
             'last_date': data['last_date'],
             'user_id': uid,
-            'modes': sorted(user_modes.get(uid, set()))
+            'modes': sorted(user_modes.get(uid, set())),
+            'mode_counts': dict(data.get('mode_counts', {}))
         })
     individual_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
 
@@ -934,7 +1034,8 @@ def global_bn_duo_scan(progress_callback=None):
             'count': data['count'],
             'last_date': data['last_date'],
             'user_id': uid,
-            'modes': sorted(user_modes.get(uid, set()))
+            'modes': sorted(user_modes.get(uid, set())),
+            'mode_counts': dict(data.get('mode_counts', {}))
         })
     gd_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
 
@@ -947,7 +1048,8 @@ def global_bn_duo_scan(progress_callback=None):
             'count': data['count'],
             'last_date': data['last_date'],
             'user_id': uid,
-            'modes': sorted(user_modes.get(uid, set()))
+            'modes': sorted(user_modes.get(uid, set())),
+            'mode_counts': dict(data.get('mode_counts', {}))
         })
     host_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
     
