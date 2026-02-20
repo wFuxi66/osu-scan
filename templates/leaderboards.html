@@ -439,20 +439,16 @@
                 href="{{ url_for('leaderboards_page', mode=mode, search=search) }}">All</a>
             <a class="filter-mode-btn {% if game_mode == 'osu' %}active{% endif %}"
                 href="{{ url_for('leaderboards_page', mode=mode, game_mode='osu', search=search) }}"><img
-                    src="https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67"
-                    alt="osu!"> osu!</a>
+                    src="{{ url_for('static', filename='images/modes/osu.png') }}" alt="osu!"> osu!</a>
             <a class="filter-mode-btn {% if game_mode == 'taiko' %}active{% endif %}"
                 href="{{ url_for('leaderboards_page', mode=mode, game_mode='taiko', search=search) }}"><img
-                    src="https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67"
-                    alt="taiko"> taiko</a>
+                    src="{{ url_for('static', filename='images/modes/taiko.png') }}" alt="taiko"> taiko</a>
             <a class="filter-mode-btn {% if game_mode == 'fruits' %}active{% endif %}"
                 href="{{ url_for('leaderboards_page', mode=mode, game_mode='fruits', search=search) }}"><img
-                    src="https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67"
-                    alt="catch"> catch</a>
+                    src="{{ url_for('static', filename='images/modes/catch.png') }}" alt="catch"> catch</a>
             <a class="filter-mode-btn {% if game_mode == 'mania' %}active{% endif %}"
                 href="{{ url_for('leaderboards_page', mode=mode, game_mode='mania', search=search) }}"><img
-                    src="https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67"
-                    alt="mania"> mania</a>
+                    src="{{ url_for('static', filename='images/modes/mania.png') }}" alt="mania"> mania</a>
             <input type="text" class="filter-search" id="nameSearch" placeholder="Search by name..."
                 value="{{ search }}">
         </div>
@@ -490,10 +486,10 @@
                         data-name="{{ entry.bn1_name|lower }},{{ entry.bn2_name|lower }}">
                         <td>{{ entry.rank }}</td>
                         <td>{{ entry.bn1_name }}{% for m in entry.bn1_modes %}<img class="mode-icon"
-                                src="{{ {'osu':'https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67','taiko':'https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67','fruits':'https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67','mania':'https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67'}[m] }}"
+                                src="{{ {'osu':url_for('static', filename='images/modes/osu.png'),'taiko':url_for('static', filename='images/modes/taiko.png'),'fruits':url_for('static', filename='images/modes/catch.png'),'mania':url_for('static', filename='images/modes/mania.png')}[m] }}"
                                 alt="{{ m }}" title="{{ m }}">{% endfor %}</td>
                         <td>{{ entry.bn2_name }}{% for m in entry.bn2_modes %}<img class="mode-icon"
-                                src="{{ {'osu':'https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67','taiko':'https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67','fruits':'https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67','mania':'https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67'}[m] }}"
+                                src="{{ {'osu':url_for('static', filename='images/modes/osu.png'),'taiko':url_for('static', filename='images/modes/taiko.png'),'fruits':url_for('static', filename='images/modes/catch.png'),'mania':url_for('static', filename='images/modes/mania.png')}[m] }}"
                                 alt="{{ m }}" title="{{ m }}">{% endfor %}</td>
                         <td style="font-weight: bold; color: #4facfe;">{{ entry.count }}</td>
                         <td>{{ entry.last_date }}</td>
@@ -503,7 +499,7 @@
                         data-modes="{{ entry.modes|join(',') }}" data-name="{{ entry.username|lower }}">
                         <td>{{ entry.rank }}</td>
                         <td>{{ entry.username }}{% for m in entry.modes %}<img class="mode-icon"
-                                src="{{ {'osu':'https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67','taiko':'https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67','fruits':'https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67','mania':'https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67'}[m] }}"
+                                src="{{ {'osu':url_for('static', filename='images/modes/osu.png'),'taiko':url_for('static', filename='images/modes/taiko.png'),'fruits':url_for('static', filename='images/modes/catch.png'),'mania':url_for('static', filename='images/modes/mania.png')}[m] }}"
                                 alt="{{ m }}" title="{{ m }}">{% endfor %}</td>
                         <td style="font-weight: bold; color: #4facfe;">{{ entry.count }}</td>
                         <td>{{ entry.last_date }}</td>
