@@ -350,6 +350,7 @@
             gap: 5px;
             color: #8892b0;
             font-size: 12px;
+            \r\n text-decoration: none;
         }
 
         .filter-mode-btn:hover {
@@ -434,20 +435,26 @@
 
         <div class="filter-bar">
             <label>Filter:</label>
-            <button class="filter-mode-btn active" data-filter="all">All</button>
-            <button class="filter-mode-btn" data-filter="osu"><img
+            <a class="filter-mode-btn {% if not game_mode %}active{% endif %}"
+                href="{{ url_for('leaderboards_page', mode=mode, search=search) }}">All</a>
+            <a class="filter-mode-btn {% if game_mode == 'osu' %}active{% endif %}"
+                href="{{ url_for('leaderboards_page', mode=mode, game_mode='osu', search=search) }}"><img
                     src="https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67"
-                    alt="osu!"> osu!</button>
-            <button class="filter-mode-btn" data-filter="taiko"><img
+                    alt="osu!"> osu!</a>
+            <a class="filter-mode-btn {% if game_mode == 'taiko' %}active{% endif %}"
+                href="{{ url_for('leaderboards_page', mode=mode, game_mode='taiko', search=search) }}"><img
                     src="https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67"
-                    alt="taiko"> taiko</button>
-            <button class="filter-mode-btn" data-filter="fruits"><img
+                    alt="taiko"> taiko</a>
+            <a class="filter-mode-btn {% if game_mode == 'fruits' %}active{% endif %}"
+                href="{{ url_for('leaderboards_page', mode=mode, game_mode='fruits', search=search) }}"><img
                     src="https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67"
-                    alt="catch"> catch</button>
-            <button class="filter-mode-btn" data-filter="mania"><img
+                    alt="catch"> catch</a>
+            <a class="filter-mode-btn {% if game_mode == 'mania' %}active{% endif %}"
+                href="{{ url_for('leaderboards_page', mode=mode, game_mode='mania', search=search) }}"><img
                     src="https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67"
-                    alt="mania"> mania</button>
-            <input type="text" class="filter-search" id="nameSearch" placeholder="Search by name...">
+                    alt="mania"> mania</a>
+            <input type="text" class="filter-search" id="nameSearch" placeholder="Search by name..."
+                value="{{ search }}">
         </div>
 
         <div class="table-wrapper">
@@ -477,11 +484,11 @@
                 </thead>
                 <tbody>
                     {% for entry in data.leaderboard %}
-                    {% set rank = pagination.start_rank + loop.index0 %}
                     {% if mode == 'duo' or mode not in ['individual', 'gd', 'host'] %}
-                    <tr class="{% if rank <= 3 %}rank-{{ rank }}{% endif %}" data-modes="{{ entry.modes|join(',') }}"
+                    <tr class="{% if entry.rank <= 3 %}rank-{{ entry.rank }}{% endif %}"
+                        data-modes="{{ entry.modes|join(',') }}"
                         data-name="{{ entry.bn1_name|lower }},{{ entry.bn2_name|lower }}">
-                        <td>{{ rank }}</td>
+                        <td>{{ entry.rank }}</td>
                         <td>{{ entry.bn1_name }}{% for m in entry.bn1_modes %}<img class="mode-icon"
                                 src="{{ {'osu':'https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67','taiko':'https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67','fruits':'https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67','mania':'https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67'}[m] }}"
                                 alt="{{ m }}" title="{{ m }}">{% endfor %}</td>
@@ -492,9 +499,9 @@
                         <td>{{ entry.last_date }}</td>
                     </tr>
                     {% else %}
-                    <tr class="{% if rank <= 3 %}rank-{{ rank }}{% endif %}" data-modes="{{ entry.modes|join(',') }}"
-                        data-name="{{ entry.username|lower }}">
-                        <td>{{ rank }}</td>
+                    <tr class="{% if entry.rank <= 3 %}rank-{{ entry.rank }}{% endif %}"
+                        data-modes="{{ entry.modes|join(',') }}" data-name="{{ entry.username|lower }}">
+                        <td>{{ entry.rank }}</td>
                         <td>{{ entry.username }}{% for m in entry.modes %}<img class="mode-icon"
                                 src="{{ {'osu':'https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67','taiko':'https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67','fruits':'https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67','mania':'https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67'}[m] }}"
                                 alt="{{ m }}" title="{{ m }}">{% endfor %}</td>
@@ -510,12 +517,14 @@
         {% if pagination and pagination.total_pages > 1 %}
         <div class="pagination">
             {% if pagination.current_page > 1 %}
-            <a href="{{ url_for('leaderboards_page', page=pagination.current_page - 1, mode=mode) }}"
+            <a href="{{ url_for('leaderboards_page', page=pagination.current_page - 1, mode=mode, search=search, game_mode=game_mode) }}"
                 class="page-link">Previous</a>
             {% endif %}
 
             <form action="{{ url_for('leaderboards_page') }}" method="get" class="page-form">
                 <input type="hidden" name="mode" value="{{ mode }}">
+                {% if search %}<input type="hidden" name="search" value="{{ search }}">{% endif %}
+                {% if game_mode %}<input type="hidden" name="game_mode" value="{{ game_mode }}">{% endif %}
                 <span>Page</span>
                 <input type="number" name="page" value="{{ pagination.current_page }}" min="1"
                     max="{{ pagination.total_pages }}" class="page-input">
@@ -523,7 +532,7 @@
             </form>
 
             {% if pagination.current_page < pagination.total_pages %} <a
-                href="{{ url_for('leaderboards_page', page=pagination.current_page + 1, mode=mode) }}"
+                href="{{ url_for('leaderboards_page', page=pagination.current_page + 1, mode=mode, search=search, game_mode=game_mode) }}"
                 class="page-link">Next</a>
                 {% endif %}
         </div>
@@ -546,36 +555,23 @@
 
     <script>
         (function () {
-            let activeMode = 'all';
-            const rows = document.querySelectorAll('tbody tr');
             const searchInput = document.getElementById('nameSearch');
-            const modeBtns = document.querySelectorAll('.filter-mode-btn');
-
-            function applyFilters() {
-                const searchTerm = (searchInput ? searchInput.value : '').toLowerCase().trim();
-                rows.forEach(row => {
-                    const rowModes = (row.getAttribute('data-modes') || '').split(',');
-                    const rowName = row.getAttribute('data-name') || '';
-
-                    const modeMatch = activeMode === 'all' || rowModes.includes(activeMode);
-                    const nameMatch = !searchTerm || rowName.includes(searchTerm);
-
-                    row.classList.toggle('filtered-out', !(modeMatch && nameMatch));
-                });
-            }
-
-            modeBtns.forEach(btn => {
-                btn.addEventListener('click', () => {
-                    modeBtns.forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    activeMode = btn.getAttribute('data-filter');
-                    applyFilters();
-                });
+            if (!searchInput) return;
+            let debounceTimer;
+            searchInput.addEventListener('input', function () {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(function () {
+                    const params = new URLSearchParams(window.location.search);
+                    const val = searchInput.value.trim();
+                    if (val) {
+                        params.set('search', val);
+                    } else {
+                        params.delete('search');
+                    }
+                    params.delete('page');
+                    window.location.search = params.toString();
+                }, 500);
             });
-
-            if (searchInput) {
-                searchInput.addEventListener('input', applyFilters);
-            }
         })();
     </script>
 </body>

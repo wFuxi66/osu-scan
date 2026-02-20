@@ -271,6 +271,8 @@ def run_global_bn_duo_scan():
 def leaderboards_page():
     mode = request.args.get('mode', 'duo')
     page = request.args.get('page', 1, type=int)
+    search = request.args.get('search', '').strip()
+    game_mode = request.args.get('game_mode', '')
     per_page = 50
     data = scan_logic.load_leaderboard_results()
     
@@ -286,6 +288,21 @@ def leaderboards_page():
             full_list = data.get('host_leaderboard', [])
         else:
             full_list = data.get('leaderboard', [])
+
+        # Stamp original rank before filtering
+        for i, entry in enumerate(full_list):
+            entry['rank'] = i + 1
+
+        # Server-side filtering
+        if search:
+            search_lower = search.lower()
+            if mode == 'duo' or mode not in ['individual', 'gd', 'host']:
+                full_list = [e for e in full_list if search_lower in e.get('bn1_name','').lower() or search_lower in e.get('bn2_name','').lower()]
+            else:
+                full_list = [e for e in full_list if search_lower in e.get('username','').lower()]
+        
+        if game_mode:
+            full_list = [e for e in full_list if game_mode in e.get('modes', [])]
 
         total_entries = len(full_list)
         total_pages = (total_entries + per_page - 1) // per_page
@@ -312,7 +329,7 @@ def leaderboards_page():
     else:
         display_data = data
 
-    return render_template('leaderboards.html', data=display_data, scan_status=GLOBAL_SCAN_STATUS, pagination=pagination, mode=mode)
+    return render_template('leaderboards.html', data=display_data, scan_status=GLOBAL_SCAN_STATUS, pagination=pagination, mode=mode, search=search, game_mode=game_mode)
 
 @app.route('/bn-duos')
 @app.route('/bn-leaderboard')
