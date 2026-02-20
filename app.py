@@ -289,20 +289,26 @@ def leaderboards_page():
         else:
             full_list = data.get('leaderboard', [])
 
-        # Stamp original rank before filtering
-        for i, entry in enumerate(full_list):
-            entry['rank'] = i + 1
+        if game_mode:
+            full_list = [e for e in full_list if game_mode in e.get('modes', [])]
 
-        # Server-side filtering
+        # Stamp rank based on current list (Global or Mode-specific)
+        # We create a copy of each entry to avoid modifying the original data in cache
+        full_list_with_ranks = []
+        for i, entry in enumerate(full_list):
+            new_entry = entry.copy()
+            new_entry['rank'] = i + 1
+            full_list_with_ranks.append(new_entry)
+        
+        full_list = full_list_with_ranks
+
+        # Name search filter AFTER ranking (preserves rank in current context)
         if search:
             search_lower = search.lower()
             if mode == 'duo' or mode not in ['individual', 'gd', 'host']:
                 full_list = [e for e in full_list if search_lower in e.get('bn1_name','').lower() or search_lower in e.get('bn2_name','').lower()]
             else:
                 full_list = [e for e in full_list if search_lower in e.get('username','').lower()]
-        
-        if game_mode:
-            full_list = [e for e in full_list if game_mode in e.get('modes', [])]
 
         total_entries = len(full_list)
         total_pages = (total_entries + per_page - 1) // per_page
