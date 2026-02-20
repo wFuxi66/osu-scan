@@ -378,7 +378,7 @@ def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=
                 if progress_callback: progress_callback(f"Scanning progress: {completed}/{total} sets...")
             
             try:
-                noms, _gd_modes, _set_modes, _host_id = future.result()
+                noms, _gd_modes, _set_modes, _host_id, _host_modes = future.result()
                 all_nominations.extend(noms)
             except Exception as e:
                 print(f"Nominator scan exception: {e}")
@@ -887,7 +887,7 @@ def global_bn_duo_scan(progress_callback=None):
                 
                 bset = future_to_set[future]
                 try:
-                    noms, gd_user_modes, set_modes, mapset_host_id = future.result()
+                    noms, gd_user_modes, set_modes, mapset_host_id, host_modes = future.result()
                     scanned_ids.add(bset['id'])
                     
                     set_data = set_lookup.get(bset['id'], {})
