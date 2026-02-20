@@ -6,9 +6,6 @@ import uuid
 import os
 import scan_logic
 from flask_limiter import Limiter
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-
 load_dotenv()
 
 app = Flask(__name__)
@@ -383,18 +380,6 @@ def trigger_global_scan():
 @limiter.exempt
 def global_scan_status():
     return jsonify(GLOBAL_SCAN_STATUS)
-
-# Monthly scheduler - runs on the 1st of each month at 06:00 UTC
-scheduler = BackgroundScheduler(daemon=True)
-scheduler.add_job(
-    run_global_bn_duo_scan,
-    trigger=CronTrigger(day=1, hour=6, minute=0),
-    id='monthly_bn_duo_scan',
-    name='Monthly BN Duo Scan',
-    replace_existing=True
-)
-scheduler.start()
-print("APScheduler started - BN Duo scan scheduled for 1st of each month at 06:00 UTC")
 
 if __name__ == '__main__':
     print("Starting osu!scan...")
