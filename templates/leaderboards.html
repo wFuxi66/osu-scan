@@ -310,6 +310,88 @@
             -webkit-appearance: none;
             margin: 0;
         }
+
+        /* Mode icons */
+        .mode-icon {
+            width: 16px;
+            height: 16px;
+            vertical-align: middle;
+            margin-left: 4px;
+            opacity: 0.85;
+        }
+
+        /* Filter bar */
+        .filter-bar {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
+            padding: 12px 15px;
+            background: rgba(15, 52, 96, 0.3);
+            border-radius: 8px;
+        }
+
+        .filter-bar label {
+            font-size: 13px;
+            color: #8892b0;
+            font-weight: 500;
+        }
+
+        .filter-mode-btn {
+            background: rgba(15, 52, 96, 0.5);
+            border: 1px solid transparent;
+            border-radius: 6px;
+            padding: 5px 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            color: #8892b0;
+            font-size: 12px;
+        }
+
+        .filter-mode-btn:hover {
+            background: rgba(15, 52, 96, 0.8);
+            color: white;
+        }
+
+        .filter-mode-btn.active {
+            background: #e94560;
+            color: white;
+            border-color: #e94560;
+        }
+
+        .filter-mode-btn img {
+            width: 14px;
+            height: 14px;
+        }
+
+        .filter-search {
+            flex: 1;
+            min-width: 150px;
+            padding: 7px 12px;
+            border-radius: 6px;
+            border: 1px solid rgba(15, 52, 96, 0.5);
+            background: rgba(15, 52, 96, 0.3);
+            color: white;
+            font-size: 13px;
+        }
+
+        .filter-search:focus {
+            outline: none;
+            border-color: #e94560;
+            background: rgba(15, 52, 96, 0.6);
+        }
+
+        .filter-search::placeholder {
+            color: #555;
+        }
+
+        tr.filtered-out {
+            display: none;
+        }
     </style>
 </head>
 
@@ -325,12 +407,14 @@
 
         <div class="mode-toggle">
             <a href="{{ url_for('leaderboards_page', mode='duo') }}"
-                class="toggle-btn {% if mode == 'duo' or mode not in ['individual', 'gd'] %}active{% endif %}">Most
-                Iconic Duos</a>
+                class="toggle-btn {% if mode == 'duo' or mode not in ['individual', 'gd', 'host'] %}active{% endif %}">Most
+                Iconic BN Duos</a>
             <a href="{{ url_for('leaderboards_page', mode='individual') }}"
                 class="toggle-btn {% if mode == 'individual' %}active{% endif %}">Most Active BNs</a>
             <a href="{{ url_for('leaderboards_page', mode='gd') }}"
                 class="toggle-btn {% if mode == 'gd' %}active{% endif %}">Most Active GDers</a>
+            <a href="{{ url_for('leaderboards_page', mode='host') }}"
+                class="toggle-btn {% if mode == 'host' %}active{% endif %}">Most Active Mappers</a>
         </div>
 
         {% if data %}
@@ -341,9 +425,29 @@
             <span>{{ data.total_gders }} unique GDers</span>
             {% elif mode == 'individual' %}
             <span>{{ data.total_individuals }} unique BNs</span>
+            {% elif mode == 'host' %}
+            <span>{{ data.total_hosts }} unique mappers</span>
             {% else %}
             <span>{{ data.total_duos }} unique duos</span>
             {% endif %}
+        </div>
+
+        <div class="filter-bar">
+            <label>Filter:</label>
+            <button class="filter-mode-btn active" data-filter="all">All</button>
+            <button class="filter-mode-btn" data-filter="osu"><img
+                    src="https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67"
+                    alt="osu!"> osu!</button>
+            <button class="filter-mode-btn" data-filter="taiko"><img
+                    src="https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67"
+                    alt="taiko"> taiko</button>
+            <button class="filter-mode-btn" data-filter="fruits"><img
+                    src="https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67"
+                    alt="catch"> catch</button>
+            <button class="filter-mode-btn" data-filter="mania"><img
+                    src="https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67"
+                    alt="mania"> mania</button>
+            <input type="text" class="filter-search" id="nameSearch" placeholder="Search by name...">
         </div>
 
         <div class="table-wrapper">
@@ -359,6 +463,10 @@
                         <th>Guest Difficulty Creator</th>
                         <th>Sets with GDs</th>
                         <th>Last Ranked</th>
+                        {% elif mode == 'host' %}
+                        <th>Mapper</th>
+                        <th>Total Ranked Sets</th>
+                        <th>Last Ranked</th>
                         {% else %}
                         <th>BN 1</th>
                         <th>BN 2</th>
@@ -370,23 +478,30 @@
                 <tbody>
                     {% for entry in data.leaderboard %}
                     {% set rank = pagination.start_rank + loop.index0 %}
-                    <tr class="{% if rank <= 3 %}rank-{{ rank }}{% endif %}">
+                    {% if mode == 'duo' or mode not in ['individual', 'gd', 'host'] %}
+                    <tr class="{% if rank <= 3 %}rank-{{ rank }}{% endif %}" data-modes="{{ entry.modes|join(',') }}"
+                        data-name="{{ entry.bn1_name|lower }},{{ entry.bn2_name|lower }}">
                         <td>{{ rank }}</td>
-                        {% if mode == 'individual' %}
-                        <td>{{ entry.username }}</td>
+                        <td>{{ entry.bn1_name }}{% for m in entry.bn1_modes %}<img class="mode-icon"
+                                src="{{ {'osu':'https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67','taiko':'https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67','fruits':'https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67','mania':'https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67'}[m] }}"
+                                alt="{{ m }}" title="{{ m }}">{% endfor %}</td>
+                        <td>{{ entry.bn2_name }}{% for m in entry.bn2_modes %}<img class="mode-icon"
+                                src="{{ {'osu':'https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67','taiko':'https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67','fruits':'https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67','mania':'https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67'}[m] }}"
+                                alt="{{ m }}" title="{{ m }}">{% endfor %}</td>
                         <td style="font-weight: bold; color: #4facfe;">{{ entry.count }}</td>
                         <td>{{ entry.last_date }}</td>
-                        {% elif mode == 'gd' %}
-                        <td>{{ entry.username }}</td>
-                        <td style="font-weight: bold; color: #4facfe;">{{ entry.count }}</td>
-                        <td>{{ entry.last_date }}</td>
-                        {% else %}
-                        <td>{{ entry.bn1_name }}</td>
-                        <td>{{ entry.bn2_name }}</td>
-                        <td style="font-weight: bold; color: #4facfe;">{{ entry.count }}</td>
-                        <td>{{ entry.last_date }}</td>
-                        {% endif %}
                     </tr>
+                    {% else %}
+                    <tr class="{% if rank <= 3 %}rank-{{ rank }}{% endif %}" data-modes="{{ entry.modes|join(',') }}"
+                        data-name="{{ entry.username|lower }}">
+                        <td>{{ rank }}</td>
+                        <td>{{ entry.username }}{% for m in entry.modes %}<img class="mode-icon"
+                                src="{{ {'osu':'https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67','taiko':'https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67','fruits':'https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67','mania':'https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67'}[m] }}"
+                                alt="{{ m }}" title="{{ m }}">{% endfor %}</td>
+                        <td style="font-weight: bold; color: #4facfe;">{{ entry.count }}</td>
+                        <td>{{ entry.last_date }}</td>
+                    </tr>
+                    {% endif %}
                     {% endfor %}
                 </tbody>
             </table>
@@ -428,6 +543,41 @@
             • <a href="https://ko-fi.com/fuxi66" target="_blank" class="kofi-btn">Support ☕</a>
         </div>
     </div>
+
+    <script>
+        (function () {
+            let activeMode = 'all';
+            const rows = document.querySelectorAll('tbody tr');
+            const searchInput = document.getElementById('nameSearch');
+            const modeBtns = document.querySelectorAll('.filter-mode-btn');
+
+            function applyFilters() {
+                const searchTerm = (searchInput ? searchInput.value : '').toLowerCase().trim();
+                rows.forEach(row => {
+                    const rowModes = (row.getAttribute('data-modes') || '').split(',');
+                    const rowName = row.getAttribute('data-name') || '';
+
+                    const modeMatch = activeMode === 'all' || rowModes.includes(activeMode);
+                    const nameMatch = !searchTerm || rowName.includes(searchTerm);
+
+                    row.classList.toggle('filtered-out', !(modeMatch && nameMatch));
+                });
+            }
+
+            modeBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    modeBtns.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    activeMode = btn.getAttribute('data-filter');
+                    applyFilters();
+                });
+            });
+
+            if (searchInput) {
+                searchInput.addEventListener('input', applyFilters);
+            }
+        })();
+    </script>
 </body>
 
 </html>

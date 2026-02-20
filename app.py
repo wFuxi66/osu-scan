@@ -282,6 +282,8 @@ def leaderboards_page():
             full_list = data.get('individual_leaderboard', [])
         elif mode == 'gd':
             full_list = data.get('gd_leaderboard', [])
+        elif mode == 'host':
+            full_list = data.get('host_leaderboard', [])
         else:
             full_list = data.get('leaderboard', [])
 

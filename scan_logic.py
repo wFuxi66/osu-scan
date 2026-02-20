@@ -231,10 +231,12 @@ def analyze_sets(beatmapsets, host_id, token, progress_callback=None, cancel_eve
     return all_gds
 
 def process_nominator_set(bset, token, session=None):
-    """Deep fetches a set to find its nominators and GDers."""
+    """Deep fetches a set to find its nominators, GDers (with modes), and host."""
     headers = {'Authorization': f'Bearer {token}'}
     nominations = []
-    gd_user_ids = set()
+    gd_user_modes = {}  # {gd_uid: set of mode strings}
+    set_modes = set()   # all modes present in this set
+    mapset_host_id = None
     
     try:
         url = f'{API_BASE}/beatmapsets/{bset["id"]}'
@@ -253,20 +255,24 @@ def process_nominator_set(bset, token, session=None):
                     'date': (bset.get('ranked_date') or bset.get('last_updated')).split('T')[0]
                 })
             
-            # Extract GDers: difficulty creators who differ from mapset host
+            # Extract host, GDers, and modes
             mapset_host_id = data.get('user_id')
             if mapset_host_id:
                 for beatmap in data.get('beatmaps', []):
+                    bm_mode = beatmap.get('mode', 'osu')
+                    set_modes.add(bm_mode)
                     diff_creator = beatmap.get('user_id')
                     if diff_creator and diff_creator != mapset_host_id:
-                        gd_user_ids.add(diff_creator)
+                        if diff_creator not in gd_user_modes:
+                            gd_user_modes[diff_creator] = set()
+                        gd_user_modes[diff_creator].add(bm_mode)
         else:
             pass
             
     except Exception as e:
         print(f"Error fetching set {bset['id']}: {e}")
         
-    return nominations, gd_user_ids
+    return nominations, gd_user_modes, set_modes, mapset_host_id
             
 # Global Cache
 USER_CACHE = {}
@@ -339,8 +345,8 @@ def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=
                 if progress_callback: progress_callback(f"Scanning progress: {completed}/{total} sets...")
             
             try:
-                results = future.result()
-                all_nominations.extend(results)
+                noms, _gd_modes, _set_modes, _host_id = future.result()
+                all_nominations.extend(noms)
             except Exception as e:
                 print(f"Nominator scan exception: {e}")
             
@@ -731,6 +737,8 @@ def global_bn_duo_scan(progress_callback=None):
     pair_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
     individual_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
     gd_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
+    host_counts = defaultdict(lambda: {'count': 0, 'last_date': ''})
+    user_modes = defaultdict(set)  # {user_id: set of mode strings}
     
     # Restore existing pair counts from cache (keys are stored as "id1,id2")
     for key_str, data in cache.get('pair_counts', {}).items():
@@ -751,6 +759,17 @@ def global_bn_duo_scan(progress_callback=None):
             gd_counts[int(uid)]['count'] = data
         else:
             gd_counts[int(uid)] = data
+
+    # Restore host counts
+    for uid, data in cache.get('host_counts', {}).items():
+        if isinstance(data, int):
+            host_counts[int(uid)]['count'] = data
+        else:
+            host_counts[int(uid)] = data
+
+    # Restore user modes
+    for uid, modes in cache.get('user_modes', {}).items():
+        user_modes[int(uid)] = set(modes)
     
     if progress_callback: progress_callback(f"Cache loaded: {len(scanned_ids)} sets already scanned.")
     
@@ -789,7 +808,7 @@ def global_bn_duo_scan(progress_callback=None):
                 
                 bset = future_to_set[future]
                 try:
-                    noms, gd_user_ids = future.result()
+                    noms, gd_user_modes, set_modes, mapset_host_id = future.result()
                     scanned_ids.add(bset['id'])
                     
                     set_data = set_lookup.get(bset['id'], {})
@@ -804,6 +823,8 @@ def global_bn_duo_scan(progress_callback=None):
                             individual_counts[nid]['count'] += 1
                             if date and date > individual_counts[nid]['last_date']:
                                 individual_counts[nid]['last_date'] = date
+                            # BN modes = modes of maps they nominate
+                            user_modes[nid].update(set_modes)
 
                         if len(unique_noms) >= 2:
                             for pair in combinations(sorted(unique_noms), 2):
@@ -812,17 +833,27 @@ def global_bn_duo_scan(progress_callback=None):
                                     pair_counts[pair]['last_date'] = date
                     
                     # Count GDers (+1 per set, not per difficulty)
-                    for gd_uid in gd_user_ids:
+                    for gd_uid, gd_modes in gd_user_modes.items():
                         gd_counts[gd_uid]['count'] += 1
                         if date and date > gd_counts[gd_uid]['last_date']:
                             gd_counts[gd_uid]['last_date'] = date
+                        # GDer modes = modes of the diffs they made
+                        user_modes[gd_uid].update(gd_modes)
+                    
+                    # Count host (+1 per ranked set)
+                    if mapset_host_id:
+                        host_counts[mapset_host_id]['count'] += 1
+                        if date and date > host_counts[mapset_host_id]['last_date']:
+                            host_counts[mapset_host_id]['last_date'] = date
+                        # Host modes = all modes in the set
+                        user_modes[mapset_host_id].update(set_modes)
 
                 except Exception as e:
                     print(f"Error deep-fetching set {bset['id']}: {e}")
         
         session.close()
     
-    if not pair_counts and not individual_counts and not gd_counts:
+    if not pair_counts and not individual_counts and not gd_counts and not host_counts:
         return {'error': 'No data found'}
     
     # 5. Save cache
@@ -831,7 +862,9 @@ def global_bn_duo_scan(progress_callback=None):
         'scanned_ids': list(scanned_ids),
         'pair_counts': {f"{k[0]},{k[1]}": v for k, v in pair_counts.items()},
         'individual_counts': individual_counts,
-        'gd_counts': gd_counts
+        'gd_counts': gd_counts,
+        'host_counts': host_counts,
+        'user_modes': {str(uid): list(modes) for uid, modes in user_modes.items()}
     }
     try:
         _save_cache(cache_data)
@@ -848,6 +881,8 @@ def global_bn_duo_scan(progress_callback=None):
         all_user_ids.add(uid)
     for uid in gd_counts.keys():
         all_user_ids.add(uid)
+    for uid in host_counts.keys():
+        all_user_ids.add(uid)
     
     user_cache = resolve_users_parallel(all_user_ids, token, progress_callback)
     
@@ -863,9 +898,14 @@ def global_bn_duo_scan(progress_callback=None):
         if name1.lower() > name2.lower():
             name1, name2 = name2, name1
         
+        # Duo modes = union of both BNs' modes
+        duo_modes = sorted(user_modes.get(id1, set()) | user_modes.get(id2, set()))
         leaderboard.append({
             'bn1_name': name1,
             'bn2_name': name2,
+            'bn1_modes': sorted(user_modes.get(id1, set())),
+            'bn2_modes': sorted(user_modes.get(id2, set())),
+            'modes': duo_modes,
             'count': data['count'],
             'last_date': data['last_date']
         })
@@ -879,7 +919,8 @@ def global_bn_duo_scan(progress_callback=None):
             'username': name,
             'count': data['count'],
             'last_date': data['last_date'],
-            'user_id': uid
+            'user_id': uid,
+            'modes': sorted(user_modes.get(uid, set()))
         })
     individual_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
 
@@ -891,19 +932,35 @@ def global_bn_duo_scan(progress_callback=None):
             'username': name,
             'count': data['count'],
             'last_date': data['last_date'],
-            'user_id': uid
+            'user_id': uid,
+            'modes': sorted(user_modes.get(uid, set()))
         })
     gd_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
+
+    # Host (Most Active Mapper) leaderboard
+    host_leaderboard = []
+    for uid, data in host_counts.items():
+        name = user_cache.get(uid, f"User_{uid}")
+        host_leaderboard.append({
+            'username': name,
+            'count': data['count'],
+            'last_date': data['last_date'],
+            'user_id': uid,
+            'modes': sorted(user_modes.get(uid, set()))
+        })
+    host_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
     
     # 8. Save leaderboard JSON
     results = {
         'leaderboard': leaderboard,
         'individual_leaderboard': individual_leaderboard,
         'gd_leaderboard': gd_leaderboard,
+        'host_leaderboard': host_leaderboard,
         'total_sets_scanned': len(scanned_ids),
         'total_duos': len(leaderboard),
         'total_individuals': len(individual_leaderboard),
         'total_gders': len(gd_leaderboard),
+        'total_hosts': len(host_leaderboard),
         'updated_at': time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime()),
         'scan_duration_note': 'Monthly automated scan'
     }
@@ -912,7 +969,7 @@ def global_bn_duo_scan(progress_callback=None):
         with open(LEADERBOARD_FILE, 'w', encoding='utf-8') as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
         if progress_callback: progress_callback("Scan complete! Results saved.")
-        print(f"Leaderboard scan complete. {len(new_sets)} new sets scanned, {len(leaderboard)} duos, {len(gd_leaderboard)} GDers. Saved to {LEADERBOARD_FILE}")
+        print(f"Leaderboard scan complete. {len(new_sets)} new sets scanned, {len(leaderboard)} duos, {len(gd_leaderboard)} GDers, {len(host_leaderboard)} hosts. Saved to {LEADERBOARD_FILE}")
     except Exception as e:
         print(f"Error saving leaderboard results: {e}")
         return {'error': f'Failed to save results: {e}'}
