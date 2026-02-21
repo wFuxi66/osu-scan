@@ -23,7 +23,7 @@ def get_session():
 # Configuration constants
 API_BASE = 'https://osu.ppy.sh/api/v2'
 TOKEN_URL = 'https://osu.ppy.sh/oauth/token'
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 # User Credentials - MUST be set via environment variables
 # On Render: Set in Dashboard > Environment
@@ -601,18 +601,36 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
         # Use ranked_date or last_updated as date
         date = (bset.get('ranked_date') or bset.get('last_updated') or '').split('T')[0]
         
-        host_modes = set()
+        # Count each individual GD difficulty by this user (not just 1 per set),
+        # and track the modes the user contributed to.
+        gd_modes = set()
+        gd_count = 0
         for bm in bset.get('beatmaps', []):
-            if bm.get('user_id') == host_id:
-                host_modes.add(bm.get('mode', 'osu'))
-                
-        if not host_modes:
-            host_modes = set(['osu'])
-            
-        stats[host_id]['count'] += 1
-        stats[host_id]['modes'].update(host_modes)
-        for m in host_modes:
-            stats[host_id]['mode_counts'][m] += 1
+            mode = bm.get('mode', 'osu')
+            owners = bm.get('owners', [])
+            if owners:
+                for owner in owners:
+                    if owner['id'] == user_id:
+                        gd_count += 1
+                        gd_modes.add(mode)
+                        break
+            else:
+                if bm.get('user_id') == user_id:
+                    gd_count += 1
+                    gd_modes.add(mode)
+
+        # Fallback: if beatmap data was unavailable in the response, count 1 per set.
+        # The guest endpoint guarantees at least one GD per returned set, so we
+        # should not silently drop the set just because beatmap details are missing.
+        if gd_count == 0 and not bset.get('beatmaps'):
+            gd_count = 1
+            gd_modes = {'osu'}
+
+        if gd_count > 0:
+            stats[host_id]['count'] += gd_count
+            stats[host_id]['modes'].update(gd_modes)
+            for m in gd_modes:
+                stats[host_id]['mode_counts'][m] += 1
             
         if date and date > stats[host_id]['last_date']:
             stats[host_id]['last_date'] = date
