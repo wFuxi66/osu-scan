@@ -1088,8 +1088,9 @@ def global_bn_duo_scan(progress_callback=None):
                     failed_sets.append(bset)
 
         # 4.5. Retry failed deep-fetches once
-        if failed_sets and progress_callback:
-            progress_callback(f"Retrying {len(failed_sets)} failed deep-fetches...")
+        if failed_sets:
+            if progress_callback:
+                progress_callback(f"Retrying {len(failed_sets)} failed deep-fetches...")
             time.sleep(2)  # Wait before retry
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as retry_executor:
