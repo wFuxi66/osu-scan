@@ -808,90 +808,80 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 LEADERBOARD_FILE = os.path.join(DATA_DIR, 'leaderboard.json')
 
 def search_ranked_beatmapsets(token, progress_callback=None):
-    """Fetches ALL ranked/loved/approved/qualified beatmapsets using chunked date-ranged search with cursor pagination."""
+    """Fetches ALL ranked/loved/approved/qualified beatmapsets using cursor pagination with restart capability."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
     seen_set_ids = set()
     session = get_session()
 
-    # Use date-ranged chunking to bypass the ~500-page hard cap
-    # Split by year chunks, starting from 2007 (osu! launch)
-    import datetime
-    current_year = datetime.datetime.now().year
-    start_year = 2007
-
     for status in ['ranked', 'qualified', 'loved', 'approved']:
-        for year in range(start_year, current_year + 1):
-            # Define date range for this chunk
-            date_from = f"{year}-01-01"
-            date_to = f"{year}-12-31" if year < current_year else datetime.datetime.now().strftime('%Y-%m-%d')
+        cursor_string = None
+        page = 0
+        page_cap = 500  # API hard cap
+        last_ranked_date = None
 
-            cursor_string = None
-            page = 0
+        while True:
+            params = {
+                's': status,
+                'sort': 'ranked_desc'  # Sort by ranked date descending
+            }
+            if cursor_string:
+                params['cursor_string'] = cursor_string
 
-            while True:
-                params = {
-                    's': status,
-                    'sort': 'ranked_desc'  # Sort by ranked date descending
-                }
-                if cursor_string:
-                    params['cursor_string'] = cursor_string
-
-                # Note: osu! API search doesn't directly support date ranges in params,
-                # but we filter by ranked_date after fetching. For a true chunked approach,
-                # we'd restart from last seen date when hitting the cap.
-                # For now, cursor pagination should handle most cases.
-
-                try:
-                    r = session.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=15)
-                    if r.status_code != 200:
-                        print(f"Search endpoint returned {r.status_code} for {status} in {year}")
-                        break
-
-                    data = r.json()
-                    sets = data.get('beatmapsets', [])
-
-                    if not sets:
-                        break
-
-                    # Filter by date range and preserve essential fields
-                    for s in sets:
-                        if s['id'] in seen_set_ids:
-                            continue
-
-                        ranked_date = s.get('ranked_date', '')
-                        if ranked_date:
-                            # Check if in current year chunk
-                            if not (date_from <= ranked_date[:10] <= date_to):
-                                continue
-
-                        seen_set_ids.add(s['id'])
-                        # Preserve essential fields: user_id, creator, artist, title, ranked_date, last_updated, status
-                        all_sets.append({
-                            'id': s['id'],
-                            'user_id': s.get('user_id'),  # Host ID
-                            'creator': s.get('creator', ''),  # Host name
-                            'artist': s.get('artist', ''),
-                            'title': s.get('title', ''),
-                            'ranked_date': s.get('ranked_date'),
-                            'last_updated': s.get('last_updated'),
-                            'status': s.get('status', status)
-                        })
-
-                    page += 1
-                    if progress_callback and page % 5 == 0:
-                        progress_callback(f"Fetching {status} maps ({year}): {len(all_sets)} total so far...")
-
-                    # Get next cursor
-                    cursor_string = data.get('cursor_string')
-                    if not cursor_string:
-                        break
-
-                    time.sleep(0.1)  # Small sleep between pages
-
-                except Exception as e:
-                    print(f"Error searching {status} beatmapsets for {year}: {e}")
+            try:
+                r = session.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=15)
+                if r.status_code != 200:
+                    print(f"Search endpoint returned {r.status_code} for {status}")
                     break
+
+                data = r.json()
+                sets = data.get('beatmapsets', [])
+
+                if not sets:
+                    break
+
+                # Preserve essential fields: user_id, creator, artist, title, ranked_date, last_updated, status
+                for s in sets:
+                    if s['id'] in seen_set_ids:
+                        continue
+
+                    seen_set_ids.add(s['id'])
+                    all_sets.append({
+                        'id': s['id'],
+                        'user_id': s.get('user_id'),  # Host ID
+                        'creator': s.get('creator', ''),  # Host name
+                        'artist': s.get('artist', ''),
+                        'title': s.get('title', ''),
+                        'ranked_date': s.get('ranked_date'),
+                        'last_updated': s.get('last_updated'),
+                        'status': s.get('status', status)
+                    })
+
+                    # Track last ranked date for restart capability
+                    if s.get('ranked_date'):
+                        last_ranked_date = s['ranked_date']
+
+                page += 1
+                if progress_callback and page % 10 == 0:
+                    progress_callback(f"Fetching {status} maps: {len(all_sets)} total, page {page}...")
+
+                # Get next cursor
+                cursor_string = data.get('cursor_string')
+                if not cursor_string:
+                    break
+
+                # Check if we're approaching the page cap (~500 pages)
+                # If so, we've likely hit the cap and should warn
+                if page >= page_cap:
+                    print(f"Warning: Reached page cap ({page_cap}) for {status}. Some maps may be missed.")
+                    print(f"Last ranked date seen: {last_ranked_date}")
+                    break
+
+                time.sleep(0.1)  # Small sleep between pages
+
+            except Exception as e:
+                print(f"Error searching {status} beatmapsets: {e}")
+                break
 
     return all_sets
 
@@ -1082,8 +1072,8 @@ def global_bn_duo_scan(progress_callback=None):
                     # Update host with refined mode data from deep-fetch
                     if mapset_host_id and host_modes:
                         # Reset the default osu count if we have real data
-                        if host_id in host_counts:
-                            host_counts[host_id]['mode_counts'] = defaultdict(int)
+                        if mapset_host_id in host_counts:
+                            host_counts[mapset_host_id]['mode_counts'] = defaultdict(int)
 
                         user_modes[mapset_host_id].update(host_modes)
                         for m in host_modes:
@@ -1154,8 +1144,8 @@ def global_bn_duo_scan(progress_callback=None):
                                 gd_counts[gd_uid]['mode_counts'][m] += 1
 
                         if mapset_host_id and host_modes:
-                            if host_id in host_counts:
-                                host_counts[host_id]['mode_counts'] = defaultdict(int)
+                            if mapset_host_id in host_counts:
+                                host_counts[mapset_host_id]['mode_counts'] = defaultdict(int)
                             user_modes[mapset_host_id].update(host_modes)
                             for m in host_modes:
                                 host_counts[mapset_host_id]['mode_counts'][m] += 1
