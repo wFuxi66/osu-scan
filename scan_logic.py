@@ -110,8 +110,8 @@ def get_beatmapsets(user_id, token, cancel_event=None):
                 for s in data:
                     s['status_category'] = s_type
                     all_sets.append(s)
-                
-                offset += len(data)
+
+                offset += limit
                 time.sleep(0.1) 
             except Exception as e:
                 print(f"Error: Failed to fetch {s_type} sets: {e}")
@@ -141,15 +141,15 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
         try:
             response = session.get(url, headers=headers, params=params, timeout=15)
             if response.status_code == 404: break
-            
+
             response.raise_for_status()
             data = response.json()
-            
+
             if not data: break
-                
+
             all_sets.extend(data)
-            
-            offset += len(data)
+
+            offset += limit
             time.sleep(0.1)
         except Exception as e:
             print(f"Error: Failed to fetch nominated sets: {e}")
@@ -553,15 +553,15 @@ def get_guest_beatmapsets(user_id, token, cancel_event=None):
         try:
             response = session.get(url, headers=headers, params=params, timeout=15)
             if response.status_code == 404: break
-            
+
             response.raise_for_status()
             data = response.json()
-            
+
             if not data: break
-                
+
             all_sets.extend(data)
-            
-            offset += len(data)
+
+            offset += limit
             time.sleep(0.1)
         except Exception as e:
             print(f"Error: Failed to fetch guest sets: {e}")
