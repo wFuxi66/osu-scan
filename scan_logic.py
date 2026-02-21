@@ -310,11 +310,13 @@ def process_nominator_set(bset, token, session=None):
                             if event.get('beatmapset', {}).get('id') == bset['id']:
                                 nom_user = event.get('user', {})
                                 if nom_user and nom_user.get('id'):
+                                    mode = event.get('discussion', {}).get('beatmap', {}).get('mode', 'osu')
+                                    rulesets = mode if isinstance(mode, list) else [mode]
                                     nominations.append({
                                         'nominator_id': nom_user['id'],
                                         'set_title': f"{bset['artist']} - {bset['title']}",
                                         'date': (event.get('created_at') or bset.get('ranked_date') or bset.get('last_updated')).split('T')[0],
-                                        'rulesets': event.get('discussion', {}).get('beatmap', {}).get('mode', 'osu')
+                                        'rulesets': rulesets
                                     })
                         time.sleep(0.1)  # Small sleep after events API call
                 except Exception as e:
