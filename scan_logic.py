@@ -183,43 +183,32 @@ def process_set(bset, host_id, token):
     if not beats:
         return []
 
-    # Dedup tracker for THIS set
-    # We only want to count a mapper ONCE per set, but we collect ALL their modes.
-    mapper_data = {}
-
+    # Count each beatmap separately (no deduplication)
+    # If a user has 2 diffs in one set, they get counted as 2
     for beatmap in beats:
         owners = beatmap.get('owners', [])
         mode = beatmap.get('mode', 'osu')
-        
+        date = beatmap['last_updated'].split('T')[0]
+
         if owners:
             for owner in owners:
                 if owner['id'] != host_id:
-                    if owner['id'] not in mapper_data:
-                        mapper_data[owner['id']] = {
-                            'name': owner['username'], 
-                            'date': beatmap['last_updated'].split('T')[0], 
-                            'modes': set()
-                        }
-                    mapper_data[owner['id']]['modes'].add(mode)
+                    gds_in_set.append({
+                        'mapper_id': owner['id'],
+                        'mapper_name': owner['username'],
+                        'last_updated': date,
+                        'modes': [mode]
+                    })
         else:
             mapper_id = beatmap['user_id']
             if mapper_id != host_id:
-                if mapper_id not in mapper_data:
-                    mapper_data[mapper_id] = {
-                        'name': None, 
-                        'date': beatmap['last_updated'].split('T')[0], 
-                        'modes': set()
-                    }
-                mapper_data[mapper_id]['modes'].add(mode)
-                
-    for mid, m in mapper_data.items():
-        gds_in_set.append({
-            'mapper_id': mid,
-            'mapper_name': m['name'],
-            'last_updated': m['date'],
-            'modes': list(m['modes'])
-        })
-        
+                gds_in_set.append({
+                    'mapper_id': mapper_id,
+                    'mapper_name': None,
+                    'last_updated': date,
+                    'modes': [mode]
+                })
+
     return gds_in_set
 
 def analyze_sets(beatmapsets, host_id, token, progress_callback=None, cancel_event=None):
@@ -231,7 +220,7 @@ def analyze_sets(beatmapsets, host_id, token, progress_callback=None, cancel_eve
     if cancel_event and cancel_event.is_set(): return []
     
     # Use ThreadPool to speed up I/O
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
         # Submit all tasks
         future_to_set = {executor.submit(process_set, bset, host_id, token): bset for bset in beatmapsets}
         
@@ -337,7 +326,7 @@ def resolve_users_parallel(user_ids, token, progress_callback=None):
                 pass
             return (uid, f"User_{uid}")
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
             future_to_uid = {executor.submit(fetch_user, uid): uid for uid in missing_ids}
             
             completed = 0
@@ -373,8 +362,8 @@ def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=
     # But for safety, we can create one session per thread if we want, but sharing is usually fine for read-only.
     # Let's try sharing one session to reuse connections.
     session = get_session()
-    
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
         future_to_set = {executor.submit(process_nominator_set, bset, token, session): bset for bset in target_sets}
         
         completed = 0
@@ -590,32 +579,52 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
 
     # 2. Count hosts (user_id field in each beatmapset = the host)
     if progress_callback: progress_callback(f"Analyzing {len(sets)} GD sets...")
-    
+
     stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'modes': set(), 'mode_counts': defaultdict(int)})
     hosts_to_resolve = set()
-    
+
     for bset in sets:
         host_id = bset['user_id']
         hosts_to_resolve.add(host_id)
-        
+
         # Use ranked_date or last_updated as date
         date = (bset.get('ranked_date') or bset.get('last_updated') or '').split('T')[0]
-        
-        host_modes = set()
-        for bm in bset.get('beatmaps', []):
-            if bm.get('user_id') == host_id:
-                host_modes.add(bm.get('mode', 'osu'))
-                
-        if not host_modes:
-            host_modes = set(['osu'])
-            
-        stats[host_id]['count'] += 1
-        stats[host_id]['modes'].update(host_modes)
-        for m in host_modes:
-            stats[host_id]['mode_counts'][m] += 1
-            
-        if date and date > stats[host_id]['last_date']:
-            stats[host_id]['last_date'] = date
+
+        # Count per-difficulty, not per-set
+        beatmaps = bset.get('beatmaps', [])
+        if beatmaps:
+            for bm in beatmaps:
+                # Check if this beatmap belongs to the scanned user
+                owners = bm.get('owners', [])
+                is_user_beatmap = False
+                bm_mode = bm.get('mode', 'osu')
+
+                if owners:
+                    # Check if user_id is in owners
+                    for owner in owners:
+                        if owner['id'] == user_id:
+                            is_user_beatmap = True
+                            break
+                else:
+                    # Fallback to user_id check
+                    if bm.get('user_id') == user_id:
+                        is_user_beatmap = True
+
+                if is_user_beatmap:
+                    stats[host_id]['count'] += 1
+                    stats[host_id]['modes'].add(bm_mode)
+                    stats[host_id]['mode_counts'][bm_mode] += 1
+
+                    if date and date > stats[host_id]['last_date']:
+                        stats[host_id]['last_date'] = date
+        else:
+            # Fallback: if no beatmaps returned by API, count as 1 set
+            stats[host_id]['count'] += 1
+            stats[host_id]['modes'].add('osu')
+            stats[host_id]['mode_counts']['osu'] += 1
+
+            if date and date > stats[host_id]['last_date']:
+                stats[host_id]['last_date'] = date
             
     # 3. Resolve host names
     if progress_callback: progress_callback("Resolving host names...")
@@ -881,7 +890,7 @@ def global_bn_duo_scan(progress_callback=None):
         session = get_session()
         set_lookup = {s['id']: s for s in new_sets}
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
             future_to_set = {
                 executor.submit(process_nominator_set, s, token, session): s 
                 for s in new_sets
