@@ -1144,7 +1144,8 @@ def global_bn_duo_scan(progress_callback=None):
                                 gd_counts[gd_uid]['mode_counts'][m] += 1
 
                         if mapset_host_id and host_modes:
-                            if mapset_host_id in host_counts:
+                            # Ensure mode_counts exists for this host without discarding prior data
+                            if mapset_host_id not in host_counts or 'mode_counts' not in host_counts[mapset_host_id]:
                                 host_counts[mapset_host_id]['mode_counts'] = defaultdict(int)
                             user_modes[mapset_host_id].update(host_modes)
                             for m in host_modes:
