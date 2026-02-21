@@ -23,6 +23,7 @@ def get_session():
 # Configuration constants
 API_BASE = 'https://osu.ppy.sh/api/v2'
 TOKEN_URL = 'https://osu.ppy.sh/oauth/token'
+CACHE_VERSION = 2
 
 # User Credentials - MUST be set via environment variables
 # On Render: Set in Dashboard > Environment
@@ -110,9 +111,6 @@ def get_beatmapsets(user_id, token, cancel_event=None):
                     s['status_category'] = s_type
                     all_sets.append(s)
                 
-                if len(data) < limit:
-                    break
-                
                 offset += len(data)
                 time.sleep(0.1) 
             except Exception as e:
@@ -150,8 +148,6 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
             if not data: break
                 
             all_sets.extend(data)
-            
-            if len(data) < limit: break
             
             offset += len(data)
             time.sleep(0.1)
@@ -291,13 +287,24 @@ def process_nominator_set(bset, token, session=None):
                 for beatmap in data.get('beatmaps', []):
                     bm_mode = beatmap.get('mode', 'osu')
                     set_modes.add(bm_mode)
-                    diff_creator = beatmap.get('user_id')
-                    if diff_creator == mapset_host_id:
-                        host_modes.add(bm_mode)
-                    elif diff_creator and diff_creator != mapset_host_id:
-                        if diff_creator not in gd_user_modes:
-                            gd_user_modes[diff_creator] = set()
-                        gd_user_modes[diff_creator].add(bm_mode)
+                    owners = beatmap.get('owners', [])
+                    if owners:
+                        for owner in owners:
+                            uid = owner['id']
+                            if uid == mapset_host_id:
+                                host_modes.add(bm_mode)
+                            else:
+                                if uid not in gd_user_modes:
+                                    gd_user_modes[uid] = set()
+                                gd_user_modes[uid].add(bm_mode)
+                    else:
+                        diff_creator = beatmap.get('user_id')
+                        if diff_creator == mapset_host_id:
+                            host_modes.add(bm_mode)
+                        elif diff_creator and diff_creator != mapset_host_id:
+                            if diff_creator not in gd_user_modes:
+                                gd_user_modes[diff_creator] = set()
+                            gd_user_modes[diff_creator].add(bm_mode)
         else:
             pass
             
@@ -555,8 +562,6 @@ def get_guest_beatmapsets(user_id, token, cancel_event=None):
                 
             all_sets.extend(data)
             
-            if len(data) < limit: break
-            
             offset += len(data)
             time.sleep(0.1)
         except Exception as e:
@@ -786,15 +791,20 @@ LEADERBOARD_CACHE_FILE = os.path.join(DATA_DIR, 'leaderboard_cache.json')
 def _load_cache():
     """Loads the scan cache (scanned set IDs + raw pair counts)."""
     if not os.path.exists(LEADERBOARD_CACHE_FILE):
-        return {'scanned_ids': [], 'pair_counts': {}}
+        return {'scanned_ids': [], 'pair_counts': {}, 'cache_version': CACHE_VERSION}
     try:
         with open(LEADERBOARD_CACHE_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            cache = json.load(f)
+        if cache.get('cache_version', 1) < CACHE_VERSION:
+            print("Cache version outdated, resetting cache for a fresh scan.")
+            return {'scanned_ids': [], 'pair_counts': {}, 'cache_version': CACHE_VERSION}
+        return cache
     except Exception:
-        return {'scanned_ids': [], 'pair_counts': {}}
+        return {'scanned_ids': [], 'pair_counts': {}, 'cache_version': CACHE_VERSION}
 
 def _save_cache(cache):
     """Saves the scan cache to disk."""
+    cache['cache_version'] = CACHE_VERSION
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(LEADERBOARD_CACHE_FILE, 'w', encoding='utf-8') as f:
         json.dump(cache, f, ensure_ascii=False)
