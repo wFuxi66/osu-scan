@@ -1073,9 +1073,11 @@ def global_bn_duo_scan(progress_callback=None):
 
                     # Update host with refined mode data from deep-fetch
                     if mapset_host_id and host_modes:
-                        # Reset the default osu count if we have real data
+                        # Adjust the default osu count for this set if we have real data
                         if mapset_host_id in host_counts:
-                            host_counts[mapset_host_id]['mode_counts'] = defaultdict(int)
+                            osu_count = host_counts[mapset_host_id]['mode_counts'].get('osu')
+                            if osu_count:
+                                host_counts[mapset_host_id]['mode_counts']['osu'] = osu_count - 1
 
                         user_modes[mapset_host_id].update(host_modes)
                         for m in host_modes:
