@@ -585,6 +585,9 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
 
     for bset in sets:
         host_id = bset['user_id']
+        # Skip sets where the scanned user is also the host
+        if host_id == user_id:
+            continue
         hosts_to_resolve.add(host_id)
 
         # Use ranked_date or last_updated as date
@@ -615,10 +618,18 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
                     stats[host_id]['modes'].add(bm_mode)
                     stats[host_id]['mode_counts'][bm_mode] += 1
 
-                    if date and date > stats[host_id]['last_date']:
-                        stats[host_id]['last_date'] = date
+                    bm_date = bm.get('last_updated', date)
+                    if bm_date and bm_date > stats[host_id]['last_date']:
+                        stats[host_id]['last_date'] = bm_date
         else:
-            # Fallback: if no beatmaps returned by API, count as 1 set
+            # Fallback: if the API returns no per-difficulty `beatmaps` for this set,
+            # we conservatively count it as a single difficulty in `osu` mode.
+            # This avoids dropping the set entirely from stats, but may undercount
+            # in cases where the user created multiple difficulties in the same set.
+            # A more accurate approach would require an additional API call here to
+            # fetch full beatmapset data (similar to other code paths) and count
+            # each difficulty explicitly. We intentionally skip that here to keep
+            # this scan lightweight and accept the approximation.
             stats[host_id]['count'] += 1
             stats[host_id]['modes'].add('osu')
             stats[host_id]['mode_counts']['osu'] += 1
