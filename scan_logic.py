@@ -729,59 +729,66 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 LEADERBOARD_FILE = os.path.join(DATA_DIR, 'leaderboard.json')
 
+import datetime
+
 def search_ranked_beatmapsets(token, progress_callback=None):
-    """Fetches ALL ranked/loved beatmapsets using the search endpoint with cursor pagination."""
+    """Fetches ALL ranked/loved beatmapsets using the search endpoint with cursor pagination segmented by year."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
     session = get_session()
-    cursor_string = None
-    page = 0
     
-    for status in ['ranked', 'loved']:
-        cursor_string = None
-        page = 0
-        
-        while True:
-            params = {'s': status}
-            if cursor_string:
-                params['cursor_string'] = cursor_string
+    current_year = datetime.datetime.now().year
+    
+    for status in ['ranked', 'loved', 'approved']:
+        # Loved category didn't really exist before 2014, but starting from 2007 is safe anyway
+        for year in range(2007, current_year + 1):
+            cursor_string = None
+            page = 0
             
-            try:
-                r = session.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=15)
-                if r.status_code != 200:
-                    print(f"Search endpoint returned {r.status_code}")
-                    break
+            while True:
+                params = {
+                    's': status,
+                    'q': f'ranked>={year}-01-01 ranked<{year+1}-01-01'
+                }
+                if cursor_string:
+                    params['cursor_string'] = cursor_string
                 
-                data = r.json()
-                sets = data.get('beatmapsets', [])
+                try:
+                    r = session.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=15)
+                    if r.status_code != 200:
+                        print(f"Search endpoint returned {r.status_code} for {status} {year}")
+                        break
+                    
+                    data = r.json()
+                    sets = data.get('beatmapsets', [])
+                    
+                    if not sets:
+                        break
+                    
+                    for s in sets:
+                        all_sets.append({
+                            'id': s['id'],
+                            'artist': s.get('artist', ''),
+                            'title': s.get('title', ''),
+                            'ranked_date': s.get('ranked_date'),
+                            'last_updated': s.get('last_updated'),
+                            'status': s.get('status', status)
+                        })
+                    
+                    page += 1
+                    if progress_callback and page % 5 == 0:
+                        progress_callback(f"Fetching {status} {year} maps: {len(all_sets)} total so far...")
                 
-                if not sets:
-                    break
+                    # Get next cursor
+                    cursor_string = data.get('cursor_string')
+                    if not cursor_string:
+                        break
+                    
+                    time.sleep(0.15)  # Be gentle with rate limits
                 
-                for s in sets:
-                    all_sets.append({
-                        'id': s['id'],
-                        'artist': s.get('artist', ''),
-                        'title': s.get('title', ''),
-                        'ranked_date': s.get('ranked_date'),
-                        'last_updated': s.get('last_updated'),
-                        'status': s.get('status', status)
-                    })
-                
-                page += 1
-                if progress_callback and page % 5 == 0:
-                    progress_callback(f"Fetching {status} maps: {len(all_sets)} total so far...")
-                
-                # Get next cursor
-                cursor_string = data.get('cursor_string')
-                if not cursor_string:
-                    break
-                
-                time.sleep(0.15)  # Be gentle with rate limits
-                
-            except Exception as e:
-                print(f"Error searching {status} beatmapsets: {e}")
-                raise e
+                except Exception as e:
+                    print(f"Error searching {status} beatmapsets: {e}")
+                    raise e
     
     return all_sets
 
