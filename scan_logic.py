@@ -89,7 +89,7 @@ def get_beatmapsets(user_id, token, cancel_event=None):
     for s_type in set_types:
         if cancel_event and cancel_event.is_set(): return []
         offset = 0
-        limit = 100
+        limit = 50
         while True:
             if cancel_event and cancel_event.is_set(): return []
             params = {'limit': limit, 'offset': offset}
@@ -366,7 +366,7 @@ def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=
     # Documentation says Session is thread-safe.
     # But for safety, we can create one session per thread if we want, but sharing is usually fine for read-only.
     # Let's try sharing one session to reuse connections.
-    session = requests.Session()
+    session = get_session()
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         future_to_set = {executor.submit(process_nominator_set, bset, token, session): bset for bset in target_sets}
@@ -536,7 +536,7 @@ def get_guest_beatmapsets(user_id, token, cancel_event=None):
     session = get_session()
     
     offset = 0
-    limit = 100
+    limit = 50
     
     while True:
         if cancel_event and cancel_event.is_set(): return []
@@ -869,7 +869,7 @@ def global_bn_duo_scan(progress_callback=None):
         if progress_callback: progress_callback("No new sets to scan. Rebuilding leaderboard from cache...")
     elif len(new_sets) > 0:
         # 4. Deep-fetch only new sets
-        session = requests.Session()
+        session = get_session()
         set_lookup = {s['id']: s for s in new_sets}
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
@@ -888,6 +888,10 @@ def global_bn_duo_scan(progress_callback=None):
                 bset = future_to_set[future]
                 try:
                     noms, gd_user_modes, set_modes, mapset_host_id, host_modes = future.result()
+                    
+                    # Only mark as scanned if deep-fetch succeeded
+                    if mapset_host_id is None:
+                        continue
                     scanned_ids.add(bset['id'])
                     
                     set_data = set_lookup.get(bset['id'], {})
@@ -997,13 +1001,15 @@ def global_bn_duo_scan(progress_callback=None):
         if name1.lower() > name2.lower():
             name1, name2 = name2, name1
         
-        # Duo modes = union of both BNs' modes
-        duo_modes = sorted(user_modes.get(id1, set()) | user_modes.get(id2, set()))
+        # Duo modes = union of both BNs' nomination modes
+        bn1_nom_modes = sorted(individual_counts[id1]['mode_counts'].keys()) if id1 in individual_counts else []
+        bn2_nom_modes = sorted(individual_counts[id2]['mode_counts'].keys()) if id2 in individual_counts else []
+        duo_modes = sorted(set(bn1_nom_modes) | set(bn2_nom_modes))
         leaderboard.append({
             'bn1_name': name1,
             'bn2_name': name2,
-            'bn1_modes': sorted(user_modes.get(id1, set())),
-            'bn2_modes': sorted(user_modes.get(id2, set())),
+            'bn1_modes': bn1_nom_modes,
+            'bn2_modes': bn2_nom_modes,
             'modes': duo_modes,
             'count': data['count'],
             'last_date': data['last_date'],
@@ -1020,7 +1026,7 @@ def global_bn_duo_scan(progress_callback=None):
             'count': data['count'],
             'last_date': data['last_date'],
             'user_id': uid,
-            'modes': sorted(user_modes.get(uid, set())),
+            'modes': sorted(data.get('mode_counts', {}).keys()),
             'mode_counts': dict(data.get('mode_counts', {}))
         })
     individual_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
@@ -1034,7 +1040,7 @@ def global_bn_duo_scan(progress_callback=None):
             'count': data['count'],
             'last_date': data['last_date'],
             'user_id': uid,
-            'modes': sorted(user_modes.get(uid, set())),
+            'modes': sorted(data.get('mode_counts', {}).keys()),
             'mode_counts': dict(data.get('mode_counts', {}))
         })
     gd_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
@@ -1048,7 +1054,7 @@ def global_bn_duo_scan(progress_callback=None):
             'count': data['count'],
             'last_date': data['last_date'],
             'user_id': uid,
-            'modes': sorted(user_modes.get(uid, set())),
+            'modes': sorted(data.get('mode_counts', {}).keys()),
             'mode_counts': dict(data.get('mode_counts', {}))
         })
     host_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
