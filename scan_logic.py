@@ -160,7 +160,7 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
 import concurrent.futures
 
 def process_set(bset, host_id, token):
-    """Deep scans a single set and finds unique GDers."""
+    """Deep scans a single set and returns guest difficulties per beatmap."""
     headers = {'Authorization': f'Bearer {token}'}
     gds_in_set = []
     
@@ -183,42 +183,33 @@ def process_set(bset, host_id, token):
     if not beats:
         return []
 
-    # Dedup tracker for THIS set
-    # We only want to count a mapper ONCE per set, but we collect ALL their modes.
-    mapper_data = {}
-
     for beatmap in beats:
+        last_updated = beatmap['last_updated'].split('T')[0]
         owners = beatmap.get('owners', [])
         mode = beatmap.get('mode', 'osu')
         
         if owners:
+            seen_owner_ids = set()
             for owner in owners:
-                if owner['id'] != host_id:
-                    if owner['id'] not in mapper_data:
-                        mapper_data[owner['id']] = {
-                            'name': owner['username'], 
-                            'date': beatmap['last_updated'].split('T')[0], 
-                            'modes': set()
-                        }
-                    mapper_data[owner['id']]['modes'].add(mode)
+                owner_id = owner['id']
+                if owner_id == host_id or owner_id in seen_owner_ids:
+                    continue
+                gds_in_set.append({
+                    'mapper_id': owner_id,
+                    'mapper_name': owner['username'],
+                    'last_updated': last_updated,
+                    'modes': [mode]
+                })
+                seen_owner_ids.add(owner_id)
         else:
             mapper_id = beatmap['user_id']
             if mapper_id != host_id:
-                if mapper_id not in mapper_data:
-                    mapper_data[mapper_id] = {
-                        'name': None, 
-                        'date': beatmap['last_updated'].split('T')[0], 
-                        'modes': set()
-                    }
-                mapper_data[mapper_id]['modes'].add(mode)
-                
-    for mid, m in mapper_data.items():
-        gds_in_set.append({
-            'mapper_id': mid,
-            'mapper_name': m['name'],
-            'last_updated': m['date'],
-            'modes': list(m['modes'])
-        })
+                gds_in_set.append({
+                    'mapper_id': mapper_id,
+                    'mapper_name': None, 
+                    'last_updated': last_updated, 
+                    'modes': [mode]
+                })
         
     return gds_in_set
 
