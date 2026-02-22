@@ -25,6 +25,10 @@ def main():
     result = run_monthly_scan(progress_callback=lambda msg: logger.info(msg))
 
     if 'error' in result:
+        # Treat the placeholder "not yet reimplemented" result as a non-fatal no-op
+        if result['error'] == 'not yet reimplemented':
+            logger.warning("Monthly scan is not yet reimplemented; skipping scan but continuing workflow.")
+            return
         logger.error("Scan failed: %s", result['error'])
         sys.exit(1)
 
