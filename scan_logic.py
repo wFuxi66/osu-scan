@@ -700,6 +700,39 @@ def get_guest_beatmapsets(user_id, token, cancel_event=None):
             
     return all_sets
 
+def get_user_ranked_beatmapsets(user_id, token, cancel_event=None):
+    """Fetches ranked_and_approved beatmapsets for a user (used for host counting)."""
+    headers = {'Authorization': f'Bearer {token}'}
+    all_sets = []
+    session = get_session()
+
+    offset = 0
+    limit = 50
+
+    while True:
+        if cancel_event and cancel_event.is_set():
+            return []
+        params = {'limit': limit, 'offset': offset}
+        url = f'{API_BASE}/users/{user_id}/beatmapsets/ranked_and_approved'
+
+        try:
+            response = session.get(url, headers=headers, params=params, timeout=15)
+            if response.status_code == 404:
+                break
+            response.raise_for_status()
+            data = response.json()
+            if not data:
+                break
+            all_sets.extend(data)
+            offset += limit
+            time.sleep(0.1)
+        except Exception as e:
+            logger.error("Failed to fetch ranked sets for user %s: %s", user_id, e)
+            break
+
+    return all_sets
+
+
 def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=None, cancel_event=None):
     """New Mode: Find which mappers the user has made the most GDs for."""
     token = get_token()
@@ -943,245 +976,458 @@ def search_ranked_beatmapsets(token, statuses=None, progress_callback=None):
         session.close()
 
 
-def run_global_scan(progress_callback=None):
-    """Runs the monthly global scan across all ranked beatmapsets.
+def search_ranked_beatmapsets_since(token, since_date, statuses=None, progress_callback=None):
+    """Fetches beatmapsets ranked strictly after since_date (for incremental scans).
 
-    Returns a dict containing the four leaderboards (duo, individual BN, GD, host)
-    plus metadata, or a dict with an 'error' key on failure.
+    Paginates using ranked_desc order and stops as soon as a set's ranked_date is
+    on or before since_date, so only newly-ranked sets are returned.
+    """
+    if statuses is None:
+        statuses = ['ranked', 'approved']
+
+    headers = {'Authorization': f'Bearer {token}'}
+    session = get_session()
+    all_sets = []
+    seen_ids = set()
+    try:
+        for status in statuses:
+            if progress_callback:
+                progress_callback(f"Fetching new {status} beatmapsets since {since_date}...")
+            cursor_string = None
+            done = False
+            page_count = 0
+
+            while not done:
+                params = {'s': status, 'sort': 'ranked_desc'}
+                if cursor_string:
+                    params['cursor_string'] = cursor_string
+
+                try:
+                    r = session.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=30)
+
+                    if r.status_code == 401:
+                        refreshed = _token_manager.refresh_token()
+                        if refreshed:
+                            headers = {'Authorization': f'Bearer {refreshed}'}
+                            r = session.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=30)
+
+                    r.raise_for_status()
+                    data = r.json()
+                    beatmapsets = data.get('beatmapsets', [])
+
+                    if not beatmapsets:
+                        break
+
+                    for bset in beatmapsets:
+                        ranked_date = (bset.get('ranked_date') or '').split('T')[0]
+                        if ranked_date and ranked_date <= since_date:
+                            done = True
+                            break
+                        if bset['id'] not in seen_ids:
+                            seen_ids.add(bset['id'])
+                            all_sets.append(bset)
+
+                    if not done:
+                        page_count += 1
+                        if page_count % 5 == 0 and progress_callback:
+                            progress_callback(f"Fetched {len(all_sets)} new {status} sets so far...")
+                        cursor_string = data.get('cursor_string')
+                        if not cursor_string:
+                            break
+                        time.sleep(0.5)
+
+                except Exception as e:
+                    logger.error("Error fetching %s sets since %s (page %d): %s", status, since_date, page_count, e)
+                    raise
+
+        return all_sets
+    finally:
+        session.close()
+
+
+def fetch_all_nomination_events(token, since_date=None, progress_callback=None):
+    """Paginates /beatmapsets/events?types[]=nominate to collect nominator-per-set data.
+
+    Args:
+        token: OAuth token.
+        since_date: Optional ISO date string 'YYYY-MM-DD'. When provided only events
+            on or after this date are fetched (incremental mode).
+        progress_callback: Optional callable(str) for progress messages.
+
+    Returns:
+        (set_nominators, nominator_ids) where:
+            set_nominators – dict {set_id: [uid, ...]} of unique nominators per set
+            nominator_ids  – set of all unique nominator user IDs found
+    """
+    headers = {'Authorization': f'Bearer {token}'}
+    session = get_session()
+    set_nominators = defaultdict(list)
+    nominator_ids = set()
+    params = {'types[]': 'nominate', 'limit': 50}
+    if since_date:
+        params['min_date'] = since_date
+
+    cursor_string = None
+    page = 0
+    try:
+        while True:
+            if cursor_string:
+                params['cursor_string'] = cursor_string
+
+            try:
+                r = session.get(f'{API_BASE}/beatmapsets/events', headers=headers, params=params, timeout=20)
+
+                if r.status_code == 401:
+                    refreshed = _token_manager.refresh_token()
+                    if refreshed:
+                        headers = {'Authorization': f'Bearer {refreshed}'}
+                        r = session.get(f'{API_BASE}/beatmapsets/events', headers=headers, params=params, timeout=20)
+
+                r.raise_for_status()
+                data = r.json()
+                events = data.get('events', [])
+
+                if not events:
+                    break
+
+                for event in events:
+                    user_obj = event.get('user') or {}
+                    uid = user_obj.get('id') if isinstance(user_obj, dict) else None
+                    bset_obj = event.get('beatmapset') or {}
+                    set_id = bset_obj.get('id') if isinstance(bset_obj, dict) else None
+                    if uid and set_id:
+                        nominator_ids.add(uid)
+                        if uid not in set_nominators[set_id]:
+                            set_nominators[set_id].append(uid)
+
+                page += 1
+                if page % 20 == 0 and progress_callback:
+                    progress_callback(f"Nomination events fetched: ~{page * 50} so far...")
+
+                cursor_string = data.get('cursor_string')
+                if not cursor_string:
+                    break
+
+                time.sleep(0.3)
+
+            except Exception as e:
+                logger.error("Error fetching nomination events (page %d): %s", page, e)
+                raise
+    finally:
+        session.close()
+
+    return dict(set_nominators), nominator_ids
+
+
+def run_global_scan(progress_callback=None, scan_state=None):
+    """Runs an incremental (or full) global scan using per-user API endpoints.
+
+    On the first run (scan_state is None or empty) every ranked/approved beatmapset
+    is fetched and per-user scans are executed for all GD contributors, hosts, and BNs.
+
+    On subsequent runs only newly-ranked sets are fetched and per-user scans are run
+    only for the small number of users who appear in those new sets.  All other users'
+    counts are taken directly from the saved scan_state checkpoint, making the monthly
+    update fast while remaining accurate.
+
+    Args:
+        progress_callback: Optional callable(str) for status messages.
+        scan_state: Optional dict loaded from scan_state.json from the previous run.
+            Must contain at least 'last_ranked_date' for incremental mode to activate.
+
+    Returns:
+        dict with leaderboard data and a 'scan_state' key holding the new checkpoint.
     """
     token = get_token()
     if not token:
         return {'error': 'Authentication failed'}
 
-    if progress_callback:
-        progress_callback("Starting global scan — fetching all ranked beatmapsets...")
+    # --- Load existing checkpoint or start fresh ---
+    is_incremental = bool(scan_state and scan_state.get('last_ranked_date'))
+    last_ranked_date = (scan_state or {}).get('last_ranked_date', '')
 
-    all_sets = search_ranked_beatmapsets(token, statuses=['ranked', 'approved'], progress_callback=progress_callback)
+    # Internal dicts keyed by integer user ID; stored as string keys in JSON
+    gd_counts = {int(k): v for k, v in (scan_state or {}).get('gd_counts', {}).items()}
+    gd_modes = {int(k): v for k, v in (scan_state or {}).get('gd_modes', {}).items()}
+    gd_last_dates = {int(k): v for k, v in (scan_state or {}).get('gd_last_dates', {}).items()}
+    host_counts = {int(k): v for k, v in (scan_state or {}).get('host_counts', {}).items()}
+    host_modes = {int(k): v for k, v in (scan_state or {}).get('host_modes', {}).items()}
+    host_last_dates = {int(k): v for k, v in (scan_state or {}).get('host_last_dates', {}).items()}
+    bn_counts = {int(k): v for k, v in (scan_state or {}).get('bn_counts', {}).items()}
+    bn_modes = {int(k): v for k, v in (scan_state or {}).get('bn_modes', {}).items()}
+    bn_last_dates = {int(k): v for k, v in (scan_state or {}).get('bn_last_dates', {}).items()}
+    # bn_duos keys are "id1-id2" strings (id1 < id2)
+    bn_duos = dict((scan_state or {}).get('bn_duos', {}))
 
-    if not all_sets:
+    if is_incremental:
+        logger.info("Incremental scan — fetching sets ranked after %s", last_ranked_date)
+        if progress_callback:
+            progress_callback(f"Incremental scan — fetching sets ranked after {last_ranked_date}...")
+        all_sets = search_ranked_beatmapsets_since(
+            token, last_ranked_date, progress_callback=progress_callback
+        )
+    else:
+        logger.info("Full global scan starting")
+        if progress_callback:
+            progress_callback("Full scan — fetching all ranked/approved beatmapsets...")
+        all_sets = search_ranked_beatmapsets(
+            token, statuses=['ranked', 'approved'], progress_callback=progress_callback
+        )
+
+    if not all_sets and not is_incremental:
         return {'error': 'No beatmapsets found'}
 
-    total = len(all_sets)
+    total_new = len(all_sets)
+    logger.info("Fetched %d beatmapsets to process.", total_new)
     if progress_callback:
-        progress_callback(f"Found {total} beatmapsets. Processing nominations and GD data...")
+        progress_callback(f"Found {total_new} beatmapsets to process.")
 
-    # Per-set data collectors
-    all_nominations = []
-    gd_stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'modes': set(), 'mode_counts': defaultdict(int)})
-    host_stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'modes': set(), 'mode_counts': defaultdict(int)})
-    # Pre-populate host names from search-result creator fields to avoid extra API calls
-    host_names = {}
+    # --- Step 1: Collect host IDs and GD contributor IDs from search results ---
+    new_host_ids = set()
+    new_gd_ids = set()
+    new_last_ranked_date = last_ranked_date
+    # Cache creator names directly from search results to skip extra API calls
+    creator_names = {}
 
-    completed = 0
-    failed_sets = []
+    for bset in all_sets:
+        host_id = bset.get('user_id')
+        if host_id is not None:
+            new_host_ids.add(host_id)
+            if bset.get('creator'):
+                creator_names[host_id] = bset['creator']
 
-    def _accumulate(bset, result_tuple):
-        noms, gd_entries, _set_modes, mapset_host_id, host_modes = result_tuple
-        all_nominations.extend(noms)
-        date = (bset.get('ranked_date') or bset.get('last_updated') or '').split('T')[0]
-        # gd_entries is a list of (uid, mode) – one per diff per non-host owner
-        for uid, mode in gd_entries:
-            gd_stats[uid]['count'] += 1
-            gd_stats[uid]['modes'].add(mode)
-            gd_stats[uid]['mode_counts'][mode] += 1
-            if date and date > gd_stats[uid]['last_date']:
-                gd_stats[uid]['last_date'] = date
-        # host_modes only contains modes where the host personally mapped a diff
-        if mapset_host_id is not None:
-            host_stats[mapset_host_id]['count'] += 1
-            host_stats[mapset_host_id]['modes'].update(host_modes)
-            for m in host_modes:
-                host_stats[mapset_host_id]['mode_counts'][m] += 1
-            if date and date > host_stats[mapset_host_id]['last_date']:
-                host_stats[mapset_host_id]['last_date'] = date
-            if bset.get('user_id') == mapset_host_id and bset.get('creator'):
-                host_names[mapset_host_id] = bset['creator']
+        for bm in bset.get('beatmaps', []):
+            owners = bm.get('owners', [])
+            if owners:
+                for owner in owners:
+                    if owner['id'] != host_id:
+                        new_gd_ids.add(owner['id'])
+            else:
+                diff_creator = bm.get('user_id')
+                if diff_creator is not None and diff_creator != host_id:
+                    new_gd_ids.add(diff_creator)
 
-    # First pass — bounded in-flight concurrency
-    max_workers = 8
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        set_iter = iter(all_sets)
-        in_flight = {}
+        ranked_date = (bset.get('ranked_date') or '').split('T')[0]
+        if ranked_date and ranked_date > new_last_ranked_date:
+            new_last_ranked_date = ranked_date
 
-        for _ in range(max_workers):
-            try:
-                bset = next(set_iter)
-            except StopIteration:
-                break
-            future = executor.submit(process_nominator_set, bset)
-            in_flight[future] = bset
+    logger.info("Collected %d unique host IDs and %d GD contributor IDs from search results.",
+                len(new_host_ids), len(new_gd_ids))
 
-        while in_flight:
-            for future in concurrent.futures.as_completed(list(in_flight)):
-                bset = in_flight.pop(future)
-                completed += 1
-                if completed % 100 == 0 and progress_callback:
-                    progress_callback(f"Processing sets: {completed}/{total}...")
-                try:
-                    _accumulate(bset, future.result())
-                except Exception as e:
-                    logger.error("Error processing set %s: %s", bset['id'], e)
-                    failed_sets.append(bset)
-
-                try:
-                    next_bset = next(set_iter)
-                except StopIteration:
-                    next_bset = None
-
-                if next_bset is not None:
-                    next_future = executor.submit(process_nominator_set, next_bset)
-                    in_flight[next_future] = next_bset
-
-    # Retry failed sets with reduced concurrency
-    if failed_sets:
-        if progress_callback:
-            progress_callback(f"Retrying {len(failed_sets)} failed sets...")
-        retry_workers = 5
-        with concurrent.futures.ThreadPoolExecutor(max_workers=retry_workers) as executor:
-            retry_iter = iter(failed_sets)
-            in_flight = {}
-
-            for _ in range(retry_workers):
-                try:
-                    bset = next(retry_iter)
-                except StopIteration:
-                    break
-                future = executor.submit(process_nominator_set, bset)
-                in_flight[future] = bset
-
-            while in_flight:
-                for future in concurrent.futures.as_completed(list(in_flight)):
-                    bset = in_flight.pop(future)
-                    try:
-                        _accumulate(bset, future.result())
-                    except Exception as e:
-                        logger.error("Retry failed for set %s: %s", bset['id'], e)
-
-                    try:
-                        next_bset = next(retry_iter)
-                    except StopIteration:
-                        next_bset = None
-
-                    if next_bset is not None:
-                        next_future = executor.submit(process_nominator_set, next_bset)
-                        in_flight[next_future] = next_bset
-
-    # Log scan summary before building leaderboards
-    logger.info("Scan pass complete: %d sets processed, %d failed.", completed, len(failed_sets))
-    logger.info("GD stats: %d unique GDers found.", len(gd_stats))
-    logger.info("Host stats: %d unique hosts found.", len(host_stats))
-    logger.info("Nominations: %d total nomination events.", len(all_nominations))
-
-    # Build duo + individual leaderboards from nominations
+    # --- Step 2: Fetch nomination events ---
     if progress_callback:
-        progress_callback("Building BN leaderboards...")
+        progress_callback("Fetching nomination events...")
+    events_since = last_ranked_date if is_incremental else None
+    try:
+        set_nominators, new_nominator_ids = fetch_all_nomination_events(
+            token, since_date=events_since, progress_callback=progress_callback
+        )
+    except Exception as e:
+        logger.error("Failed to fetch nomination events: %s", e)
+        set_nominators = {}
+        new_nominator_ids = set()
 
-    duo_stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'bn1_modes': set(), 'bn2_modes': set(), 'modes': set(), 'mode_counts': defaultdict(int)})
-    individual_stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'modes': set(), 'mode_counts': defaultdict(int)})
+    logger.info("Collected %d unique nominator IDs from events.", len(new_nominator_ids))
 
-    # Group nominations by set to find co-nominators
-    set_nominations = defaultdict(list)
-    for nom in all_nominations:
-        set_nominations[nom['set_id']].append(nom)
+    # --- Step 3: Per-user scans for affected users (parallel, max 8 workers) ---
 
-    for _set_id, noms in set_nominations.items():
-        for nom in noms:
-            uid = nom['nominator_id']
-            date = nom['date']
-            rulesets = nom.get('rulesets') or ['osu']
-            individual_stats[uid]['count'] += 1
-            individual_stats[uid]['modes'].update(rulesets)
-            for r in rulesets:
-                individual_stats[uid]['mode_counts'][r] += 1
-            if date and date > individual_stats[uid]['last_date']:
-                individual_stats[uid]['last_date'] = date
-
-        # Build duo pairs from unique nominators per set
-        unique_noms = list({n['nominator_id']: n for n in noms}.values())
-        for i, nom1 in enumerate(unique_noms):
-            for nom2 in unique_noms[i + 1:]:
-                id1 = min(nom1['nominator_id'], nom2['nominator_id'])
-                id2 = max(nom1['nominator_id'], nom2['nominator_id'])
-                duo_key = (id1, id2)
-                date = max(nom1['date'], nom2['date'])
-                if nom1['nominator_id'] == id1:
-                    bn1_rulesets = nom1.get('rulesets') or ['osu']
-                    bn2_rulesets = nom2.get('rulesets') or ['osu']
+    def _scan_gd(uid):
+        tok = _token_manager.get_token()
+        sets = get_guest_beatmapsets(uid, tok)
+        count = len(sets)
+        mc = defaultdict(int)
+        last_date = ''
+        for bset in sets:
+            ranked_date = (bset.get('ranked_date') or bset.get('last_updated') or '').split('T')[0]
+            if ranked_date and ranked_date > last_date:
+                last_date = ranked_date
+            for bm in bset.get('beatmaps', []):
+                bm_mode = bm.get('mode', 'osu')
+                owners = bm.get('owners', [])
+                if owners:
+                    for owner in owners:
+                        if owner['id'] == uid:
+                            mc[bm_mode] += 1
                 else:
-                    bn1_rulesets = nom2.get('rulesets') or ['osu']
-                    bn2_rulesets = nom1.get('rulesets') or ['osu']
-                duo_stats[duo_key]['count'] += 1
-                duo_stats[duo_key]['bn1_modes'].update(bn1_rulesets)
-                duo_stats[duo_key]['bn2_modes'].update(bn2_rulesets)
-                duo_stats[duo_key]['modes'].update(bn1_rulesets + bn2_rulesets)
-                for r in bn1_rulesets + bn2_rulesets:
-                    duo_stats[duo_key]['mode_counts'][r] += 1
-                if date and date > duo_stats[duo_key]['last_date']:
-                    duo_stats[duo_key]['last_date'] = date
+                    if bm.get('user_id') == uid:
+                        mc[bm_mode] += 1
+        return count, dict(mc), last_date
 
-    # Resolve all user IDs in one batch
+    def _scan_host(uid):
+        tok = _token_manager.get_token()
+        sets = get_user_ranked_beatmapsets(uid, tok)
+        count = len(sets)
+        mc = defaultdict(int)
+        last_date = ''
+        for bset in sets:
+            ranked_date = (bset.get('ranked_date') or bset.get('last_updated') or '').split('T')[0]
+            if ranked_date and ranked_date > last_date:
+                last_date = ranked_date
+            for bm in bset.get('beatmaps', []):
+                mc[bm.get('mode', 'osu')] += 1
+        return count, dict(mc), last_date
+
+    def _scan_bn(uid):
+        tok = _token_manager.get_token()
+        sets = get_nominated_beatmapsets(uid, tok)
+        count = len(sets)
+        mc = defaultdict(int)
+        last_date = ''
+        for bset in sets:
+            ranked_date = (bset.get('ranked_date') or bset.get('last_updated') or '').split('T')[0]
+            if ranked_date and ranked_date > last_date:
+                last_date = ranked_date
+            bset_modes = {bm.get('mode', 'osu') for bm in bset.get('beatmaps', [])} or {'osu'}
+            for mode in bset_modes:
+                mc[mode] += 1
+        return count, dict(mc), last_date
+
+    def _run_parallel_scans(user_ids, scan_fn, counts_dict, modes_dict, last_dates_dict, label):
+        total_u = len(user_ids)
+        completed_u = [0]
+
+        def _worker(uid):
+            result = scan_fn(uid)
+            completed_u[0] += 1
+            if completed_u[0] % 100 == 0 and progress_callback:
+                progress_callback(f"{label}: {completed_u[0]}/{total_u}...")
+            return uid, result
+
+        if not user_ids:
+            return
+        if progress_callback:
+            progress_callback(f"Scanning {total_u} {label} users...")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(_worker, uid): uid for uid in user_ids}
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    uid, (count, mc, last_date) = future.result()
+                    counts_dict[uid] = count
+                    modes_dict[uid] = mc
+                    last_dates_dict[uid] = last_date
+                except Exception as e:
+                    uid = futures[future]
+                    logger.error("%s scan failed for user %s: %s", label, uid, e)
+
+    _run_parallel_scans(new_gd_ids, _scan_gd, gd_counts, gd_modes, gd_last_dates, "GD")
+    _run_parallel_scans(new_host_ids, _scan_host, host_counts, host_modes, host_last_dates, "host")
+    _run_parallel_scans(new_nominator_ids, _scan_bn, bn_counts, bn_modes, bn_last_dates, "BN")
+
+    # --- Step 4: Update duo counts from events ---
+    for set_id, nominators in set_nominators.items():
+        unique_noms = list(dict.fromkeys(nominators))  # deduplicate, preserve insertion order
+        for i in range(len(unique_noms)):
+            for j in range(i + 1, len(unique_noms)):
+                id1 = min(unique_noms[i], unique_noms[j])
+                id2 = max(unique_noms[i], unique_noms[j])
+                duo_key = f"{id1}-{id2}"
+                bn_duos[duo_key] = bn_duos.get(duo_key, 0) + 1
+
+    logger.info("Computed %d duo pairs total.", len(bn_duos))
+
+    # --- Step 5: Build new scan_state checkpoint ---
+    new_scan_state = {
+        'last_ranked_date': new_last_ranked_date,
+        'gd_counts': {str(k): v for k, v in gd_counts.items()},
+        'gd_modes': {str(k): v for k, v in gd_modes.items()},
+        'gd_last_dates': {str(k): v for k, v in gd_last_dates.items()},
+        'host_counts': {str(k): v for k, v in host_counts.items()},
+        'host_modes': {str(k): v for k, v in host_modes.items()},
+        'host_last_dates': {str(k): v for k, v in host_last_dates.items()},
+        'bn_counts': {str(k): v for k, v in bn_counts.items()},
+        'bn_modes': {str(k): v for k, v in bn_modes.items()},
+        'bn_last_dates': {str(k): v for k, v in bn_last_dates.items()},
+        'bn_duos': bn_duos,
+    }
+
+    # --- Step 6: Resolve usernames for all IDs in one batch ---
     if progress_callback:
         progress_callback("Resolving user names...")
 
     all_ids_to_resolve = set()
-    all_ids_to_resolve.update(individual_stats.keys())
-    all_ids_to_resolve.update(uid for key in duo_stats for uid in key)
-    all_ids_to_resolve.update(gd_stats.keys())
-    all_ids_to_resolve.update(uid for uid in host_stats if uid not in host_names)
+    all_ids_to_resolve.update(gd_counts.keys())
+    all_ids_to_resolve.update(host_counts.keys())
+    all_ids_to_resolve.update(bn_counts.keys())
+    for duo_key in bn_duos:
+        parts = duo_key.split('-')
+        if len(parts) == 2:
+            try:
+                all_ids_to_resolve.update(int(p) for p in parts)
+            except ValueError:
+                pass
 
-    user_cache = resolve_users_parallel(all_ids_to_resolve, _token_manager.get_token(), progress_callback)
-    user_cache.update(host_names)
+    # Strip IDs already known from creator_names to minimise API calls
+    ids_missing_names = all_ids_to_resolve - set(creator_names.keys())
+    user_cache = resolve_users_parallel(ids_missing_names, _token_manager.get_token(), progress_callback)
+    user_cache.update(creator_names)
 
-    # Individual BN leaderboard
-    individual_leaderboard = []
-    for uid, data in individual_stats.items():
-        individual_leaderboard.append({
-            'username': user_cache.get(uid, f"ID:{uid}"),
-            'count': data['count'],
-            'last_date': data['last_date'],
-            'modes': list(data['modes']),
-            'mode_counts': dict(data['mode_counts']),
-        })
-    individual_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
+    # --- Step 7: Build leaderboards ---
+    if progress_callback:
+        progress_callback("Building leaderboards...")
 
-    # Duo leaderboard
-    duo_leaderboard = []
-    for (id1, id2), data in duo_stats.items():
-        duo_leaderboard.append({
-            'bn1_name': user_cache.get(id1, f"ID:{id1}"),
-            'bn2_name': user_cache.get(id2, f"ID:{id2}"),
-            'count': data['count'],
-            'last_date': data['last_date'],
-            'bn1_modes': list(data['bn1_modes']),
-            'bn2_modes': list(data['bn2_modes']),
-            'modes': list(data['modes']),
-            'mode_counts': dict(data['mode_counts']),
-        })
-    duo_leaderboard.sort(key=lambda x: (-x['count'], x['bn1_name']))
-
-    # GD leaderboard
     gd_leaderboard = []
-    for uid, data in gd_stats.items():
-        gd_leaderboard.append({
-            'username': user_cache.get(uid, f"ID:{uid}"),
-            'count': data['count'],
-            'last_date': data['last_date'],
-            'modes': list(data['modes']),
-            'mode_counts': dict(data['mode_counts']),
-        })
+    for uid, count in gd_counts.items():
+        if count > 0:
+            mc = gd_modes.get(uid, {})
+            gd_leaderboard.append({
+                'username': user_cache.get(uid, f"ID:{uid}"),
+                'count': count,
+                'last_date': gd_last_dates.get(uid, ''),
+                'modes': list(mc.keys()),
+                'mode_counts': mc,
+            })
     gd_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
 
-    # Host leaderboard
     host_leaderboard = []
-    for uid, data in host_stats.items():
-        host_leaderboard.append({
-            'username': user_cache.get(uid, f"ID:{uid}"),
-            'count': data['count'],
-            'last_date': data['last_date'],
-            'modes': list(data['modes']),
-            'mode_counts': dict(data['mode_counts']),
-        })
+    for uid, count in host_counts.items():
+        if count > 0:
+            mc = host_modes.get(uid, {})
+            host_leaderboard.append({
+                'username': user_cache.get(uid, f"ID:{uid}"),
+                'count': count,
+                'last_date': host_last_dates.get(uid, ''),
+                'modes': list(mc.keys()),
+                'mode_counts': mc,
+            })
     host_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
+
+    individual_leaderboard = []
+    for uid, count in bn_counts.items():
+        if count > 0:
+            mc = bn_modes.get(uid, {})
+            individual_leaderboard.append({
+                'username': user_cache.get(uid, f"ID:{uid}"),
+                'count': count,
+                'last_date': bn_last_dates.get(uid, ''),
+                'modes': list(mc.keys()),
+                'mode_counts': mc,
+            })
+    individual_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
+
+    duo_leaderboard = []
+    for duo_key, count in bn_duos.items():
+        if count > 0:
+            parts = duo_key.split('-')
+            if len(parts) == 2:
+                try:
+                    id1, id2 = int(parts[0]), int(parts[1])
+                except ValueError:
+                    continue
+                duo_leaderboard.append({
+                    'bn1_name': user_cache.get(id1, f"ID:{id1}"),
+                    'bn2_name': user_cache.get(id2, f"ID:{id2}"),
+                    'count': count,
+                    'last_date': '',
+                    'bn1_modes': [],
+                    'bn2_modes': [],
+                    'modes': [],
+                    'mode_counts': {},
+                })
+    duo_leaderboard.sort(key=lambda x: (-x['count'], x['bn1_name']))
+
+    logger.info("Leaderboards built: %d GDers, %d hosts, %d BNs, %d duos.",
+                len(gd_leaderboard), len(host_leaderboard), len(individual_leaderboard), len(duo_leaderboard))
 
     return {
         'leaderboard': duo_leaderboard,
@@ -1189,10 +1435,11 @@ def run_global_scan(progress_callback=None):
         'gd_leaderboard': gd_leaderboard,
         'host_leaderboard': host_leaderboard,
         'updated_at': time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime()),
-        'total_sets_scanned': total,
+        'total_sets_scanned': total_new,
         'total_duos': len(duo_leaderboard),
         'total_individuals': len(individual_leaderboard),
         'total_gders': len(gd_leaderboard),
         'total_hosts': len(host_leaderboard),
+        'scan_state': new_scan_state,
     }
 

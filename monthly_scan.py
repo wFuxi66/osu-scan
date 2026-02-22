@@ -7,9 +7,23 @@ import requests
 logger = logging.getLogger(__name__)
 
 LEADERBOARD_RELEASE_URL = "https://github.com/wFuxi66/osu-scan/releases/download/latest-data/leaderboard.json"
+_SCAN_STATE_RELEASE_URL = "https://github.com/wFuxi66/osu-scan/releases/download/latest-data/scan_state.json"
 _LEADERBOARD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'leaderboard.json')
+_SCAN_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'scan_state.json')
 _remote_cache = {'data': None, 'last_fetch': 0}
 CACHE_TTL = 3600  # 1 hour
+
+
+def _load_scan_state():
+    """Loads scan_state.json from the local data directory (placed there by the workflow)."""
+    if os.path.exists(_SCAN_STATE_FILE):
+        logger.info("Loading scan state from %s", _SCAN_STATE_FILE)
+        try:
+            with open(_SCAN_STATE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error("Error loading scan state: %s", e)
+    return None
 
 
 def run_monthly_scan(progress_callback=None):
@@ -23,8 +37,14 @@ def run_monthly_scan(progress_callback=None):
         except Exception:
             logger.exception("Progress callback raised an exception.")
 
+    scan_state = _load_scan_state()
+    if scan_state:
+        logger.info("Loaded scan state (last_ranked_date=%s).", scan_state.get('last_ranked_date'))
+    else:
+        logger.info("No scan state found — performing full scan.")
+
     try:
-        result = scan_logic.run_global_scan(progress_callback=progress_callback)
+        result = scan_logic.run_global_scan(progress_callback=progress_callback, scan_state=scan_state)
     except Exception as e:
         logger.exception("Unexpected error during global scan.")
         return {'error': str(e)}
@@ -39,6 +59,10 @@ def run_monthly_scan(progress_callback=None):
 
     leaderboard_file = os.path.join(data_dir, 'leaderboard.json')
     cache_file = os.path.join(data_dir, 'leaderboard_cache.json')
+    scan_state_file = os.path.join(data_dir, 'scan_state.json')
+
+    # Extract and save the scan_state checkpoint before writing the leaderboard
+    new_scan_state = result.pop('scan_state', None)
 
     try:
         with open(leaderboard_file, 'w', encoding='utf-8') as f:
@@ -48,6 +72,11 @@ def run_monthly_scan(progress_callback=None):
         with open(cache_file, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
         logger.info("Saved cache to %s", cache_file)
+
+        if new_scan_state:
+            with open(scan_state_file, 'w', encoding='utf-8') as f:
+                json.dump(new_scan_state, f, ensure_ascii=False, indent=2)
+            logger.info("Saved scan state to %s", scan_state_file)
     except Exception as e:
         logger.error("Error saving leaderboard files: %s", e)
         return {'error': str(e)}
