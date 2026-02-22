@@ -12,8 +12,9 @@ def get_session():
     """Returns a requests Session equipped with robust retry logic."""
     session = requests.Session()
     # Retry on 429 (Rate Limit) and 5xx (Server Error)
-    retries = Retry(total=5, 
-                    backoff_factor=1, 
+    # 401 is NOT in forcelist - manual handling refreshes token and retries
+    retries = Retry(total=5,
+                    backoff_factor=1,
                     status_forcelist=[429, 500, 502, 503, 504])
     adapter = HTTPAdapter(max_retries=retries)
     session.mount('https://', adapter)
@@ -35,21 +36,49 @@ if not CLIENT_ID or not CLIENT_SECRET:
     print("WARNING: OSU_CLIENT_ID and OSU_CLIENT_SECRET environment variables not set!")
     print("The app will not work without valid osu! API credentials.")
 
+# Token Manager for long-running scans
+class TokenManager:
+    """Manages token refresh for long-running scans."""
+    def __init__(self):
+        self.token = None
+        self.expires_at = 0
+
+    def get_token(self):
+        """Get current token or refresh if expired."""
+        now = time.time()
+        if self.token and now < self.expires_at - 300:  # Refresh 5 min before expiry
+            return self.token
+
+        data = {
+            'client_id': CLIENT_ID,
+            'client_secret': CLIENT_SECRET,
+            'grant_type': 'client_credentials',
+            'scope': 'public'
+        }
+        try:
+            response = requests.post(TOKEN_URL, data=data, timeout=10)
+            response.raise_for_status()
+            result = response.json()
+            self.token = result['access_token']
+            # Tokens typically expire in 86400 seconds (24 hours)
+            self.expires_at = now + result.get('expires_in', 86400)
+            return self.token
+        except Exception as e:
+            print(f"Error authenticating: {e}")
+            return None
+
+    def refresh_token(self):
+        """Force token refresh (e.g., after 401 response)."""
+        self.token = None  # Invalidate current token
+        self.expires_at = 0
+        return self.get_token()
+
+# Global token manager instance
+_token_manager = TokenManager()
+
 def get_token():
     """Obtains a client credentials token from osu! API."""
-    data = {
-        'client_id': CLIENT_ID,
-        'client_secret': CLIENT_SECRET,
-        'grant_type': 'client_credentials',
-        'scope': 'public'
-    }
-    try:
-        response = requests.post(TOKEN_URL, data=data, timeout=10)
-        response.raise_for_status()
-        return response.json()['access_token']
-    except Exception as e:
-        print(f"Error authenticating: {e}")
-        return None
+    return _token_manager.get_token()
 
 def get_user_id(username_or_id, token):
     """Resolves a username to an ID."""
@@ -159,24 +188,40 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
 
 import concurrent.futures
 
-def process_set(bset, host_id, token):
+def process_set(bset, host_id, token=None):
     """Deep scans a single set and finds unique GDers."""
-    headers = {'Authorization': f'Bearer {token}'}
     gds_in_set = []
-    
+
     try:
-        # Full Deep Fetch
-        url = f'{API_BASE}/beatmapsets/{bset["id"]}'
-        session = get_session()
-        r = session.get(url, headers=headers, timeout=10)
-        
-        if r.status_code == 200:
-            full_set = r.json()
-        else:
+        # Full Deep Fetch - get token dynamically
+        token = _token_manager.get_token()
+        if not token:
+            print(f"Failed to get token for set {bset['id']}, using search data")
             full_set = bset
-            
+        else:
+            headers = {'Authorization': f'Bearer {token}'}
+            url = f'{API_BASE}/beatmapsets/{bset["id"]}'
+            session = get_session()
+            r = session.get(url, headers=headers, timeout=10)
+
+            # Handle 401 by refreshing token and retrying once
+            if r.status_code == 401:
+                print(f"Token expired for set {bset['id']}, refreshing...")
+                refreshed_token = _token_manager.refresh_token()
+                if refreshed_token:
+                    headers = {'Authorization': f'Bearer {refreshed_token}'}
+                    r = session.get(url, headers=headers, timeout=10)
+
+            if r.status_code == 200:
+                full_set = r.json()
+            else:
+                # Preserve essential fields from search result when deep-fetch fails
+                print(f"Deep-fetch failed for set {bset['id']} with status {r.status_code}, using search data")
+                full_set = bset
+
     except Exception as e:
         print(f"Error fetching deep set {bset['id']}: {e}")
+        # Preserve essential fields from search result
         full_set = bset
 
     beats = full_set.get('beatmaps', [])
@@ -216,50 +261,66 @@ def analyze_sets(beatmapsets, host_id, token, progress_callback=None, cancel_eve
     all_gds = []
     total = len(beatmapsets)
     if progress_callback: progress_callback(f"Deep Scanning {total} sets...")
-    
+
     if cancel_event and cancel_event.is_set(): return []
-    
-    # Use ThreadPool to speed up I/O
-    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+
+    # Use ThreadPool to speed up I/O - reduced from 15 to 8 to avoid 429 errors
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         # Submit all tasks
         future_to_set = {executor.submit(process_set, bset, host_id, token): bset for bset in beatmapsets}
-        
+
         completed = 0
         for future in concurrent.futures.as_completed(future_to_set):
             if cancel_event and cancel_event.is_set():
                 executor.shutdown(wait=False, cancel_futures=True)
                 return []
-                
+
             completed += 1
             if completed % 5 == 0:
                 if progress_callback: progress_callback(f"Scanning progress: {completed}/{total} sets...")
-            
+                time.sleep(0.05)  # Small sleep to reduce API pressure
+
             try:
                 results = future.result()
                 all_gds.extend(results)
             except Exception as e:
                 print(f"Set processing generated an exception: {e}")
-                
+
     return all_gds
 
-def process_nominator_set(bset, token, session=None):
+def process_nominator_set(bset, token=None, session=None):
     """Deep fetches a set to find its nominators, GDers (with modes), and host."""
-    headers = {'Authorization': f'Bearer {token}'}
     nominations = []
     gd_user_modes = {}  # {gd_uid: set of mode strings}
     set_modes = set()   # all modes present in this set
     mapset_host_id = None
-    
+    host_modes = set()
+
     try:
+        # Get token dynamically
+        token = _token_manager.get_token()
+        if not token:
+            print(f"Failed to get token for set {bset['id']}")
+            return nominations, gd_user_modes, set_modes, mapset_host_id, host_modes
+
+        headers = {'Authorization': f'Bearer {token}'}
         url = f'{API_BASE}/beatmapsets/{bset["id"]}'
         # Use session if provided, else standard request
         req_func = session.get if session else get_session().get
         r = req_func(url, headers=headers, timeout=20)
-        
+
+        # Handle 401 by refreshing token and retrying once
+        if r.status_code == 401:
+            print(f"Token expired for set {bset['id']}, refreshing...")
+            refreshed_token = _token_manager.refresh_token()
+            if refreshed_token:
+                headers = {'Authorization': f'Bearer {refreshed_token}'}
+                r = req_func(url, headers=headers, timeout=20)
+
         if r.status_code == 200:
             data = r.json()
             current_noms = data.get('current_nominations', [])
-            
+
             for nom in current_noms:
                 nominations.append({
                     'nominator_id': nom['user_id'],
@@ -267,10 +328,45 @@ def process_nominator_set(bset, token, session=None):
                     'date': (bset.get('ranked_date') or bset.get('last_updated')).split('T')[0],
                     'rulesets': nom.get('rulesets', [])
                 })
-            
+
+            # Fallback to events API when current_nominations is empty (historical/reset maps)
+            if not current_noms:
+                try:
+                    events_url = f'{API_BASE}/beatmapsets/events'
+                    events_params = {
+                        'types[]': 'nominate',
+                        'min_date': (bset.get('ranked_date') or bset.get('last_updated', '2007-01-01')).split('T')[0]
+                    }
+                    events_r = req_func(events_url, headers=headers, params=events_params, timeout=15)
+
+                    # Handle 401 for events API too
+                    if events_r.status_code == 401:
+                        print(f"Token expired for events API (set {bset['id']}), refreshing...")
+                        refreshed_token = _token_manager.refresh_token()
+                        if refreshed_token:
+                            headers = {'Authorization': f'Bearer {refreshed_token}'}
+                            events_r = req_func(events_url, headers=headers, params=events_params, timeout=15)
+
+                    if events_r.status_code == 200:
+                        events_data = events_r.json()
+                        for event in events_data.get('events', []):
+                            if event.get('beatmapset', {}).get('id') == bset['id']:
+                                nom_user = event.get('user', {})
+                                if nom_user and nom_user.get('id'):
+                                    mode = event.get('discussion', {}).get('beatmap', {}).get('mode', 'osu')
+                                    rulesets = mode if isinstance(mode, list) else [mode]
+                                    nominations.append({
+                                        'nominator_id': nom_user['id'],
+                                        'set_title': f"{bset['artist']} - {bset['title']}",
+                                        'date': (event.get('created_at') or bset.get('ranked_date') or bset.get('last_updated')).split('T')[0],
+                                        'rulesets': rulesets
+                                    })
+                        time.sleep(0.1)  # Small sleep after events API call
+                except Exception as e:
+                    print(f"Error fetching events for set {bset['id']}: {e}")
+
             # Extract host, GDers, and modes
             mapset_host_id = data.get('user_id')
-            host_modes = set()
             if mapset_host_id:
                 for beatmap in data.get('beatmaps', []):
                     bm_mode = beatmap.get('mode', 'osu')
@@ -295,11 +391,15 @@ def process_nominator_set(bset, token, session=None):
                             gd_user_modes[diff_creator].add(bm_mode)
         else:
             pass
-            
+
     except Exception as e:
         print(f"Error fetching set {bset['id']}: {e}")
-        
-    return nominations, gd_user_modes, set_modes, mapset_host_id, host_modes if 'host_modes' in locals() else set()
+
+    # Simplify host_modes fallback: use set_modes if host_modes is empty
+    if not host_modes:
+        host_modes = set_modes if set_modes else {'osu'}
+
+    return nominations, gd_user_modes, set_modes, mapset_host_id, host_modes
             
 # Global Cache
 USER_CACHE = {}
@@ -307,11 +407,11 @@ USER_CACHE = {}
 def resolve_users_parallel(user_ids, token, progress_callback=None):
     """Resolves a list of user IDs to usernames using threading, with caching."""
     headers = {'Authorization': f'Bearer {token}'}
-    
+
     # Identify which IDs are missing from cache
     missing_ids = [uid for uid in user_ids if uid not in USER_CACHE and uid != 0]
     total_missing = len(missing_ids)
-    
+
     if total_missing > 0:
         msg = f"Resolving {total_missing} usernames..."
         if progress_callback: progress_callback(msg)
@@ -326,36 +426,38 @@ def resolve_users_parallel(user_ids, token, progress_callback=None):
                 pass
             return (uid, f"User_{uid}")
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+        # Reduced from 15 to 8 to avoid 429 errors
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             future_to_uid = {executor.submit(fetch_user, uid): uid for uid in missing_ids}
-            
+
             completed = 0
             for future in concurrent.futures.as_completed(future_to_uid):
                 completed += 1
                 if completed % 10 == 0:
                      if progress_callback: progress_callback(f"Resolving names {completed}/{total_missing}...")
-                
+                     time.sleep(0.05)  # Small sleep to reduce API pressure
+
                 try:
                     uid, name = future.result()
                     USER_CACHE[uid] = name
                 except:
                     pass
-    
+
     # Build result from cache
     return {uid: USER_CACHE.get(uid, f"User_{uid}") for uid in user_ids if uid != 0}
 
 def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=None):
     """Fetches nominators for the provided beatmap sets using threading."""
     all_nominations = []
-    
+
     target_sets = [b for b in beatmapsets if b['status'] in ['ranked', 'loved', 'qualified', 'approved']]
     total = len(target_sets)
-    
+
     msg = f"Scanning {total} sets for Nominators..."
     if progress_callback: progress_callback(msg)
-    
+
     if cancel_event and cancel_event.is_set(): return []
-    
+
     # Create a thread-local session factory or just pass a session?
     # Actually requests.Session is not thread-safe if shared across threads heavily?
     # Documentation says Session is thread-safe.
@@ -363,21 +465,23 @@ def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=
     # Let's try sharing one session to reuse connections.
     session = get_session()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+    # Reduced from 15 to 8 to avoid 429 errors
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         future_to_set = {executor.submit(process_nominator_set, bset, token, session): bset for bset in target_sets}
-        
+
         completed = 0
         for future in concurrent.futures.as_completed(future_to_set):
             completed += 1
             if completed % 5 == 0:
                 if progress_callback: progress_callback(f"Scanning progress: {completed}/{total} sets...")
-            
+                time.sleep(0.05)  # Small sleep to reduce API pressure
+
             try:
                 noms, _gd_modes, _set_modes, _host_id, _host_modes = future.result()
                 all_nominations.extend(noms)
             except Exception as e:
                 print(f"Nominator scan exception: {e}")
-            
+
     session.close()
     return all_nominations
 
@@ -749,18 +853,23 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 LEADERBOARD_FILE = os.path.join(DATA_DIR, 'leaderboard.json')
 
 def search_ranked_beatmapsets(token, progress_callback=None):
-    """Fetches ALL ranked/loved/approved beatmapsets using search cursor pagination."""
+    """Fetches ALL ranked/loved/approved/qualified beatmapsets using cursor pagination with restart capability."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
     seen_set_ids = set()
     session = get_session()
 
-    for status in ['ranked', 'loved', 'approved']:
+    for status in ['ranked', 'qualified', 'loved', 'approved']:
         cursor_string = None
         page = 0
+        page_cap = 500  # API hard cap
+        last_ranked_date = None
 
         while True:
-            params = {'s': status}
+            params = {
+                's': status,
+                'sort': 'ranked_desc'  # Sort by ranked date descending
+            }
             if cursor_string:
                 params['cursor_string'] = cursor_string
 
@@ -776,12 +885,16 @@ def search_ranked_beatmapsets(token, progress_callback=None):
                 if not sets:
                     break
 
+                # Preserve essential fields: user_id, creator, artist, title, ranked_date, last_updated, status
                 for s in sets:
                     if s['id'] in seen_set_ids:
                         continue
+
                     seen_set_ids.add(s['id'])
                     all_sets.append({
                         'id': s['id'],
+                        'user_id': s.get('user_id'),  # Host ID
+                        'creator': s.get('creator', ''),  # Host name
                         'artist': s.get('artist', ''),
                         'title': s.get('title', ''),
                         'ranked_date': s.get('ranked_date'),
@@ -789,19 +902,32 @@ def search_ranked_beatmapsets(token, progress_callback=None):
                         'status': s.get('status', status)
                     })
 
+                    # Track last ranked date for restart capability
+                    if s.get('ranked_date'):
+                        last_ranked_date = s['ranked_date']
+
                 page += 1
-                if progress_callback and page % 5 == 0:
-                    progress_callback(f"Fetching {status} maps: {len(all_sets)} total so far...")
+                if progress_callback and page % 10 == 0:
+                    progress_callback(f"Fetching {status} maps: {len(all_sets)} total, page {page}...")
 
                 # Get next cursor
                 cursor_string = data.get('cursor_string')
                 if not cursor_string:
                     break
 
+                # Check if we're approaching the page cap (~500 pages)
+                # If so, we've likely hit the cap and should warn
+                if page >= page_cap:
+                    print(f"Warning: Reached page cap ({page_cap}) for {status}. Some maps may be missed.")
+                    print(f"Last ranked date seen: {last_ranked_date}")
+                    break
+
+                time.sleep(0.1)  # Small sleep between pages
+
             except Exception as e:
                 print(f"Error searching {status} beatmapsets: {e}")
-                raise e
-    
+                break
+
     return all_sets
 
 
@@ -897,35 +1023,57 @@ def global_bn_duo_scan(progress_callback=None):
     if len(new_sets) == 0 and pair_counts:
         if progress_callback: progress_callback("No new sets to scan. Rebuilding leaderboard from cache...")
     elif len(new_sets) > 0:
-        # 4. Deep-fetch only new sets
+        # 3.5. Count hosts directly from search results (before deep-fetch)
+        # This decouples host leaderboard from deep-fetch, avoiding missing data on failures
+        if progress_callback: progress_callback("Counting hosts from search results...")
+        for s in new_sets:
+            if s.get('user_id'):  # Host ID is directly available
+                host_id = s['user_id']
+                date = (s.get('ranked_date') or s.get('last_updated') or '').split('T')[0]
+
+                # We'll update host_counts here with basic data
+                # Mode info will be refined during deep-fetch if successful
+                host_counts[host_id]['count'] += 1
+                if date and date > host_counts[host_id]['last_date']:
+                    host_counts[host_id]['last_date'] = date
+                # Default to osu mode - will be updated during deep-fetch
+                host_counts[host_id]['mode_counts']['osu'] += 1
+                user_modes[host_id].add('osu')
+
+        # 4. Deep-fetch only new sets with retry logic
         session = get_session()
         set_lookup = {s['id']: s for s in new_sets}
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+        failed_sets = []  # Track failed deep-fetches for retry
+
+        # Reduced from 15 to 8 to avoid 429 errors
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             future_to_set = {
-                executor.submit(process_nominator_set, s, token, session): s 
+                executor.submit(process_nominator_set, s, token, session): s
                 for s in new_sets
             }
-            
+
             completed = 0
             for future in concurrent.futures.as_completed(future_to_set):
                 completed += 1
-                if completed % 100 == 0:
-                    if progress_callback: 
+                if completed % 50 == 0:
+                    if progress_callback:
                         progress_callback(f"Deep-scanning: {completed}/{len(new_sets)} new sets...")
-                
+                    time.sleep(0.1)  # Small sleep to reduce API pressure
+
                 bset = future_to_set[future]
                 try:
                     noms, gd_user_modes, set_modes, mapset_host_id, host_modes = future.result()
-                    
-                    # Only mark as scanned if deep-fetch succeeded
+
+                    # Track failed deep-fetches for retry
                     if mapset_host_id is None:
+                        failed_sets.append(bset)
                         continue
+
                     scanned_ids.add(bset['id'])
-                    
+
                     set_data = set_lookup.get(bset['id'], {})
                     date = (set_data.get('ranked_date') or set_data.get('last_updated') or '').split('T')[0]
-                    
+
                     if noms:
                         # Count individual nominations (unique per bn per set)
                         unique_noms = {n['nominator_id']: n for n in noms}
@@ -933,7 +1081,7 @@ def global_bn_duo_scan(progress_callback=None):
                             individual_counts[nid]['count'] += 1
                             if date and date > individual_counts[nid]['last_date']:
                                 individual_counts[nid]['last_date'] = date
-                            
+
                             # Mode counts
                             rulesets = n.get('rulesets', []) or ['osu']
                             for r in rulesets:
@@ -946,43 +1094,114 @@ def global_bn_duo_scan(progress_callback=None):
                                 pair_counts[pair]['count'] += 1
                                 if date and date > pair_counts[pair]['last_date']:
                                     pair_counts[pair]['last_date'] = date
-                                    
+
                                 r1 = set(n1.get('rulesets', []) or ['osu'])
                                 r2 = set(n2.get('rulesets', []) or ['osu'])
                                 shared_modes = r1 & r2
                                 if not shared_modes:
                                     shared_modes = r1 | r2
-                                    
+
                                 for r in shared_modes:
                                     pair_counts[pair]['mode_counts'][r] += 1
-                    
+
                     # Count GDers (+1 per set, not per difficulty)
                     for gd_uid, gd_modes in gd_user_modes.items():
                         gd_counts[gd_uid]['count'] += 1
                         if date and date > gd_counts[gd_uid]['last_date']:
                             gd_counts[gd_uid]['last_date'] = date
-                            
+
                         user_modes[gd_uid].update(gd_modes)
                         for m in gd_modes:
                             gd_counts[gd_uid]['mode_counts'][m] += 1
-                    
-                    # Count host (+1 per ranked set)
-                    if mapset_host_id:
-                        host_modes_set = host_modes if 'host_modes' in locals() and host_modes else set_modes
-                        if not host_modes_set:
-                            host_modes_set = {'osu'}
-                            
-                        host_counts[mapset_host_id]['count'] += 1
-                        if date and date > host_counts[mapset_host_id]['last_date']:
-                            host_counts[mapset_host_id]['last_date'] = date
-                            
-                        user_modes[mapset_host_id].update(host_modes_set)
-                        for m in host_modes_set:
+
+                    # Update host with refined mode data from deep-fetch
+                    if mapset_host_id and host_modes:
+                        # Adjust the default osu count for this set if we have real data
+                        if mapset_host_id in host_counts:
+                            osu_count = host_counts[mapset_host_id]['mode_counts'].get('osu')
+                            if osu_count:
+                                host_counts[mapset_host_id]['mode_counts']['osu'] = osu_count - 1
+
+                        user_modes[mapset_host_id].update(host_modes)
+                        for m in host_modes:
                             host_counts[mapset_host_id]['mode_counts'][m] += 1
 
                 except Exception as e:
                     print(f"Error deep-fetching set {bset['id']}: {e}")
-        
+                    failed_sets.append(bset)
+
+        # 4.5. Retry failed deep-fetches once
+        if failed_sets:
+            if progress_callback:
+                progress_callback(f"Retrying {len(failed_sets)} failed deep-fetches...")
+            time.sleep(2)  # Wait before retry
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as retry_executor:
+                retry_futures = {
+                    retry_executor.submit(process_nominator_set, s, token, session): s
+                    for s in failed_sets
+                }
+
+                retry_completed = 0
+                for future in concurrent.futures.as_completed(retry_futures):
+                    retry_completed += 1
+                    bset = retry_futures[future]
+                    try:
+                        noms, gd_user_modes, set_modes, mapset_host_id, host_modes = future.result()
+
+                        if mapset_host_id is None:
+                            continue  # Skip after retry
+
+                        scanned_ids.add(bset['id'])
+
+                        set_data = set_lookup.get(bset['id'], {})
+                        date = (set_data.get('ranked_date') or set_data.get('last_updated') or '').split('T')[0]
+
+                        # Same processing logic as above
+                        if noms:
+                            unique_noms = {n['nominator_id']: n for n in noms}
+                            for nid, n in unique_noms.items():
+                                individual_counts[nid]['count'] += 1
+                                if date and date > individual_counts[nid]['last_date']:
+                                    individual_counts[nid]['last_date'] = date
+                                rulesets = n.get('rulesets', []) or ['osu']
+                                for r in rulesets:
+                                    individual_counts[nid]['mode_counts'][r] += 1
+                                user_modes[nid].update(rulesets)
+
+                            if len(unique_noms) >= 2:
+                                for n1, n2 in combinations(sorted(unique_noms.values(), key=lambda x: x['nominator_id']), 2):
+                                    pair = (n1['nominator_id'], n2['nominator_id'])
+                                    pair_counts[pair]['count'] += 1
+                                    if date and date > pair_counts[pair]['last_date']:
+                                        pair_counts[pair]['last_date'] = date
+                                    r1 = set(n1.get('rulesets', []) or ['osu'])
+                                    r2 = set(n2.get('rulesets', []) or ['osu'])
+                                    shared_modes = r1 & r2
+                                    if not shared_modes:
+                                        shared_modes = r1 | r2
+                                    for r in shared_modes:
+                                        pair_counts[pair]['mode_counts'][r] += 1
+
+                        for gd_uid, gd_modes in gd_user_modes.items():
+                            gd_counts[gd_uid]['count'] += 1
+                            if date and date > gd_counts[gd_uid]['last_date']:
+                                gd_counts[gd_uid]['last_date'] = date
+                            user_modes[gd_uid].update(gd_modes)
+                            for m in gd_modes:
+                                gd_counts[gd_uid]['mode_counts'][m] += 1
+
+                        if mapset_host_id and host_modes:
+                            # Ensure mode_counts exists for this host without discarding prior data
+                            if mapset_host_id not in host_counts or 'mode_counts' not in host_counts[mapset_host_id]:
+                                host_counts[mapset_host_id]['mode_counts'] = defaultdict(int)
+                            user_modes[mapset_host_id].update(host_modes)
+                            for m in host_modes:
+                                host_counts[mapset_host_id]['mode_counts'][m] += 1
+
+                    except Exception as e:
+                        print(f"Retry failed for set {bset['id']}: {e}")
+
         session.close()
     
     if not pair_counts and not individual_counts and not gd_counts and not host_counts:
