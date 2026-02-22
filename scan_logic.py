@@ -1,3 +1,4 @@
+import logging
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -7,6 +8,8 @@ import json
 import concurrent.futures
 from collections import defaultdict
 from itertools import combinations
+
+logger = logging.getLogger(__name__)
 
 def get_session():
     """Returns a requests Session equipped with robust retry logic."""
@@ -33,8 +36,8 @@ CLIENT_ID = os.environ.get('OSU_CLIENT_ID')
 CLIENT_SECRET = os.environ.get('OSU_CLIENT_SECRET')
 
 if not CLIENT_ID or not CLIENT_SECRET:
-    print("WARNING: OSU_CLIENT_ID and OSU_CLIENT_SECRET environment variables not set!")
-    print("The app will not work without valid osu! API credentials.")
+    logger.warning("OSU_CLIENT_ID and OSU_CLIENT_SECRET environment variables not set!")
+    logger.warning("The app will not work without valid osu! API credentials.")
 
 # Token Manager for long-running scans
 class TokenManager:
@@ -64,7 +67,7 @@ class TokenManager:
             self.expires_at = now + result.get('expires_in', 86400)
             return self.token
         except Exception as e:
-            print(f"Error authenticating: {e}")
+            logger.error("Error authenticating: %s", e)
             return None
 
     def refresh_token(self):
@@ -143,7 +146,7 @@ def get_beatmapsets(user_id, token, cancel_event=None):
                 offset += limit
                 time.sleep(0.1) 
             except Exception as e:
-                print(f"Error: Failed to fetch {s_type} sets: {e}")
+                logger.error("Failed to fetch %s sets for user %s: %s", s_type, user_id, e)
                 raise e
                 
                 
@@ -181,7 +184,7 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
             offset += limit
             time.sleep(0.1)
         except Exception as e:
-            print(f"Error: Failed to fetch nominated sets: {e}")
+            logger.error("Failed to fetch nominated sets for user %s: %s", user_id, e)
             raise e
             
     return all_sets
@@ -196,7 +199,7 @@ def process_set(bset, host_id, token=None):
         # Full Deep Fetch - get token dynamically
         token = _token_manager.get_token()
         if not token:
-            print(f"Failed to get token for set {bset['id']}, using search data")
+            logger.warning("Failed to get token for set %s, using search data", bset['id'])
             full_set = bset
         else:
             headers = {'Authorization': f'Bearer {token}'}
@@ -206,7 +209,7 @@ def process_set(bset, host_id, token=None):
 
             # Handle 401 by refreshing token and retrying once
             if r.status_code == 401:
-                print(f"Token expired for set {bset['id']}, refreshing...")
+                logger.warning("Token expired for set %s, refreshing...", bset['id'])
                 refreshed_token = _token_manager.refresh_token()
                 if refreshed_token:
                     headers = {'Authorization': f'Bearer {refreshed_token}'}
@@ -216,11 +219,11 @@ def process_set(bset, host_id, token=None):
                 full_set = r.json()
             else:
                 # Preserve essential fields from search result when deep-fetch fails
-                print(f"Deep-fetch failed for set {bset['id']} with status {r.status_code}, using search data")
+                logger.warning("Deep-fetch failed for set %s with status %s, using search data", bset['id'], r.status_code)
                 full_set = bset
 
     except Exception as e:
-        print(f"Error fetching deep set {bset['id']}: {e}")
+        logger.error("Error fetching deep set %s: %s", bset['id'], e)
         # Preserve essential fields from search result
         full_set = bset
 
@@ -284,14 +287,22 @@ def analyze_sets(beatmapsets, host_id, token, progress_callback=None, cancel_eve
                 results = future.result()
                 all_gds.extend(results)
             except Exception as e:
-                print(f"Set processing generated an exception: {e}")
+                logger.error("Set processing generated an exception: %s", e)
 
     return all_gds
 
 def process_nominator_set(bset, token=None, session=None):
-    """Deep fetches a set to find its nominators, GDers (with modes), and host."""
+    """Deep fetches a set to find its nominators, GDers (with modes), and host.
+
+    Returns a tuple of:
+      nominations        – list of nomination dicts
+      gd_entries         – list of (uid, mode) tuples, one per diff per non-host owner
+      set_modes          – set of all modes present in the set
+      mapset_host_id     – user_id of the set host (may be None on failure)
+      host_modes         – set of modes where the host personally mapped a diff
+    """
     nominations = []
-    gd_user_modes = {}  # {gd_uid: set of mode strings}
+    gd_entries = []     # list of (uid, mode) – one entry per diff per non-host owner
     set_modes = set()   # all modes present in this set
     mapset_host_id = None
     host_modes = set()
@@ -301,8 +312,8 @@ def process_nominator_set(bset, token=None, session=None):
         # Get token dynamically
         token = _token_manager.get_token()
         if not token:
-            print(f"Failed to get token for set {bset['id']}")
-            return nominations, gd_user_modes, set_modes, mapset_host_id, host_modes
+            logger.warning("Failed to get token for set %s", bset['id'])
+            return nominations, gd_entries, set_modes, mapset_host_id, host_modes
 
         headers = {'Authorization': f'Bearer {token}'}
         url = f'{API_BASE}/beatmapsets/{bset["id"]}'
@@ -310,7 +321,7 @@ def process_nominator_set(bset, token=None, session=None):
 
         # Handle 401 by refreshing token and retrying once
         if r.status_code == 401:
-            print(f"Token expired for set {bset['id']}, refreshing...")
+            logger.warning("Token expired for set %s, refreshing...", bset['id'])
             refreshed_token = _token_manager.refresh_token()
             if refreshed_token:
                 headers = {'Authorization': f'Bearer {refreshed_token}'}
@@ -341,7 +352,7 @@ def process_nominator_set(bset, token=None, session=None):
 
                     # Handle 401 for events API too
                     if events_r.status_code == 401:
-                        print(f"Token expired for events API (set {bset['id']}), refreshing...")
+                        logger.warning("Token expired for events API (set %s), refreshing...", bset['id'])
                         refreshed_token = _token_manager.refresh_token()
                         if refreshed_token:
                             headers = {'Authorization': f'Bearer {refreshed_token}'}
@@ -364,45 +375,69 @@ def process_nominator_set(bset, token=None, session=None):
                                     })
                         time.sleep(0.1)  # Small sleep after events API call
                 except Exception as e:
-                    print(f"Error fetching events for set {bset['id']}: {e}")
+                    logger.error("Error fetching events for set %s: %s", bset['id'], e)
 
             # Extract host, GDers, and modes
             mapset_host_id = data.get('user_id')
-            if mapset_host_id:
-                for beatmap in data.get('beatmaps', []):
+            # Use `is not None` so user_id=0 (deleted account) still triggers processing
+            if mapset_host_id is not None:
+                beatmaps = data.get('beatmaps', [])
+                _debug = logger.isEnabledFor(logging.DEBUG)
+                if _debug:
+                    logger.debug("Set %s (%s - %s): %d diffs, host_id=%s",
+                                 bset['id'], bset.get('artist', ''), bset.get('title', ''),
+                                 len(beatmaps), mapset_host_id)
+                for beatmap in beatmaps:
                     bm_mode = beatmap.get('mode', 'osu')
+                    bm_id = beatmap.get('id', '?') if _debug else None
                     set_modes.add(bm_mode)
                     owners = beatmap.get('owners', [])
                     if owners:
+                        # Collab diff: attribute each owner individually
                         for owner in owners:
                             uid = owner['id']
                             if uid == mapset_host_id:
                                 host_modes.add(bm_mode)
+                                if _debug:
+                                    logger.debug("  diff %s [%s]: host %s", bm_id, bm_mode, uid)
                             else:
-                                if uid not in gd_user_modes:
-                                    gd_user_modes[uid] = set()
-                                gd_user_modes[uid].add(bm_mode)
+                                gd_entries.append((uid, bm_mode))
+                                if _debug:
+                                    logger.debug("  diff %s [%s]: GD owner %s (via owners field)", bm_id, bm_mode, uid)
                     else:
+                        # Single creator: fall back to user_id field
                         diff_creator = beatmap.get('user_id')
                         if diff_creator == mapset_host_id:
                             host_modes.add(bm_mode)
-                        elif diff_creator and diff_creator != mapset_host_id:
-                            if diff_creator not in gd_user_modes:
-                                gd_user_modes[diff_creator] = set()
-                            gd_user_modes[diff_creator].add(bm_mode)
+                            if _debug:
+                                logger.debug("  diff %s [%s]: host %s (via user_id)", bm_id, bm_mode, diff_creator)
+                        elif diff_creator is not None and diff_creator != mapset_host_id:
+                            gd_entries.append((diff_creator, bm_mode))
+                            if _debug:
+                                logger.debug("  diff %s [%s]: GD creator %s (via user_id)", bm_id, bm_mode, diff_creator)
+                        elif _debug:
+                            logger.debug("  diff %s [%s]: no creator info (user_id=%s)", bm_id, bm_mode, diff_creator)
+
+                # Log at INFO if GDs or noms were found (useful for diagnosis), else DEBUG
+                if gd_entries or nominations:
+                    logger.info("Set %s: %d GD diffs, %d nominations, host_modes=%s",
+                                bset['id'], len(gd_entries), len(nominations), host_modes)
+                else:
+                    logger.debug("Set %s: no GDs or nominations found", bset['id'])
+            else:
+                logger.warning("Set %s has no user_id in API response; skipping diff attribution.", bset['id'])
         else:
-            pass
+            logger.warning("Deep-fetch failed for set %s with status %s", bset['id'], r.status_code)
 
     except Exception as e:
-        print(f"Error fetching set {bset['id']}: {e}")
+        logger.error("Error fetching set %s: %s", bset['id'], e)
     finally:
         local_session.close()
 
-    # Simplify host_modes fallback: use set_modes if host_modes is empty
-    if not host_modes:
-        host_modes = set_modes if set_modes else {'osu'}
+    # NOTE: host_modes intentionally left empty when the host has no personal diffs.
+    # A host who only gathered GDs should not be credited for those modes.
 
-    return nominations, gd_user_modes, set_modes, mapset_host_id, host_modes
+    return nominations, gd_entries, set_modes, mapset_host_id, host_modes
             
 # Global Cache
 USER_CACHE = {}
@@ -480,10 +515,10 @@ def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=
                 time.sleep(0.05)  # Small sleep to reduce API pressure
 
             try:
-                noms, _gd_modes, _set_modes, _host_id, _host_modes = future.result()
+                noms, _gd_entries, _set_modes, _host_id, _host_modes = future.result()
                 all_nominations.extend(noms)
             except Exception as e:
-                print(f"Nominator scan exception: {e}")
+                logger.error("Nominator scan exception: %s", e)
 
     session.close()
     return all_nominations
@@ -660,7 +695,7 @@ def get_guest_beatmapsets(user_id, token, cancel_event=None):
             offset += limit
             time.sleep(0.1)
         except Exception as e:
-            print(f"Error: Failed to fetch guest sets: {e}")
+            logger.error("Failed to fetch guest sets for user %s: %s", user_id, e)
             raise e
             
     return all_sets
@@ -900,7 +935,7 @@ def search_ranked_beatmapsets(token, statuses=None, progress_callback=None):
                     time.sleep(0.5)
 
                 except Exception as e:
-                    print(f"Error searching {status} beatmapsets (page {page_count}): {e}")
+                    logger.error("Error searching %s beatmapsets (page %d): %s", status, page_count, e)
                     raise
 
         return all_sets
@@ -941,17 +976,18 @@ def run_global_scan(progress_callback=None):
     failed_sets = []
 
     def _accumulate(bset, result_tuple):
-        noms, gd_user_modes, _set_modes, mapset_host_id, host_modes = result_tuple
+        noms, gd_entries, _set_modes, mapset_host_id, host_modes = result_tuple
         all_nominations.extend(noms)
         date = (bset.get('ranked_date') or bset.get('last_updated') or '').split('T')[0]
-        for uid, modes in gd_user_modes.items():
+        # gd_entries is a list of (uid, mode) – one per diff per non-host owner
+        for uid, mode in gd_entries:
             gd_stats[uid]['count'] += 1
-            gd_stats[uid]['modes'].update(modes)
-            for m in modes:
-                gd_stats[uid]['mode_counts'][m] += 1
+            gd_stats[uid]['modes'].add(mode)
+            gd_stats[uid]['mode_counts'][mode] += 1
             if date and date > gd_stats[uid]['last_date']:
                 gd_stats[uid]['last_date'] = date
-        if mapset_host_id:
+        # host_modes only contains modes where the host personally mapped a diff
+        if mapset_host_id is not None:
             host_stats[mapset_host_id]['count'] += 1
             host_stats[mapset_host_id]['modes'].update(host_modes)
             for m in host_modes:
@@ -984,7 +1020,7 @@ def run_global_scan(progress_callback=None):
                 try:
                     _accumulate(bset, future.result())
                 except Exception as e:
-                    print(f"Error processing set {bset['id']}: {e}")
+                    logger.error("Error processing set %s: %s", bset['id'], e)
                     failed_sets.append(bset)
 
                 try:
@@ -1019,7 +1055,7 @@ def run_global_scan(progress_callback=None):
                     try:
                         _accumulate(bset, future.result())
                     except Exception as e:
-                        print(f"Retry failed for set {bset['id']}: {e}")
+                        logger.error("Retry failed for set %s: %s", bset['id'], e)
 
                     try:
                         next_bset = next(retry_iter)
@@ -1029,6 +1065,12 @@ def run_global_scan(progress_callback=None):
                     if next_bset is not None:
                         next_future = executor.submit(process_nominator_set, next_bset)
                         in_flight[next_future] = next_bset
+
+    # Log scan summary before building leaderboards
+    logger.info("Scan pass complete: %d sets processed, %d failed.", completed, len(failed_sets))
+    logger.info("GD stats: %d unique GDers found.", len(gd_stats))
+    logger.info("Host stats: %d unique hosts found.", len(host_stats))
+    logger.info("Nominations: %d total nomination events.", len(all_nominations))
 
     # Build duo + individual leaderboards from nominations
     if progress_callback:
