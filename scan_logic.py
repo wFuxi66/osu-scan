@@ -296,6 +296,7 @@ def process_nominator_set(bset, token=None, session=None):
     mapset_host_id = None
     host_modes = set()
 
+    local_session = get_session()
     try:
         # Get token dynamically
         token = _token_manager.get_token()
@@ -305,9 +306,7 @@ def process_nominator_set(bset, token=None, session=None):
 
         headers = {'Authorization': f'Bearer {token}'}
         url = f'{API_BASE}/beatmapsets/{bset["id"]}'
-        # Use session if provided, else standard request
-        req_func = session.get if session else get_session().get
-        r = req_func(url, headers=headers, timeout=20)
+        r = local_session.get(url, headers=headers, timeout=20)
 
         # Handle 401 by refreshing token and retrying once
         if r.status_code == 401:
@@ -315,7 +314,7 @@ def process_nominator_set(bset, token=None, session=None):
             refreshed_token = _token_manager.refresh_token()
             if refreshed_token:
                 headers = {'Authorization': f'Bearer {refreshed_token}'}
-                r = req_func(url, headers=headers, timeout=20)
+                r = local_session.get(url, headers=headers, timeout=20)
 
         if r.status_code == 200:
             data = r.json()
@@ -324,6 +323,7 @@ def process_nominator_set(bset, token=None, session=None):
             for nom in current_noms:
                 nominations.append({
                     'nominator_id': nom['user_id'],
+                    'set_id': bset['id'],
                     'set_title': f"{bset['artist']} - {bset['title']}",
                     'date': (bset.get('ranked_date') or bset.get('last_updated')).split('T')[0],
                     'rulesets': nom.get('rulesets', [])
@@ -337,7 +337,7 @@ def process_nominator_set(bset, token=None, session=None):
                         'types[]': 'nominate',
                         'min_date': (bset.get('ranked_date') or bset.get('last_updated', '2007-01-01')).split('T')[0]
                     }
-                    events_r = req_func(events_url, headers=headers, params=events_params, timeout=15)
+                    events_r = local_session.get(events_url, headers=headers, params=events_params, timeout=15)
 
                     # Handle 401 for events API too
                     if events_r.status_code == 401:
@@ -345,7 +345,7 @@ def process_nominator_set(bset, token=None, session=None):
                         refreshed_token = _token_manager.refresh_token()
                         if refreshed_token:
                             headers = {'Authorization': f'Bearer {refreshed_token}'}
-                            events_r = req_func(events_url, headers=headers, params=events_params, timeout=15)
+                            events_r = local_session.get(events_url, headers=headers, params=events_params, timeout=15)
 
                     if events_r.status_code == 200:
                         events_data = events_r.json()
@@ -357,6 +357,7 @@ def process_nominator_set(bset, token=None, session=None):
                                     rulesets = mode if isinstance(mode, list) else [mode]
                                     nominations.append({
                                         'nominator_id': nom_user['id'],
+                                        'set_id': bset['id'],
                                         'set_title': f"{bset['artist']} - {bset['title']}",
                                         'date': (event.get('created_at') or bset.get('ranked_date') or bset.get('last_updated')).split('T')[0],
                                         'rulesets': rulesets
@@ -394,6 +395,8 @@ def process_nominator_set(bset, token=None, session=None):
 
     except Exception as e:
         print(f"Error fetching set {bset['id']}: {e}")
+    finally:
+        local_session.close()
 
     # Simplify host_modes fallback: use set_modes if host_modes is empty
     if not host_modes:
@@ -853,54 +856,56 @@ def search_ranked_beatmapsets(token, statuses=None, progress_callback=None):
     session = get_session()
     all_sets = []
     seen_ids = set()
+    try:
+        for status in statuses:
+            if progress_callback:
+                progress_callback(f"Fetching {status} beatmapsets...")
+            cursor_string = None
+            page_count = 0
 
-    for status in statuses:
-        if progress_callback:
-            progress_callback(f"Fetching {status} beatmapsets...")
-        cursor_string = None
-        page_count = 0
+            while True:
+                params = {'s': status, 'sort': 'ranked_asc'}
+                if cursor_string:
+                    params['cursor_string'] = cursor_string
 
-        while True:
-            params = {'s': status, 'sort': 'ranked_asc'}
-            if cursor_string:
-                params['cursor_string'] = cursor_string
+                try:
+                    r = session.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=30)
 
-            try:
-                r = session.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=30)
+                    if r.status_code == 401:
+                        refreshed = _token_manager.refresh_token()
+                        if refreshed:
+                            headers = {'Authorization': f'Bearer {refreshed}'}
+                            r = session.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=30)
 
-                if r.status_code == 401:
-                    refreshed = _token_manager.refresh_token()
-                    if refreshed:
-                        headers = {'Authorization': f'Bearer {refreshed}'}
-                        r = session.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=30)
+                    r.raise_for_status()
+                    data = r.json()
+                    beatmapsets = data.get('beatmapsets', [])
 
-                r.raise_for_status()
-                data = r.json()
-                beatmapsets = data.get('beatmapsets', [])
+                    if not beatmapsets:
+                        break
 
-                if not beatmapsets:
-                    break
+                    for bset in beatmapsets:
+                        if bset['id'] not in seen_ids:
+                            seen_ids.add(bset['id'])
+                            all_sets.append(bset)
 
-                for bset in beatmapsets:
-                    if bset['id'] not in seen_ids:
-                        seen_ids.add(bset['id'])
-                        all_sets.append(bset)
+                    page_count += 1
+                    if page_count % 10 == 0 and progress_callback:
+                        progress_callback(f"Fetched {len(all_sets)} {status} sets so far...")
 
-                page_count += 1
-                if page_count % 10 == 0 and progress_callback:
-                    progress_callback(f"Fetched {len(all_sets)} {status} sets so far...")
+                    cursor_string = data.get('cursor_string')
+                    if not cursor_string:
+                        break
 
-                cursor_string = data.get('cursor_string')
-                if not cursor_string:
-                    break
+                    time.sleep(0.5)
 
-                time.sleep(0.5)
+                except Exception as e:
+                    print(f"Error searching {status} beatmapsets (page {page_count}): {e}")
+                    raise
 
-            except Exception as e:
-                print(f"Error searching {status} beatmapsets (page {page_count}): {e}")
-                break
-
-    return all_sets
+        return all_sets
+    finally:
+        session.close()
 
 
 def run_global_scan(progress_callback=None):
@@ -932,7 +937,6 @@ def run_global_scan(progress_callback=None):
     # Pre-populate host names from search-result creator fields to avoid extra API calls
     host_names = {}
 
-    session = get_session()
     completed = 0
     failed_sets = []
 
@@ -957,37 +961,74 @@ def run_global_scan(progress_callback=None):
             if bset.get('user_id') == mapset_host_id and bset.get('creator'):
                 host_names[mapset_host_id] = bset['creator']
 
-    # First pass — full concurrency
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-        future_to_set = {executor.submit(process_nominator_set, bset, token, session): bset for bset in all_sets}
+    # First pass — bounded in-flight concurrency
+    max_workers = 8
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        set_iter = iter(all_sets)
+        in_flight = {}
 
-        for future in concurrent.futures.as_completed(future_to_set):
-            bset = future_to_set[future]
-            completed += 1
-            if completed % 100 == 0 and progress_callback:
-                progress_callback(f"Processing sets: {completed}/{total}...")
+        for _ in range(max_workers):
             try:
-                _accumulate(bset, future.result())
-            except Exception as e:
-                print(f"Error processing set {bset['id']}: {e}")
-                failed_sets.append(bset)
+                bset = next(set_iter)
+            except StopIteration:
+                break
+            future = executor.submit(process_nominator_set, bset)
+            in_flight[future] = bset
 
-    session.close()
+        while in_flight:
+            for future in concurrent.futures.as_completed(list(in_flight)):
+                bset = in_flight.pop(future)
+                completed += 1
+                if completed % 100 == 0 and progress_callback:
+                    progress_callback(f"Processing sets: {completed}/{total}...")
+                try:
+                    _accumulate(bset, future.result())
+                except Exception as e:
+                    print(f"Error processing set {bset['id']}: {e}")
+                    failed_sets.append(bset)
+
+                try:
+                    next_bset = next(set_iter)
+                except StopIteration:
+                    next_bset = None
+
+                if next_bset is not None:
+                    next_future = executor.submit(process_nominator_set, next_bset)
+                    in_flight[next_future] = next_bset
 
     # Retry failed sets with reduced concurrency
     if failed_sets:
         if progress_callback:
             progress_callback(f"Retrying {len(failed_sets)} failed sets...")
-        session2 = get_session()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_set = {executor.submit(process_nominator_set, bset, token, session2): bset for bset in failed_sets}
-            for future in concurrent.futures.as_completed(future_to_set):
-                bset = future_to_set[future]
+        retry_workers = 5
+        with concurrent.futures.ThreadPoolExecutor(max_workers=retry_workers) as executor:
+            retry_iter = iter(failed_sets)
+            in_flight = {}
+
+            for _ in range(retry_workers):
                 try:
-                    _accumulate(bset, future.result())
-                except Exception as e:
-                    print(f"Retry failed for set {bset['id']}: {e}")
-        session2.close()
+                    bset = next(retry_iter)
+                except StopIteration:
+                    break
+                future = executor.submit(process_nominator_set, bset)
+                in_flight[future] = bset
+
+            while in_flight:
+                for future in concurrent.futures.as_completed(list(in_flight)):
+                    bset = in_flight.pop(future)
+                    try:
+                        _accumulate(bset, future.result())
+                    except Exception as e:
+                        print(f"Retry failed for set {bset['id']}: {e}")
+
+                    try:
+                        next_bset = next(retry_iter)
+                    except StopIteration:
+                        next_bset = None
+
+                    if next_bset is not None:
+                        next_future = executor.submit(process_nominator_set, next_bset)
+                        in_flight[next_future] = next_bset
 
     # Build duo + individual leaderboards from nominations
     if progress_callback:
@@ -999,9 +1040,9 @@ def run_global_scan(progress_callback=None):
     # Group nominations by set to find co-nominators
     set_nominations = defaultdict(list)
     for nom in all_nominations:
-        set_nominations[nom['set_title']].append(nom)
+        set_nominations[nom['set_id']].append(nom)
 
-    for _set_title, noms in set_nominations.items():
+    for _set_id, noms in set_nominations.items():
         for nom in noms:
             uid = nom['nominator_id']
             date = nom['date']
@@ -1046,7 +1087,7 @@ def run_global_scan(progress_callback=None):
     all_ids_to_resolve.update(gd_stats.keys())
     all_ids_to_resolve.update(uid for uid in host_stats if uid not in host_names)
 
-    user_cache = resolve_users_parallel(all_ids_to_resolve, token, progress_callback)
+    user_cache = resolve_users_parallel(all_ids_to_resolve, _token_manager.get_token(), progress_callback)
     user_cache.update(host_names)
 
     # Individual BN leaderboard
