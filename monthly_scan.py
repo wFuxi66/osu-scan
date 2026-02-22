@@ -15,6 +15,11 @@ CACHE_TTL = 3600  # 1 hour
 def run_monthly_scan(progress_callback=None):
     """Placeholder for the monthly global scan (not yet reimplemented)."""
     logger.info("run_monthly_scan called — scan logic is not yet reimplemented.")
+    if progress_callback is not None:
+        try:
+            progress_callback("Monthly scan not yet reimplemented; placeholder run invoked.")
+        except Exception:
+            logger.exception("Progress callback raised an exception in run_monthly_scan placeholder.")
     return {'error': 'Monthly scan not yet reimplemented'}
 
 
