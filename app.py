@@ -5,6 +5,7 @@ import time
 import uuid
 import os
 import scan_logic
+import monthly_scan
 from flask_limiter import Limiter
 load_dotenv()
 
@@ -252,7 +253,7 @@ def run_global_bn_duo_scan():
         print(f"[BN Duo Scan] {msg}")
     
     try:
-        result = scan_logic.global_bn_duo_scan(progress_callback=progress)
+        result = monthly_scan.run_monthly_scan(progress_callback=progress)
         if 'error' in result:
             print(f"Global BN duo scan failed: {result['error']}")
         else:
@@ -271,7 +272,7 @@ def leaderboards_page():
     search = request.args.get('search', '').strip()
     game_mode = request.args.get('game_mode', '')
     per_page = 50
-    data = scan_logic.load_leaderboard_results()
+    data = monthly_scan.load_leaderboard_results()
     
     pagination = None
     display_data = None
