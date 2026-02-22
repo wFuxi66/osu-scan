@@ -11,10 +11,11 @@ from itertools import combinations
 def get_session():
     """Returns a requests Session equipped with robust retry logic."""
     session = requests.Session()
-    # Retry on 401 (Token Expired), 429 (Rate Limit) and 5xx (Server Error)
+    # Retry on 429 (Rate Limit) and 5xx (Server Error)
+    # 401 is NOT in forcelist - manual handling refreshes token and retries
     retries = Retry(total=5,
                     backoff_factor=1,
-                    status_forcelist=[401, 429, 500, 502, 503, 504])
+                    status_forcelist=[429, 500, 502, 503, 504])
     adapter = HTTPAdapter(max_retries=retries)
     session.mount('https://', adapter)
     session.mount('http://', adapter)
@@ -65,6 +66,12 @@ class TokenManager:
         except Exception as e:
             print(f"Error authenticating: {e}")
             return None
+
+    def refresh_token(self):
+        """Force token refresh (e.g., after 401 response)."""
+        self.token = None  # Invalidate current token
+        self.expires_at = 0
+        return self.get_token()
 
 # Global token manager instance
 _token_manager = TokenManager()
@@ -181,23 +188,36 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
 
 import concurrent.futures
 
-def process_set(bset, host_id, token):
+def process_set(bset, host_id, token=None):
     """Deep scans a single set and finds unique GDers."""
-    headers = {'Authorization': f'Bearer {token}'}
     gds_in_set = []
 
     try:
-        # Full Deep Fetch
-        url = f'{API_BASE}/beatmapsets/{bset["id"]}'
-        session = get_session()
-        r = session.get(url, headers=headers, timeout=10)
-
-        if r.status_code == 200:
-            full_set = r.json()
-        else:
-            # Preserve essential fields from search result when deep-fetch fails
-            print(f"Deep-fetch failed for set {bset['id']} with status {r.status_code}, using search data")
+        # Full Deep Fetch - get token dynamically
+        token = _token_manager.get_token()
+        if not token:
+            print(f"Failed to get token for set {bset['id']}, using search data")
             full_set = bset
+        else:
+            headers = {'Authorization': f'Bearer {token}'}
+            url = f'{API_BASE}/beatmapsets/{bset["id"]}'
+            session = get_session()
+            r = session.get(url, headers=headers, timeout=10)
+
+            # Handle 401 by refreshing token and retrying once
+            if r.status_code == 401:
+                print(f"Token expired for set {bset['id']}, refreshing...")
+                refreshed_token = _token_manager.refresh_token()
+                if refreshed_token:
+                    headers = {'Authorization': f'Bearer {refreshed_token}'}
+                    r = session.get(url, headers=headers, timeout=10)
+
+            if r.status_code == 200:
+                full_set = r.json()
+            else:
+                # Preserve essential fields from search result when deep-fetch fails
+                print(f"Deep-fetch failed for set {bset['id']} with status {r.status_code}, using search data")
+                full_set = bset
 
     except Exception as e:
         print(f"Error fetching deep set {bset['id']}: {e}")
@@ -268,9 +288,8 @@ def analyze_sets(beatmapsets, host_id, token, progress_callback=None, cancel_eve
 
     return all_gds
 
-def process_nominator_set(bset, token, session=None):
+def process_nominator_set(bset, token=None, session=None):
     """Deep fetches a set to find its nominators, GDers (with modes), and host."""
-    headers = {'Authorization': f'Bearer {token}'}
     nominations = []
     gd_user_modes = {}  # {gd_uid: set of mode strings}
     set_modes = set()   # all modes present in this set
@@ -278,10 +297,25 @@ def process_nominator_set(bset, token, session=None):
     host_modes = set()
 
     try:
+        # Get token dynamically
+        token = _token_manager.get_token()
+        if not token:
+            print(f"Failed to get token for set {bset['id']}")
+            return nominations, gd_user_modes, set_modes, mapset_host_id, host_modes
+
+        headers = {'Authorization': f'Bearer {token}'}
         url = f'{API_BASE}/beatmapsets/{bset["id"]}'
         # Use session if provided, else standard request
         req_func = session.get if session else get_session().get
         r = req_func(url, headers=headers, timeout=20)
+
+        # Handle 401 by refreshing token and retrying once
+        if r.status_code == 401:
+            print(f"Token expired for set {bset['id']}, refreshing...")
+            refreshed_token = _token_manager.refresh_token()
+            if refreshed_token:
+                headers = {'Authorization': f'Bearer {refreshed_token}'}
+                r = req_func(url, headers=headers, timeout=20)
 
         if r.status_code == 200:
             data = r.json()
@@ -304,6 +338,15 @@ def process_nominator_set(bset, token, session=None):
                         'min_date': (bset.get('ranked_date') or bset.get('last_updated', '2007-01-01')).split('T')[0]
                     }
                     events_r = req_func(events_url, headers=headers, params=events_params, timeout=15)
+
+                    # Handle 401 for events API too
+                    if events_r.status_code == 401:
+                        print(f"Token expired for events API (set {bset['id']}), refreshing...")
+                        refreshed_token = _token_manager.refresh_token()
+                        if refreshed_token:
+                            headers = {'Authorization': f'Bearer {refreshed_token}'}
+                            events_r = req_func(events_url, headers=headers, params=events_params, timeout=15)
+
                     if events_r.status_code == 200:
                         events_data = events_r.json()
                         for event in events_data.get('events', []):
