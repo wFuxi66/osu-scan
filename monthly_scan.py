@@ -44,8 +44,12 @@ def load_leaderboard_results():
             return data
         else:
             logger.warning("GitHub Release returned status %s, falling back to local file.", r.status_code)
+            # Negative cache: avoid repeated remote fetch attempts during outages
+            _remote_cache['last_fetch'] = time.time()
     except Exception as e:
         logger.warning("Error fetching remote leaderboard: %s", e)
+        # Negative cache: avoid repeated remote fetch attempts during outages
+        _remote_cache['last_fetch'] = time.time()
 
     # Fallback to local file
     if os.path.exists(_LEADERBOARD_FILE):
