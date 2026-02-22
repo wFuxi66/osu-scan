@@ -29,7 +29,7 @@ def load_leaderboard_results():
 
     # Return cached data if still fresh
     if time.time() - _remote_cache['last_fetch'] < CACHE_TTL and _remote_cache['data']:
-        logger.info("Returning cached leaderboard data.")
+        logger.debug("Returning cached leaderboard data.")
         return _remote_cache['data']
 
     # Try fetching from GitHub Release
