@@ -240,26 +240,26 @@ GLOBAL_SCAN_SECRET = os.environ.get('GLOBAL_SCAN_SECRET', 'osuscan_admin_secret'
 GLOBAL_SCAN_STATUS = {'running': False, 'message': '', 'last_run': None}
 
 def run_global_bn_duo_scan():
-    """Background function for the global BN duo scan."""
+    """Background function for the monthly global scan."""
     if GLOBAL_SCAN_STATUS['running']:
-        print("Global BN duo scan already running, skipping.")
+        print("Monthly scan already running, skipping.")
         return
     
     GLOBAL_SCAN_STATUS['running'] = True
-    GLOBAL_SCAN_STATUS['message'] = 'Starting global BN duo scan...'
+    GLOBAL_SCAN_STATUS['message'] = 'Starting monthly scan...'
     
     def progress(msg):
         GLOBAL_SCAN_STATUS['message'] = msg
-        print(f"[BN Duo Scan] {msg}")
+        print(f"[Monthly Scan] {msg}")
     
     try:
         result = monthly_scan.run_monthly_scan(progress_callback=progress)
         if 'error' in result:
-            print(f"Global BN duo scan failed: {result['error']}")
+            print(f"Monthly scan failed: {result['error']}")
         else:
-            print(f"Global BN duo scan completed successfully.")
+            print(f"Monthly scan completed successfully.")
     except Exception as e:
-        print(f"Global BN duo scan error: {e}")
+        print(f"Monthly scan error: {e}")
     finally:
         GLOBAL_SCAN_STATUS['running'] = False
         GLOBAL_SCAN_STATUS['message'] = 'Idle'
