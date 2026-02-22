@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, Response, jsonify, redirect, url_for
 from dotenv import load_dotenv
+import logging
 import threading
 import time
 import uuid
@@ -8,6 +9,12 @@ import scan_logic
 import monthly_scan
 from flask_limiter import Limiter
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 app = Flask(__name__)
 
