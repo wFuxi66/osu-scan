@@ -13,14 +13,53 @@ CACHE_TTL = 3600  # 1 hour
 
 
 def run_monthly_scan(progress_callback=None):
-    """Placeholder for the monthly global scan (not yet reimplemented)."""
-    logger.info("run_monthly_scan called — scan logic is not yet reimplemented.")
+    """Runs the global monthly scan and saves leaderboard data to files."""
+    import scan_logic
+
+    logger.info("run_monthly_scan started.")
     if progress_callback is not None:
         try:
-            progress_callback("Monthly scan not yet reimplemented; placeholder run invoked.")
+            progress_callback("Starting global monthly scan...")
         except Exception:
-            logger.exception("Progress callback raised an exception in run_monthly_scan placeholder.")
-    return {'error': 'Monthly scan not yet reimplemented'}
+            logger.exception("Progress callback raised an exception.")
+
+    try:
+        result = scan_logic.run_global_scan(progress_callback=progress_callback)
+    except Exception as e:
+        logger.exception("Unexpected error during global scan.")
+        return {'error': str(e)}
+
+    if 'error' in result:
+        logger.error("Global scan returned error: %s", result['error'])
+        return result
+
+    # Persist results so the GitHub Actions workflow can upload them
+    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+    os.makedirs(data_dir, exist_ok=True)
+
+    leaderboard_file = os.path.join(data_dir, 'leaderboard.json')
+    cache_file = os.path.join(data_dir, 'leaderboard_cache.json')
+
+    try:
+        with open(leaderboard_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        logger.info("Saved leaderboard to %s", leaderboard_file)
+
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        logger.info("Saved cache to %s", cache_file)
+    except Exception as e:
+        logger.error("Error saving leaderboard files: %s", e)
+        return {'error': str(e)}
+
+    if progress_callback is not None:
+        try:
+            progress_callback("Scan complete!")
+        except Exception:
+            logger.exception("Progress callback raised an exception.")
+
+    logger.info("run_monthly_scan finished. Sets scanned: %s", result.get('total_sets_scanned', 0))
+    return result
 
 
 def load_leaderboard_results():

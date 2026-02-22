@@ -843,3 +843,273 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
         'leaderboard': leaderboard
     }
 
+
+def search_ranked_beatmapsets(token, statuses=None, progress_callback=None):
+    """Fetches all beatmapsets of the given statuses using cursor-based pagination."""
+    if statuses is None:
+        statuses = ['ranked', 'approved']
+
+    headers = {'Authorization': f'Bearer {token}'}
+    session = get_session()
+    all_sets = []
+    seen_ids = set()
+
+    for status in statuses:
+        if progress_callback:
+            progress_callback(f"Fetching {status} beatmapsets...")
+        cursor_string = None
+        page_count = 0
+
+        while True:
+            params = {'s': status, 'sort': 'ranked_asc'}
+            if cursor_string:
+                params['cursor_string'] = cursor_string
+
+            try:
+                r = session.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=30)
+
+                if r.status_code == 401:
+                    refreshed = _token_manager.refresh_token()
+                    if refreshed:
+                        headers = {'Authorization': f'Bearer {refreshed}'}
+                        r = session.get(f'{API_BASE}/beatmapsets/search', headers=headers, params=params, timeout=30)
+
+                r.raise_for_status()
+                data = r.json()
+                beatmapsets = data.get('beatmapsets', [])
+
+                if not beatmapsets:
+                    break
+
+                for bset in beatmapsets:
+                    if bset['id'] not in seen_ids:
+                        seen_ids.add(bset['id'])
+                        all_sets.append(bset)
+
+                page_count += 1
+                if page_count % 10 == 0 and progress_callback:
+                    progress_callback(f"Fetched {len(all_sets)} {status} sets so far...")
+
+                cursor_string = data.get('cursor_string')
+                if not cursor_string:
+                    break
+
+                time.sleep(0.5)
+
+            except Exception as e:
+                print(f"Error searching {status} beatmapsets (page {page_count}): {e}")
+                break
+
+    return all_sets
+
+
+def run_global_scan(progress_callback=None):
+    """Runs the monthly global scan across all ranked beatmapsets.
+
+    Returns a dict containing the four leaderboards (duo, individual BN, GD, host)
+    plus metadata, or a dict with an 'error' key on failure.
+    """
+    token = get_token()
+    if not token:
+        return {'error': 'Authentication failed'}
+
+    if progress_callback:
+        progress_callback("Starting global scan — fetching all ranked beatmapsets...")
+
+    all_sets = search_ranked_beatmapsets(token, statuses=['ranked', 'approved'], progress_callback=progress_callback)
+
+    if not all_sets:
+        return {'error': 'No beatmapsets found'}
+
+    total = len(all_sets)
+    if progress_callback:
+        progress_callback(f"Found {total} beatmapsets. Processing nominations and GD data...")
+
+    # Per-set data collectors
+    all_nominations = []
+    gd_stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'modes': set(), 'mode_counts': defaultdict(int)})
+    host_stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'modes': set(), 'mode_counts': defaultdict(int)})
+    # Pre-populate host names from search-result creator fields to avoid extra API calls
+    host_names = {}
+
+    session = get_session()
+    completed = 0
+    failed_sets = []
+
+    def _accumulate(bset, result_tuple):
+        noms, gd_user_modes, _set_modes, mapset_host_id, host_modes = result_tuple
+        all_nominations.extend(noms)
+        date = (bset.get('ranked_date') or bset.get('last_updated') or '').split('T')[0]
+        for uid, modes in gd_user_modes.items():
+            gd_stats[uid]['count'] += 1
+            gd_stats[uid]['modes'].update(modes)
+            for m in modes:
+                gd_stats[uid]['mode_counts'][m] += 1
+            if date and date > gd_stats[uid]['last_date']:
+                gd_stats[uid]['last_date'] = date
+        if mapset_host_id:
+            host_stats[mapset_host_id]['count'] += 1
+            host_stats[mapset_host_id]['modes'].update(host_modes)
+            for m in host_modes:
+                host_stats[mapset_host_id]['mode_counts'][m] += 1
+            if date and date > host_stats[mapset_host_id]['last_date']:
+                host_stats[mapset_host_id]['last_date'] = date
+            if bset.get('user_id') == mapset_host_id and bset.get('creator'):
+                host_names[mapset_host_id] = bset['creator']
+
+    # First pass — full concurrency
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        future_to_set = {executor.submit(process_nominator_set, bset, token, session): bset for bset in all_sets}
+
+        for future in concurrent.futures.as_completed(future_to_set):
+            bset = future_to_set[future]
+            completed += 1
+            if completed % 100 == 0 and progress_callback:
+                progress_callback(f"Processing sets: {completed}/{total}...")
+            try:
+                _accumulate(bset, future.result())
+            except Exception as e:
+                print(f"Error processing set {bset['id']}: {e}")
+                failed_sets.append(bset)
+
+    session.close()
+
+    # Retry failed sets with reduced concurrency
+    if failed_sets:
+        if progress_callback:
+            progress_callback(f"Retrying {len(failed_sets)} failed sets...")
+        session2 = get_session()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_set = {executor.submit(process_nominator_set, bset, token, session2): bset for bset in failed_sets}
+            for future in concurrent.futures.as_completed(future_to_set):
+                bset = future_to_set[future]
+                try:
+                    _accumulate(bset, future.result())
+                except Exception as e:
+                    print(f"Retry failed for set {bset['id']}: {e}")
+        session2.close()
+
+    # Build duo + individual leaderboards from nominations
+    if progress_callback:
+        progress_callback("Building BN leaderboards...")
+
+    duo_stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'bn1_modes': set(), 'bn2_modes': set(), 'modes': set(), 'mode_counts': defaultdict(int)})
+    individual_stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'modes': set(), 'mode_counts': defaultdict(int)})
+
+    # Group nominations by set to find co-nominators
+    set_nominations = defaultdict(list)
+    for nom in all_nominations:
+        set_nominations[nom['set_title']].append(nom)
+
+    for _set_title, noms in set_nominations.items():
+        for nom in noms:
+            uid = nom['nominator_id']
+            date = nom['date']
+            rulesets = nom.get('rulesets') or ['osu']
+            individual_stats[uid]['count'] += 1
+            individual_stats[uid]['modes'].update(rulesets)
+            for r in rulesets:
+                individual_stats[uid]['mode_counts'][r] += 1
+            if date and date > individual_stats[uid]['last_date']:
+                individual_stats[uid]['last_date'] = date
+
+        # Build duo pairs from unique nominators per set
+        unique_noms = list({n['nominator_id']: n for n in noms}.values())
+        for i, nom1 in enumerate(unique_noms):
+            for nom2 in unique_noms[i + 1:]:
+                id1 = min(nom1['nominator_id'], nom2['nominator_id'])
+                id2 = max(nom1['nominator_id'], nom2['nominator_id'])
+                duo_key = (id1, id2)
+                date = max(nom1['date'], nom2['date'])
+                if nom1['nominator_id'] == id1:
+                    bn1_rulesets = nom1.get('rulesets') or ['osu']
+                    bn2_rulesets = nom2.get('rulesets') or ['osu']
+                else:
+                    bn1_rulesets = nom2.get('rulesets') or ['osu']
+                    bn2_rulesets = nom1.get('rulesets') or ['osu']
+                duo_stats[duo_key]['count'] += 1
+                duo_stats[duo_key]['bn1_modes'].update(bn1_rulesets)
+                duo_stats[duo_key]['bn2_modes'].update(bn2_rulesets)
+                duo_stats[duo_key]['modes'].update(bn1_rulesets + bn2_rulesets)
+                for r in bn1_rulesets + bn2_rulesets:
+                    duo_stats[duo_key]['mode_counts'][r] += 1
+                if date and date > duo_stats[duo_key]['last_date']:
+                    duo_stats[duo_key]['last_date'] = date
+
+    # Resolve all user IDs in one batch
+    if progress_callback:
+        progress_callback("Resolving user names...")
+
+    all_ids_to_resolve = set()
+    all_ids_to_resolve.update(individual_stats.keys())
+    all_ids_to_resolve.update(uid for key in duo_stats for uid in key)
+    all_ids_to_resolve.update(gd_stats.keys())
+    all_ids_to_resolve.update(uid for uid in host_stats if uid not in host_names)
+
+    user_cache = resolve_users_parallel(all_ids_to_resolve, token, progress_callback)
+    user_cache.update(host_names)
+
+    # Individual BN leaderboard
+    individual_leaderboard = []
+    for uid, data in individual_stats.items():
+        individual_leaderboard.append({
+            'username': user_cache.get(uid, f"ID:{uid}"),
+            'count': data['count'],
+            'last_date': data['last_date'],
+            'modes': list(data['modes']),
+            'mode_counts': dict(data['mode_counts']),
+        })
+    individual_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
+
+    # Duo leaderboard
+    duo_leaderboard = []
+    for (id1, id2), data in duo_stats.items():
+        duo_leaderboard.append({
+            'bn1_name': user_cache.get(id1, f"ID:{id1}"),
+            'bn2_name': user_cache.get(id2, f"ID:{id2}"),
+            'count': data['count'],
+            'last_date': data['last_date'],
+            'bn1_modes': list(data['bn1_modes']),
+            'bn2_modes': list(data['bn2_modes']),
+            'modes': list(data['modes']),
+            'mode_counts': dict(data['mode_counts']),
+        })
+    duo_leaderboard.sort(key=lambda x: (-x['count'], x['bn1_name']))
+
+    # GD leaderboard
+    gd_leaderboard = []
+    for uid, data in gd_stats.items():
+        gd_leaderboard.append({
+            'username': user_cache.get(uid, f"ID:{uid}"),
+            'count': data['count'],
+            'last_date': data['last_date'],
+            'modes': list(data['modes']),
+            'mode_counts': dict(data['mode_counts']),
+        })
+    gd_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
+
+    # Host leaderboard
+    host_leaderboard = []
+    for uid, data in host_stats.items():
+        host_leaderboard.append({
+            'username': user_cache.get(uid, f"ID:{uid}"),
+            'count': data['count'],
+            'last_date': data['last_date'],
+            'modes': list(data['modes']),
+            'mode_counts': dict(data['mode_counts']),
+        })
+    host_leaderboard.sort(key=lambda x: (-x['count'], x['username']))
+
+    return {
+        'leaderboard': duo_leaderboard,
+        'individual_leaderboard': individual_leaderboard,
+        'gd_leaderboard': gd_leaderboard,
+        'host_leaderboard': host_leaderboard,
+        'updated_at': time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime()),
+        'total_sets_scanned': total,
+        'total_duos': len(duo_leaderboard),
+        'total_individuals': len(individual_leaderboard),
+        'total_gders': len(gd_leaderboard),
+        'total_hosts': len(host_leaderboard),
+    }
+
