@@ -1225,7 +1225,14 @@ def run_global_scan(progress_callback=None, scan_state=None):
     except Exception as e:
         logger.error("Failed to fetch nomination events: %s", e)
         set_nominators = {}
-        new_nominator_ids = set()
+        new_nominator_ids = set(bn_counts.keys())
+        if new_nominator_ids:
+            logger.warning(
+                "Falling back to %d existing BN IDs from scan state to avoid empty leaderboard.",
+                len(new_nominator_ids),
+            )
+        else:
+            logger.warning("No existing BN scan state available; BN leaderboard will be empty.")
 
     logger.info("Collected %d unique nominator IDs from events.", len(new_nominator_ids))
 
@@ -1234,7 +1241,6 @@ def run_global_scan(progress_callback=None, scan_state=None):
     def _scan_gd(uid):
         tok = _token_manager.get_token()
         sets = get_guest_beatmapsets(uid, tok)
-        count = len(sets)
         mc = defaultdict(int)
         last_date = ''
         for bset in sets:
@@ -1251,6 +1257,7 @@ def run_global_scan(progress_callback=None, scan_state=None):
                 else:
                     if bm.get('user_id') == uid:
                         mc[bm_mode] += 1
+        count = sum(mc.values())
         return count, dict(mc), last_date
 
     def _scan_host(uid):
@@ -1264,7 +1271,14 @@ def run_global_scan(progress_callback=None, scan_state=None):
             if ranked_date and ranked_date > last_date:
                 last_date = ranked_date
             for bm in bset.get('beatmaps', []):
-                mc[bm.get('mode', 'osu')] += 1
+                bm_mode = bm.get('mode', 'osu')
+                owners = bm.get('owners', [])
+                if owners:
+                    if any(o['id'] == uid for o in owners):
+                        mc[bm_mode] += 1
+                else:
+                    if bm.get('user_id') == uid:
+                        mc[bm_mode] += 1
         return count, dict(mc), last_date
 
     def _scan_bn(uid):
@@ -1414,15 +1428,26 @@ def run_global_scan(progress_callback=None, scan_state=None):
                     id1, id2 = int(parts[0]), int(parts[1])
                 except ValueError:
                     continue
+                bn1_mc = bn_modes.get(id1, {})
+                bn2_mc = bn_modes.get(id2, {})
+                combined_mc = defaultdict(int)
+                for m, c in bn1_mc.items():
+                    combined_mc[m] += c
+                for m, c in bn2_mc.items():
+                    combined_mc[m] += c
+                last_date = max(
+                    bn_last_dates.get(id1, ''),
+                    bn_last_dates.get(id2, ''),
+                )
                 duo_leaderboard.append({
                     'bn1_name': user_cache.get(id1, f"ID:{id1}"),
                     'bn2_name': user_cache.get(id2, f"ID:{id2}"),
                     'count': count,
-                    'last_date': '',
-                    'bn1_modes': [],
-                    'bn2_modes': [],
-                    'modes': [],
-                    'mode_counts': {},
+                    'last_date': last_date,
+                    'bn1_modes': list(bn1_mc.keys()),
+                    'bn2_modes': list(bn2_mc.keys()),
+                    'modes': list(combined_mc.keys()),
+                    'mode_counts': dict(combined_mc),
                 })
     duo_leaderboard.sort(key=lambda x: (-x['count'], x['bn1_name']))
 
