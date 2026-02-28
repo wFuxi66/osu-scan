@@ -1,43 +1,44 @@
-# osu! Guest Difficulty Scanner
+# osu!scan
 
-This tool scans your osu! beatmap sets (Graveyard, Pending, Ranked, Loved) and identifies all Guest Difficulties (GDs), exporting a list of GDers and dates to a CSV file.
+**osu!scan** is a simple web tool to analyze your osu! beatmap contributions.
 
-## Setup
+**Live Site:** [https://osu-scan.onrender.com](https://osu-scan.onrender.com)
 
-1.  **Install Python**: Ensure you have Python installed.
-2.  **Install Dependencies**:
-    Open a terminal in this folder and run:
-    ```bash
-    pip install -r requirements.txt
-    ```
+## Features
 
-## Usage
+- **Guest Difficulty Scanner**: Finds every map you have guest difficultied for other people.
+- **Nominator Scanner**: Finds which Beatmap Nominators (BNs) have nominated your sets the most.
+- **Leaderboard**: Displays a clean ranking of your top collaborators.
+- **Download**: Export the results as an HTML file.
 
-1.  **Get API Credentials**:
-    - Go to [osu! Account Settings - OAuth](https://osu.ppy.sh/home/account/edit#oauth).
-    - Under "OAuth", create a new "New OAuth Application".
-    - **Name**: `GD Scanner` (or anything).
-    - **Callback URL**: `http://localhost` (doesn't matter for this script).
-    - Click **Register**.
-    - You will see a `Client ID` (number) and `Client Secret` (long string). **Keep these ready.**
+## How it works
 
-2.  **Run the Script**:
-    ```bash
-    python scan_gds.py
-    ```
+1. Enter a generic osu! username or ID.
+2. The scan runs in real-time (fetching data from osu! API v2).
+3. View the results directly on the web page.
 
-3.  **Follow the Prompts**:
-    - Enter your Client ID.
-    - Enter your Client Secret.
-    - Enter your osu! Username.
+## Running Locally
 
-4.  **View Results**:
-    - The script will generate a file named `gd_report_YOUR_USERNAME.csv`.
-    - Open this file in Excel, Google Sheets, or any text editor.
+If you want to run this code on your own machine:
 
-## What it collects
-- **Mapper Name**: The user who owns the difficulty.
-- **Set Title**: The beatmap set.
-- **Diff Name**: The name of the difficulty.
-- **Date**: The `last_updated` date of the difficulty.
-- **Link**: Direct link to the map.
+1. Install Python 3.10+
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Create a `.env` file with your osu! API credentials (see `.env.example`).
+4. Run the app:
+   ```bash
+   python app.py
+   ```
+5. Open `http://127.0.0.1:5000`
+
+## Technologies
+
+- **Python (Flask)**
+- **osu! API v2**
+- **HTML/CSS (Simple UI)**
+- Hosted on **Render**
+
+---
+*Created by Fuxi66*
