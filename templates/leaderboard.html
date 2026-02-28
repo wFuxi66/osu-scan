@@ -206,6 +206,95 @@
             font-size: 15px;
         }
 
+        /* Search bar */
+        .search-wrapper {
+            margin-bottom: 14px;
+        }
+
+        .search-input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px 14px;
+            background: rgba(15, 52, 96, 0.5);
+            border: 1px solid #0f3460;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .search-input::placeholder {
+            color: #666;
+        }
+
+        .search-input:focus {
+            border-color: #e94560;
+        }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 16px;
+            user-select: none;
+        }
+
+        .pagination-btn {
+            background: rgba(15, 52, 96, 0.5);
+            border: 1px solid #0f3460;
+            color: #aeb2b8;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+            border-color: #e94560;
+            color: #fff;
+        }
+
+        .pagination-btn:disabled {
+            opacity: 0.35;
+            cursor: default;
+        }
+
+        .pagination-info {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            color: #aeb2b8;
+            font-size: 14px;
+        }
+
+        .page-input {
+            width: 42px;
+            text-align: center;
+            background: rgba(15, 52, 96, 0.5);
+            border: 1px solid #0f3460;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 14px;
+            padding: 4px;
+            outline: none;
+            transition: border-color 0.2s;
+            -moz-appearance: textfield;
+        }
+
+        .page-input::-webkit-outer-spin-button,
+        .page-input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        .page-input:focus {
+            border-color: #e94560;
+        }
+
         /* Ko-fi Support Button */
         .kofi-btn {
             display: inline-block;
@@ -261,6 +350,10 @@
                 padding: 5px 10px;
                 font-size: 12px;
             }
+
+            .page-input {
+                width: 36px;
+            }
         }
     </style>
 </head>
@@ -294,8 +387,12 @@
 
         <!-- Top BNs -->
         <div id="section-bns" class="leaderboard-section active">
+            <div class="search-wrapper">
+                <input type="text" class="search-input" id="search-bns" placeholder="Search a nominator..."
+                    autocomplete="off">
+            </div>
             <div class="table-wrapper">
-                <table>
+                <table id="table-bns">
                     <thead>
                         <tr>
                             <th>#</th>
@@ -305,7 +402,8 @@
                     </thead>
                     <tbody>
                         {% for bn in top_bns %}
-                        <tr class="{% if loop.index <= 3 %}rank-{{ loop.index }}{% endif %}">
+                        <tr class="{% if loop.index <= 3 %}rank-{{ loop.index }}{% endif %}"
+                            data-name="{{ bn.username|lower }}">
                             <td>{{ loop.index }}</td>
                             <td>
                                 <a href="https://osu.ppy.sh/users/{{ bn.osu_id }}" target="_blank"
@@ -318,12 +416,17 @@
                     </tbody>
                 </table>
             </div>
+            <div class="pagination" id="pagination-bns"></div>
         </div>
 
         <!-- Iconic Duos -->
         <div id="section-duos" class="leaderboard-section">
+            <div class="search-wrapper">
+                <input type="text" class="search-input" id="search-duos" placeholder="Search a duo..."
+                    autocomplete="off">
+            </div>
             <div class="table-wrapper">
-                <table>
+                <table id="table-duos">
                     <thead>
                         <tr>
                             <th>#</th>
@@ -334,7 +437,8 @@
                     </thead>
                     <tbody>
                         {% for duo in duos %}
-                        <tr class="{% if loop.index <= 3 %}rank-{{ loop.index }}{% endif %}">
+                        <tr class="{% if loop.index <= 3 %}rank-{{ loop.index }}{% endif %}"
+                            data-name="{{ duo.bn1_name|lower }} {{ duo.bn2_name|lower }}">
                             <td>{{ loop.index }}</td>
                             <td>
                                 <a href="https://osu.ppy.sh/users/{{ duo.bn1_id }}" target="_blank"
@@ -350,6 +454,7 @@
                     </tbody>
                 </table>
             </div>
+            <div class="pagination" id="pagination-duos"></div>
         </div>
 
         <div class="scan-info">
@@ -376,6 +481,123 @@
             document.getElementById('section-' + section).classList.add('active');
             clicked.classList.add('active');
         }
+
+        // Pagination + Search logic
+        (function () {
+            const PER_PAGE = 50;
+
+            function setupTable(tableId, searchId, paginationId) {
+                const table = document.getElementById(tableId);
+                if (!table) return;
+                const tbody = table.querySelector('tbody');
+                if (!tbody) return;
+
+                const allRows = Array.from(tbody.querySelectorAll('tr'));
+                const searchInput = document.getElementById(searchId);
+                const paginationDiv = document.getElementById(paginationId);
+
+                let currentPage = 1;
+                let filteredRows = allRows;
+
+                function getFilteredRows() {
+                    const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
+                    if (!query) return allRows;
+                    return allRows.filter(row => {
+                        const name = row.getAttribute('data-name') || '';
+                        return name.includes(query);
+                    });
+                }
+
+                function render() {
+                    filteredRows = getFilteredRows();
+                    const totalPages = Math.max(1, Math.ceil(filteredRows.length / PER_PAGE));
+                    if (currentPage > totalPages) currentPage = totalPages;
+
+                    const start = (currentPage - 1) * PER_PAGE;
+                    const end = start + PER_PAGE;
+                    const visibleSet = new Set(filteredRows.slice(start, end));
+
+                    allRows.forEach(row => {
+                        row.style.display = visibleSet.has(row) ? '' : 'none';
+                    });
+
+                    renderPagination(totalPages);
+                }
+
+                function renderPagination(totalPages) {
+                    if (!paginationDiv) return;
+                    paginationDiv.innerHTML = '';
+
+                    if (filteredRows.length <= PER_PAGE) return;
+
+                    const prevBtn = document.createElement('button');
+                    prevBtn.className = 'pagination-btn';
+                    prevBtn.textContent = '◀';
+                    prevBtn.disabled = currentPage <= 1;
+                    prevBtn.onclick = () => { currentPage--; render(); };
+
+                    const info = document.createElement('span');
+                    info.className = 'pagination-info';
+
+                    const label = document.createElement('span');
+                    label.textContent = 'Page';
+
+                    const input = document.createElement('input');
+                    input.type = 'number';
+                    input.className = 'page-input';
+                    input.value = currentPage;
+                    input.min = 1;
+                    input.max = totalPages;
+
+                    input.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter') {
+                            let val = parseInt(input.value, 10);
+                            if (isNaN(val) || val < 1) val = 1;
+                            if (val > totalPages) val = totalPages;
+                            currentPage = val;
+                            render();
+                        }
+                    });
+
+                    input.addEventListener('blur', () => {
+                        let val = parseInt(input.value, 10);
+                        if (isNaN(val) || val < 1) val = 1;
+                        if (val > totalPages) val = totalPages;
+                        currentPage = val;
+                        render();
+                    });
+
+                    const total = document.createElement('span');
+                    total.textContent = '/ ' + totalPages;
+
+                    info.appendChild(label);
+                    info.appendChild(input);
+                    info.appendChild(total);
+
+                    const nextBtn = document.createElement('button');
+                    nextBtn.className = 'pagination-btn';
+                    nextBtn.textContent = '▶';
+                    nextBtn.disabled = currentPage >= totalPages;
+                    nextBtn.onclick = () => { currentPage++; render(); };
+
+                    paginationDiv.appendChild(prevBtn);
+                    paginationDiv.appendChild(info);
+                    paginationDiv.appendChild(nextBtn);
+                }
+
+                if (searchInput) {
+                    searchInput.addEventListener('input', () => {
+                        currentPage = 1;
+                        render();
+                    });
+                }
+
+                render();
+            }
+
+            setupTable('table-bns', 'search-bns', 'pagination-bns');
+            setupTable('table-duos', 'search-duos', 'pagination-duos');
+        })();
     </script>
 </body>
 
