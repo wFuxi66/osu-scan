@@ -184,43 +184,60 @@ def analyze_sets(beatmapsets, host_id, token, progress_callback=None):
                 
     return all_gds
 
-def analyze_nominators(beatmapsets, token, progress_callback=None):
-    """Fetches nominators for the provided beatmap sets."""
-    nominations = []
+def process_nominator_set(bset, token):
+    """Deep fetches a set to find its nominators."""
     headers = {'Authorization': f'Bearer {token}'}
+    nominations = []
+    
+    try:
+        url = f'{API_BASE}/beatmapsets/{bset["id"]}'
+        r = requests.get(url, headers=headers, timeout=10)
+        
+        if r.status_code == 200:
+            data = r.json()
+            current_noms = data.get('current_nominations', [])
+            
+            for nom in current_noms:
+                nominations.append({
+                    'nominator_id': nom['user_id'],
+                    'set_title': f"{bset['artist']} - {bset['title']}",
+                    'date': (bset.get('ranked_date') or bset.get('last_updated')).split('T')[0]
+                })
+        else:
+            # If fetch fails, we skip specific nominator data for this set
+            pass
+            
+    except Exception as e:
+        print(f"Error fetching set {bset['id']}: {e}")
+        
+    return nominations
+
+def analyze_nominators(beatmapsets, token, progress_callback=None):
+    """Fetches nominators for the provided beatmap sets using threading."""
+    all_nominations = []
     
     target_sets = [b for b in beatmapsets if b['status'] in ['ranked', 'loved', 'qualified', 'approved']]
+    total = len(target_sets)
     
-    msg = f"Scanning {len(target_sets)} sets for Nominators..."
-    print(msg)
+    msg = f"Scanning {total} sets for Nominators..."
     if progress_callback: progress_callback(msg)
     
-    for i, bset in enumerate(target_sets):
-        if i % 5 == 0:
-            msg = f"Fetching set details {i}/{len(target_sets)}..."
-            print(msg, end='\r')
-            if progress_callback: progress_callback(msg)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_set = {executor.submit(process_nominator_set, bset, token): bset for bset in target_sets}
+        
+        completed = 0
+        for future in concurrent.futures.as_completed(future_to_set):
+            completed += 1
+            if completed % 5 == 0:
+                if progress_callback: progress_callback(f"Scanning progress: {completed}/{total} sets...")
             
-        try:
-            # Must fetch full details to get 'current_nominations'
-            url = f'{API_BASE}/beatmapsets/{bset["id"]}'
-            r = requests.get(url, headers=headers, timeout=10)
+            try:
+                results = future.result()
+                all_nominations.extend(results)
+            except Exception as e:
+                print(f"Nominator scan exception: {e}")
             
-            if r.status_code == 200:
-                data = r.json()
-                current_noms = data.get('current_nominations', [])
-                
-                for nom in current_noms:
-                    nominations.append({
-                        'nominator_id': nom['user_id'],
-                        'set_title': f"{bset['artist']} - {bset['title']}",
-                        'date': (bset.get('ranked_date') or bset.get('last_updated')).split('T')[0] # Approximate date
-                    })
-            time.sleep(0.15) # Respect rate limits
-        except Exception as e:
-            print(f"Error fetching set {bset['id']}: {e}")
-            
-    return nominations
+    return all_nominations
 
 def resolve_and_aggregate_nominators(noms, token, progress_callback=None):
     """Resolves names and builds the nominator leaderboard."""
