@@ -249,18 +249,6 @@
             color: #fff;
         }
 
-        .clear-search {
-            font-size: 12px;
-            color: #aeb2b8;
-            text-decoration: none;
-            display: inline-block;
-            margin-bottom: 10px;
-        }
-
-        .clear-search:hover {
-            color: #e94560;
-        }
-
         /* Pagination */
         .pagination {
             display: flex;
@@ -300,12 +288,6 @@
             gap: 4px;
             color: #aeb2b8;
             font-size: 14px;
-        }
-
-        .page-jump-form {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
         }
 
         .page-input {
@@ -351,6 +333,13 @@
             transform: translateY(-2px);
             box-shadow: 0 4px 15px rgba(233, 69, 96, 0.5);
             background: linear-gradient(135deg, #ff7ab8 0%, #ff2e63 100%);
+        }
+
+        .loading-msg {
+            text-align: center;
+            padding: 40px;
+            color: #aeb2b8;
+            font-size: 15px;
         }
 
         /* Mobile */
@@ -401,163 +390,75 @@
 
         <h1>Global Leaderboards</h1>
 
-        {% if not data %}
-        <div class="no-data">
+        <div id="loading" class="loading-msg">Loading leaderboard data...</div>
+
+        <div id="leaderboard-content" style="display:none;">
+            <!-- Mode filter -->
+            <div class="mode-tabs" id="mode-tabs">
+                <div class="mode-tab active" data-mode="all">All</div>
+                <div class="mode-tab" data-mode="osu">osu!</div>
+                <div class="mode-tab" data-mode="taiko">Taiko</div>
+                <div class="mode-tab" data-mode="catch">Catch</div>
+                <div class="mode-tab" data-mode="mania">Mania</div>
+            </div>
+
+            <!-- Section tabs -->
+            <div class="section-tabs" id="section-tabs">
+                <div class="section-tab active" data-section="bns">Top BNs</div>
+                <div class="section-tab" data-section="duos">Iconic Duos</div>
+            </div>
+
+            <!-- Top BNs -->
+            <div id="section-bns" class="leaderboard-section active">
+                <div class="search-form">
+                    <input type="text" class="search-input" id="search-bns" placeholder="Search a nominator..."
+                        autocomplete="off">
+                    <button class="search-btn" id="search-bns-btn">Search</button>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Nominator</th>
+                                <th>Nominations</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bns-tbody"></tbody>
+                    </table>
+                </div>
+                <div class="pagination" id="bns-pagination"></div>
+            </div>
+
+            <!-- Iconic Duos -->
+            <div id="section-duos" class="leaderboard-section">
+                <div class="search-form">
+                    <input type="text" class="search-input" id="search-duos" placeholder="Search a duo..."
+                        autocomplete="off">
+                    <button class="search-btn" id="search-duos-btn">Search</button>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead id="duos-thead">
+                            <tr>
+                                <th>#</th>
+                                <th>Duo</th>
+                                <th>Mode</th>
+                                <th>Maps Together</th>
+                            </tr>
+                        </thead>
+                        <tbody id="duos-tbody"></tbody>
+                    </table>
+                </div>
+                <div class="pagination" id="duos-pagination"></div>
+            </div>
+
+            <div class="scan-info" id="scan-info"></div>
+        </div>
+
+        <div id="no-data" class="no-data" style="display:none;">
             No leaderboard data available yet. Scan has not been run.
         </div>
-        {% else %}
-
-        <!-- Mode filter -->
-        <div class="mode-tabs">
-            <a class="mode-tab {% if mode == 'all' %}active{% endif %}" href="/leaderboard?mode=all">All</a>
-            <a class="mode-tab {% if mode == 'osu' %}active{% endif %}" href="/leaderboard?mode=osu">osu!</a>
-            <a class="mode-tab {% if mode == 'taiko' %}active{% endif %}" href="/leaderboard?mode=taiko">Taiko</a>
-            <a class="mode-tab {% if mode == 'catch' %}active{% endif %}" href="/leaderboard?mode=catch">Catch</a>
-            <a class="mode-tab {% if mode == 'mania' %}active{% endif %}" href="/leaderboard?mode=mania">Mania</a>
-        </div>
-
-        <!-- Section tabs -->
-        <div class="section-tabs">
-            <div class="section-tab {% if section == 'duos' %}{% else %}active{% endif %}"
-                onclick="showSection('bns', this)">Top BNs</div>
-            <div class="section-tab {% if section == 'duos' %}active{% endif %}" onclick="showSection('duos', this)">
-                Iconic Duos</div>
-        </div>
-
-        <!-- Top BNs -->
-        <div id="section-bns" class="leaderboard-section {% if section == 'duos' %}{% else %}active{% endif %}">
-            <form class="search-form" method="get" action="/leaderboard">
-                <input type="hidden" name="mode" value="{{ mode }}">
-                <input type="hidden" name="section" value="bns">
-                <input type="text" class="search-input" name="q_bns" value="{{ q_bns }}"
-                    placeholder="Search a nominator..." autocomplete="off">
-                <button type="submit" class="search-btn">Search</button>
-            </form>
-            {% if q_bns %}
-            <a class="clear-search" href="/leaderboard?mode={{ mode }}&section=bns">Clear search</a>
-            {% endif %}
-            <div class="table-wrapper">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Nominator</th>
-                            <th>Nominations</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for bn in top_bns %}
-                        {% set r = bn.rank %}
-                        <tr
-                            class="{% if r == 1 %}rank-gold{% elif r == 2 %}rank-silver{% elif r == 3 %}rank-bronze{% endif %}">
-                            <td>{{ r }}</td>
-                            <td>
-                                <a href="https://osu.ppy.sh/users/{{ bn.osu_id }}" target="_blank"
-                                    class="username-link">{{ bn.username }}</a>
-                                {% if bn.is_current %}<span class="current-bn">Active</span>{% endif %}
-                            </td>
-                            <td>{{ bn.display_count }}</td>
-                        </tr>
-                        {% else %}
-                        <tr>
-                            <td colspan="3" style="color:#666; text-align:center; padding:20px;">No results found.</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% if total_pages_bns > 1 %}
-            <div class="pagination">
-                <a class="pagination-btn {% if page_bns <= 1 %}disabled{% endif %}"
-                    href="/leaderboard?mode={{ mode }}&section=bns&q_bns={{ q_bns }}&page_bns={{ page_bns - 1 }}">&#9664;</a>
-                <span class="pagination-info">
-                    <form class="page-jump-form" method="get" action="/leaderboard">
-                        <input type="hidden" name="mode" value="{{ mode }}">
-                        <input type="hidden" name="section" value="bns">
-                        <input type="hidden" name="q_bns" value="{{ q_bns }}">
-                        Page <input type="number" class="page-input" name="page_bns" value="{{ page_bns }}" min="1"
-                            max="{{ total_pages_bns }}"> / {{ total_pages_bns }}
-                    </form>
-                </span>
-                <a class="pagination-btn {% if page_bns >= total_pages_bns %}disabled{% endif %}"
-                    href="/leaderboard?mode={{ mode }}&section=bns&q_bns={{ q_bns }}&page_bns={{ page_bns + 1 }}">&#9654;</a>
-            </div>
-            {% endif %}
-        </div>
-
-        <!-- Iconic Duos -->
-        <div id="section-duos" class="leaderboard-section {% if section == 'duos' %}active{% endif %}">
-            <form class="search-form" method="get" action="/leaderboard">
-                <input type="hidden" name="mode" value="{{ mode }}">
-                <input type="hidden" name="section" value="duos">
-                <input type="text" class="search-input" name="q_duos" value="{{ q_duos }}" placeholder="Search a duo..."
-                    autocomplete="off">
-                <button type="submit" class="search-btn">Search</button>
-            </form>
-            {% if q_duos %}
-            <a class="clear-search" href="/leaderboard?mode={{ mode }}&section=duos">Clear search</a>
-            {% endif %}
-            <div class="table-wrapper">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Duo</th>
-                            {% if mode == 'all' %}<th>Mode</th>{% endif %}
-                            <th>Maps Together</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for duo in duos %}
-                        {% set r = duo.rank %}
-                        <tr
-                            class="{% if r == 1 %}rank-gold{% elif r == 2 %}rank-silver{% elif r == 3 %}rank-bronze{% endif %}">
-                            <td>{{ r }}</td>
-                            <td>
-                                <a href="https://osu.ppy.sh/users/{{ duo.bn1_id }}" target="_blank"
-                                    class="username-link">{{ duo.bn1_name }}</a>
-                                <span class="duo-separator">x</span>
-                                <a href="https://osu.ppy.sh/users/{{ duo.bn2_id }}" target="_blank"
-                                    class="username-link">{{ duo.bn2_name }}</a>
-                            </td>
-                            {% if mode == 'all' %}<td><span class="mode-badge">{{ duo.mode }}</span></td>{% endif %}
-                            <td>{{ duo.count }}</td>
-                        </tr>
-                        {% else %}
-                        <tr>
-                            <td colspan="{% if mode == 'all' %}4{% else %}3{% endif %}"
-                                style="color:#666; text-align:center; padding:20px;">No results found.</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% if total_pages_duos > 1 %}
-            <div class="pagination">
-                <a class="pagination-btn {% if page_duos <= 1 %}disabled{% endif %}"
-                    href="/leaderboard?mode={{ mode }}&section=duos&q_duos={{ q_duos }}&page_duos={{ page_duos - 1 }}">&#9664;</a>
-                <span class="pagination-info">
-                    <form class="page-jump-form" method="get" action="/leaderboard">
-                        <input type="hidden" name="mode" value="{{ mode }}">
-                        <input type="hidden" name="section" value="duos">
-                        <input type="hidden" name="q_duos" value="{{ q_duos }}">
-                        Page <input type="number" class="page-input" name="page_duos" value="{{ page_duos }}" min="1"
-                            max="{{ total_pages_duos }}"> / {{ total_pages_duos }}
-                    </form>
-                </span>
-                <a class="pagination-btn {% if page_duos >= total_pages_duos %}disabled{% endif %}"
-                    href="/leaderboard?mode={{ mode }}&section=duos&q_duos={{ q_duos }}&page_duos={{ page_duos + 1 }}">&#9654;</a>
-            </div>
-            {% endif %}
-        </div>
-
-        <div class="scan-info">
-            Last updated: {{ last_scan }}
-            | {{ data.total_bns_scanned | default(0) }} BNs scanned, {{ data.total_sets_scanned | default(0) }} sets
-            processed
-        </div>
-
-        {% endif %}
 
         <div style="margin-top: 40px; text-align: center; font-size: 12px; color: #666;">
             Made by <a href="https://osu.ppy.sh/users/24230576"
@@ -569,22 +470,264 @@
     </div>
 
     <script>
-        // Section tab switching - purely cosmetic, no data manipulation
-        const params = new URLSearchParams(window.location.search);
-        const activeSection = params.get('section') || 'bns';
+        const PER_PAGE = 50;
 
-        function showSection(section, clicked) {
-            document.querySelectorAll('.leaderboard-section').forEach(el => el.classList.remove('active'));
-            document.querySelectorAll('.section-tab').forEach(el => el.classList.remove('active'));
-            document.getElementById('section-' + section).classList.add('active');
-            clicked.classList.add('active');
+        // State
+        let rawData = null;
+        let currentMode = 'all';
+        let currentSection = 'bns';
+        let searchBns = '';
+        let searchDuos = '';
+        let pageBns = 1;
+        let pageDuos = 1;
+
+        // Read initial state from URL
+        (function readURL() {
+            const p = new URLSearchParams(window.location.search);
+            if (p.get('mode')) currentMode = p.get('mode');
+            if (p.get('section')) currentSection = p.get('section');
+        })();
+
+        // Fetch data once
+        fetch('/api/leaderboard_data')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('loading').style.display = 'none';
+                if (!data) {
+                    document.getElementById('no-data').style.display = 'block';
+                    return;
+                }
+                rawData = data;
+                document.getElementById('leaderboard-content').style.display = 'block';
+                initUI();
+                render();
+            })
+            .catch(() => {
+                document.getElementById('loading').textContent = 'Failed to load data.';
+            });
+
+        function initUI() {
+            // Mode tabs
+            document.querySelectorAll('.mode-tab').forEach(tab => {
+                if (tab.dataset.mode === currentMode) tab.classList.add('active');
+                else tab.classList.remove('active');
+                tab.addEventListener('click', () => {
+                    currentMode = tab.dataset.mode;
+                    pageBns = 1;
+                    pageDuos = 1;
+                    document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    updateURL();
+                    render();
+                });
+            });
+
+            // Section tabs
+            document.querySelectorAll('.section-tab').forEach(tab => {
+                if (tab.dataset.section === currentSection) tab.classList.add('active');
+                else tab.classList.remove('active');
+                tab.addEventListener('click', () => {
+                    currentSection = tab.dataset.section;
+                    document.querySelectorAll('.section-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    document.querySelectorAll('.leaderboard-section').forEach(s => s.classList.remove('active'));
+                    document.getElementById('section-' + currentSection).classList.add('active');
+                    updateURL();
+                });
+            });
+
+            // Show correct section
+            document.querySelectorAll('.leaderboard-section').forEach(s => s.classList.remove('active'));
+            document.getElementById('section-' + currentSection).classList.add('active');
+
+            // Search - BNs
+            const searchBnsInput = document.getElementById('search-bns');
+            const searchBnsBtn = document.getElementById('search-bns-btn');
+            searchBnsBtn.addEventListener('click', () => {
+                searchBns = searchBnsInput.value.trim().toLowerCase();
+                pageBns = 1;
+                render();
+            });
+            searchBnsInput.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { e.preventDefault(); searchBnsBtn.click(); }
+            });
+
+            // Search - Duos
+            const searchDuosInput = document.getElementById('search-duos');
+            const searchDuosBtn = document.getElementById('search-duos-btn');
+            searchDuosBtn.addEventListener('click', () => {
+                searchDuos = searchDuosInput.value.trim().toLowerCase();
+                pageDuos = 1;
+                render();
+            });
+            searchDuosInput.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { e.preventDefault(); searchDuosBtn.click(); }
+            });
         }
 
-        // Page jump forms: submit on Enter (default form behavior handles it)
-        // Also submit on blur of page input
-        document.querySelectorAll('.page-input').forEach(input => {
-            input.addEventListener('blur', () => input.form.submit());
-        });
+        function updateURL() {
+            const p = new URLSearchParams();
+            if (currentMode !== 'all') p.set('mode', currentMode);
+            if (currentSection !== 'bns') p.set('section', currentSection);
+            const qs = p.toString();
+            history.replaceState(null, '', '/leaderboard' + (qs ? '?' + qs : ''));
+        }
+
+        function rankClass(r) {
+            if (r === 1) return 'rank-gold';
+            if (r === 2) return 'rank-silver';
+            if (r === 3) return 'rank-bronze';
+            return '';
+        }
+
+        function escapeHTML(s) {
+            const el = document.createElement('span');
+            el.textContent = s;
+            return el.innerHTML;
+        }
+
+        function render() {
+            renderBNs();
+            renderDuos();
+            renderScanInfo();
+        }
+
+        function renderBNs() {
+            const tbody = document.getElementById('bns-tbody');
+            if (!rawData || !rawData.top_bns) { tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>'; return; }
+
+            // Build filtered list
+            let bns = [];
+            for (const bn of rawData.top_bns) {
+                const count = currentMode === 'all' ? (bn.total || 0) : ((bn.by_mode || {})[currentMode] || 0);
+                if (count > 0) bns.push({ ...bn, display_count: count });
+            }
+            bns.sort((a, b) => b.display_count - a.display_count);
+
+            // Assign ranks before search filter
+            for (let i = 0; i < bns.length; i++) bns[i].rank = i + 1;
+
+            // Search filter (preserves ranks)
+            if (searchBns) bns = bns.filter(b => (b.username || '').toLowerCase().includes(searchBns));
+
+            // Pagination
+            const total = bns.length;
+            const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+            pageBns = Math.min(pageBns, totalPages);
+            const page = bns.slice((pageBns - 1) * PER_PAGE, pageBns * PER_PAGE);
+
+            // Render rows
+            if (page.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>';
+            } else {
+                let html = '';
+                for (const bn of page) {
+                    const rc = rankClass(bn.rank);
+                    const activeBadge = bn.is_current ? '<span class="current-bn">Active</span>' : '';
+                    html += `<tr class="${rc}"><td>${bn.rank}</td><td><a href="https://osu.ppy.sh/users/${bn.osu_id}" target="_blank" class="username-link">${escapeHTML(bn.username)}</a>${activeBadge}</td><td>${bn.display_count}</td></tr>`;
+                }
+                tbody.innerHTML = html;
+            }
+
+            // Pagination controls
+            renderPagination('bns-pagination', pageBns, totalPages, p => { pageBns = p; render(); });
+        }
+
+        function renderDuos() {
+            const tbody = document.getElementById('duos-tbody');
+            const thead = document.getElementById('duos-thead');
+            if (!rawData || !rawData.duos) { tbody.innerHTML = '<tr><td colspan="4" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>'; return; }
+
+            const showMode = currentMode === 'all';
+
+            // Update header
+            if (showMode) {
+                thead.innerHTML = '<tr><th>#</th><th>Duo</th><th>Mode</th><th>Maps Together</th></tr>';
+            } else {
+                thead.innerHTML = '<tr><th>#</th><th>Duo</th><th>Maps Together</th></tr>';
+            }
+
+            // Filter by mode
+            let duos = rawData.duos;
+            if (currentMode !== 'all') duos = duos.filter(d => d.mode === currentMode);
+
+            // Assign ranks
+            for (let i = 0; i < duos.length; i++) duos[i].rank = i + 1;
+
+            // Search filter
+            if (searchDuos) duos = duos.filter(d => ((d.bn1_name || '') + ' ' + (d.bn2_name || '')).toLowerCase().includes(searchDuos));
+
+            // Pagination
+            const total = duos.length;
+            const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+            pageDuos = Math.min(pageDuos, totalPages);
+            const page = duos.slice((pageDuos - 1) * PER_PAGE, pageDuos * PER_PAGE);
+
+            const cols = showMode ? 4 : 3;
+            if (page.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="${cols}" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>`;
+            } else {
+                let html = '';
+                for (const duo of page) {
+                    const rc = rankClass(duo.rank);
+                    const modeCol = showMode ? `<td><span class="mode-badge">${escapeHTML(duo.mode || '')}</span></td>` : '';
+                    html += `<tr class="${rc}"><td>${duo.rank}</td><td><a href="https://osu.ppy.sh/users/${duo.bn1_id}" target="_blank" class="username-link">${escapeHTML(duo.bn1_name)}</a><span class="duo-separator">x</span><a href="https://osu.ppy.sh/users/${duo.bn2_id}" target="_blank" class="username-link">${escapeHTML(duo.bn2_name)}</a></td>${modeCol}<td>${duo.count}</td></tr>`;
+                }
+                tbody.innerHTML = html;
+            }
+
+            // Pagination controls
+            renderPagination('duos-pagination', pageDuos, totalPages, p => { pageDuos = p; render(); });
+        }
+
+        function renderPagination(containerId, currentPage, totalPages, onPageChange) {
+            const container = document.getElementById(containerId);
+            if (totalPages <= 1) { container.innerHTML = ''; return; }
+
+            const prevDisabled = currentPage <= 1 ? 'disabled' : '';
+            const nextDisabled = currentPage >= totalPages ? 'disabled' : '';
+
+            container.innerHTML = `
+                <span class="pagination-btn ${prevDisabled}" id="${containerId}-prev">&#9664;</span>
+                <span class="pagination-info">
+                    Page <input type="number" class="page-input" id="${containerId}-input" value="${currentPage}" min="1" max="${totalPages}"> / ${totalPages}
+                </span>
+                <span class="pagination-btn ${nextDisabled}" id="${containerId}-next">&#9654;</span>
+            `;
+
+            document.getElementById(`${containerId}-prev`).addEventListener('click', () => {
+                if (currentPage > 1) onPageChange(currentPage - 1);
+            });
+            document.getElementById(`${containerId}-next`).addEventListener('click', () => {
+                if (currentPage < totalPages) onPageChange(currentPage + 1);
+            });
+
+            const pageInput = document.getElementById(`${containerId}-input`);
+            const jumpTo = () => {
+                let val = parseInt(pageInput.value, 10);
+                if (isNaN(val) || val < 1) val = 1;
+                if (val > totalPages) val = totalPages;
+                if (val !== currentPage) onPageChange(val);
+            };
+            pageInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); jumpTo(); } });
+            pageInput.addEventListener('blur', jumpTo);
+        }
+
+        function renderScanInfo() {
+            const el = document.getElementById('scan-info');
+            if (!rawData) { el.textContent = ''; return; }
+
+            let lastScan = 'Never';
+            if (rawData.last_scan) {
+                try {
+                    const dt = new Date(rawData.last_scan);
+                    lastScan = dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ', ' + dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                } catch (e) {
+                    lastScan = rawData.last_scan;
+                }
+            }
+            el.textContent = `Last updated: ${lastScan} | ${rawData.total_bns_scanned || 0} BNs scanned, ${rawData.total_sets_scanned || 0} sets processed`;
+        }
     </script>
 </body>
 

@@ -234,86 +234,32 @@ def download_report(cache_id):
 
 GLOBAL_SCAN_RUNNING = False
 
+# Server-side cache for leaderboard data (avoids hitting Firebase on every request)
+LEADERBOARD_CACHE = {'data': None, 'fetched_at': 0}
+LEADERBOARD_CACHE_TTL = 300  # 5 minutes
+
+def get_leaderboard_data():
+    """Get leaderboard data with server-side caching."""
+    now = time.time()
+    if LEADERBOARD_CACHE['data'] is not None and (now - LEADERBOARD_CACHE['fetched_at'] < LEADERBOARD_CACHE_TTL):
+        return LEADERBOARD_CACHE['data']
+    data = global_scan.load_from_firebase()
+    LEADERBOARD_CACHE['data'] = data
+    LEADERBOARD_CACHE['fetched_at'] = now
+    return data
+
 @app.route('/leaderboard')
 def leaderboard():
-    from datetime import datetime
-    PER_PAGE = 50
+    return render_template('leaderboard.html')
 
-    mode = request.args.get('mode', 'all')
-    section = request.args.get('section', 'bns')
-    q_bns = request.args.get('q_bns', '').strip().lower()
-    q_duos = request.args.get('q_duos', '').strip().lower()
-    page_bns = max(1, int(request.args.get('page_bns', 1)))
-    page_duos = max(1, int(request.args.get('page_duos', 1)))
-
-    data = global_scan.load_from_firebase()
-
-    all_bns = []
-    all_duos = []
-
-    if data and 'top_bns' in data:
-        for bn in data['top_bns']:
-            if mode == 'all':
-                display_count = bn.get('total', 0)
-            else:
-                display_count = bn.get('by_mode', {}).get(mode, 0)
-            if display_count > 0:
-                bn_entry = dict(bn)
-                bn_entry['display_count'] = display_count
-                all_bns.append(bn_entry)
-        all_bns.sort(key=lambda x: -x['display_count'])
-
-    if data and 'duos' in data:
-        for duo in data['duos']:
-            if mode == 'all' or duo.get('mode') == mode:
-                all_duos.append(duo)
-
-    # Assign global ranks before filtering
-    for i, bn in enumerate(all_bns):
-        bn['rank'] = i + 1
-    for i, duo in enumerate(all_duos):
-        duo['rank'] = i + 1
-
-    # Filter by search (ranks preserved)
-    filtered_bns = [b for b in all_bns if q_bns in b.get('username', '').lower()] if q_bns else all_bns
-    filtered_duos = [d for d in all_duos if q_duos in (d.get('bn1_name', '') + ' ' + d.get('bn2_name', '')).lower()] if q_duos else all_duos
-
-    # Paginate
-    total_bns = len(filtered_bns)
-    total_duos = len(filtered_duos)
-    total_pages_bns = max(1, -(-total_bns // PER_PAGE))
-    total_pages_duos = max(1, -(-total_duos // PER_PAGE))
-    page_bns = min(page_bns, total_pages_bns)
-    page_duos = min(page_duos, total_pages_duos)
-
-    top_bns = filtered_bns[(page_bns - 1) * PER_PAGE: page_bns * PER_PAGE]
-    duos = filtered_duos[(page_duos - 1) * PER_PAGE: page_duos * PER_PAGE]
-
-    # Format date
-    last_scan_raw = data.get('last_scan') if data else None
-    last_scan = 'Never'
-    if last_scan_raw:
-        try:
-            dt = datetime.fromisoformat(last_scan_raw)
-            last_scan = dt.strftime('%d %b %Y, %H:%M')
-        except Exception:
-            last_scan = last_scan_raw
-
-    return render_template('leaderboard.html',
-                           data=data,
-                           top_bns=top_bns,
-                           duos=duos,
-                           mode=mode,
-                           section=section,
-                           q_bns=q_bns,
-                           q_duos=q_duos,
-                           page_bns=page_bns,
-                           page_duos=page_duos,
-                           total_pages_bns=total_pages_bns,
-                           total_pages_duos=total_pages_duos,
-                           total_bns=total_bns,
-                           total_duos=total_duos,
-                           last_scan=last_scan)
+@app.route('/api/leaderboard_data')
+@limiter.exempt
+def leaderboard_data():
+    """Returns full leaderboard JSON. Client handles filtering/pagination."""
+    data = get_leaderboard_data()
+    if not data:
+        return jsonify(None)
+    return jsonify(data)
 
 @app.route('/api/run_global_scan', methods=['POST'])
 def trigger_global_scan():
