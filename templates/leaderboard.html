@@ -599,7 +599,16 @@
             // Build filtered list
             let bns = [];
             for (const bn of rawData.top_bns) {
-                const count = currentMode === 'all' ? (bn.total || 0) : ((bn.by_mode || {})[currentMode] || 0);
+                // Handle both 'catch' and 'fruits' in the old data
+                let count = 0;
+                if (currentMode === 'all') {
+                    count = bn.total || 0;
+                } else if (currentMode === 'catch') {
+                    count = ((bn.by_mode || {}).catch || 0) + ((bn.by_mode || {}).fruits || 0);
+                } else {
+                    count = (bn.by_mode || {})[currentMode] || 0;
+                }
+
                 if (count > 0) bns.push({ ...bn, display_count: count });
             }
             bns.sort((a, b) => b.display_count - a.display_count);
@@ -649,7 +658,13 @@
 
             // Filter by mode
             let duos = rawData.duos;
-            if (currentMode !== 'all') duos = duos.filter(d => d.mode === currentMode);
+            if (currentMode !== 'all') {
+                if (currentMode === 'catch') {
+                    duos = duos.filter(d => d.mode === 'catch' || d.mode === 'fruits');
+                } else {
+                    duos = duos.filter(d => d.mode === currentMode);
+                }
+            }
 
             // Assign ranks
             for (let i = 0; i < duos.length; i++) duos[i].rank = i + 1;
