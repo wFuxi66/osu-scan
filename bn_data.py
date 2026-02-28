@@ -51,8 +51,45 @@ def extract_bn_info(user):
         'nat_duration': user.get('natDuration', 0),
     }
 
+def fetch_alumni():
+    """Fetches osu! Alumni (group 16) from the groups page to catch old BNs not in Mapper's Guild."""
+    import re
+    
+    alumni = []
+    
+    try:
+        r = requests.get('https://osu.ppy.sh/groups/16', timeout=30)
+        if r.status_code != 200:
+            print(f"Alumni page returned status {r.status_code}")
+            return []
+        
+        # osu! embeds user data in <script id="json-users"> tag
+        match = re.search(r'<script\s+id="json-users"[^>]*>(.*?)</script>', r.text, re.DOTALL)
+        if not match:
+            print("Could not find json-users in Alumni page")
+            return []
+        
+        import json
+        users = json.loads(match.group(1))
+        
+        for user in users:
+            alumni.append({
+                'osu_id': user['id'],
+                'username': user.get('username', f'User_{user["id"]}'),
+                'modes': [],
+                'is_current': False,
+                'bn_duration': 0,
+                'nat_duration': 0,
+            })
+        
+        print(f"Found {len(alumni)} Alumni from osu! group 16")
+    except Exception as e:
+        print(f"Error fetching Alumni: {e}")
+    
+    return alumni
+
 def get_all_bns():
-    """Fetches and merges all BNs (current + former) into a deduplicated list."""
+    """Fetches and merges all BNs (current + former + alumni) into a deduplicated list."""
     print("Fetching current BNs from Mapper's Guild...")
     current = fetch_current_bns()
     print(f"Found {len(current)} current BNs/NATs")
@@ -80,6 +117,17 @@ def get_all_bns():
         if osu_id not in seen_ids:
             seen_ids.add(osu_id)
             all_bns.append(extract_bn_info(user))
+    
+    # Then Alumni from osu! group 16 (catches old BNs missing from Mapper's Guild)
+    print("Fetching Alumni from osu! group 16...")
+    alumni = fetch_alumni()
+    alumni_added = 0
+    for al in alumni:
+        if al['osu_id'] not in seen_ids:
+            seen_ids.add(al['osu_id'])
+            all_bns.append(al)
+            alumni_added += 1
+    print(f"Added {alumni_added} new Alumni not in Mapper's Guild")
     
     print(f"Total unique BNs/NATs: {len(all_bns)}")
     return all_bns
