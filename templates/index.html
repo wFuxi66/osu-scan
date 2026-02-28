@@ -89,11 +89,81 @@
         }
     </style>
     <script>
-        function showLoader() {
-            document.getElementById('loader').style.display = 'block';
-            document.getElementById('info').style.display = 'block';
-            document.getElementById('search-btn').disabled = true;
-            document.getElementById('nom-btn').disabled = true;
+        async function startScan(mode) {
+            const username = document.getElementById('username-input').value;
+            if (!username) {
+                alert("Please enter a username or ID");
+                return;
+            }
+
+            // UI
+            const loader = document.getElementById('loader');
+            const info = document.getElementById('info');
+            const btn1 = document.getElementById('search-btn');
+            const btn2 = document.getElementById('nom-btn');
+            const errorDiv = document.getElementById('error-msg');
+
+            if (errorDiv) errorDiv.style.display = 'none';
+
+            loader.style.display = 'block';
+            info.style.display = 'block';
+            info.innerText = 'Starting...';
+            btn1.disabled = true;
+            btn2.disabled = true;
+
+            // 1. Start Job
+            const formData = new FormData();
+            formData.append('username', username);
+            formData.append('mode', mode);
+
+            try {
+                const response = await fetch('/api/start_scan', { method: 'POST', body: formData });
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                const jobId = data.job_id;
+                pollStatus(jobId);
+
+            } catch (e) {
+                stopLoading(e.message);
+            }
+        }
+
+        function pollStatus(jobId) {
+            const info = document.getElementById('info');
+
+            const interval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/status/${jobId}`);
+                    const status = await res.json();
+
+                    if (status.status === 'running') {
+                        info.innerText = status.message;
+                    } else if (status.status === 'done') {
+                        clearInterval(interval);
+                        window.location.href = `/results_view/${status.result_id}`;
+                    } else if (status.status === 'error') {
+                        clearInterval(interval);
+                        stopLoading(status.error);
+                    }
+                } catch (e) {
+                    clearInterval(interval);
+                    stopLoading("Network error");
+                }
+            }, 1000);
+        }
+
+        function stopLoading(msg) {
+            document.getElementById('loader').style.display = 'none';
+            document.getElementById('search-btn').disabled = false;
+            document.getElementById('nom-btn').disabled = false;
+            const info = document.getElementById('info');
+            info.style.display = 'block';
+            info.innerText = "Error: " + msg;
+            info.style.color = '#ff6b6b';
         }
     </script>
 </head>
@@ -102,19 +172,16 @@
     <div class="container">
         <h1>osu!scan</h1>
         <p>Scan your GDers & Nominators</p>
-        <form action="/search" method="post" onsubmit="showLoader()">
-            <input type="text" name="username" placeholder="Username or ID" required>
+        <div>
+            <input type="text" id="username-input" name="username" placeholder="Username or ID" required>
             <br><br>
-            <button type="submit" name="mode" value="gd" id="search-btn">Scan GDers</button>
-            <button type="submit" name="mode" value="nominators" id="nom-btn" style="background-color: #4facfe;">Scan
+            <button id="search-btn" onclick="startScan('gd')">Scan GDers</button>
+            <button id="nom-btn" onclick="startScan('nominators')" style="background-color: #4facfe;">Scan
                 Nominators</button>
-        </form>
+        </div>
         <div id="loader" class="loader"></div>
-        <div id="info" class="info" style="display:none;">Scanning... This may take a few minutes. Check the terminal
-            for progress.</div>
-        {% if error %}
-        <div class="error">{{ error }}</div>
-        {% endif %}
+        <div id="info" class="info" style="display:none; font-family: monospace; font-weight: bold;"></div>
+        <div id="error-msg" class="error" style="display:none;"></div>
     </div>
 </body>
 
