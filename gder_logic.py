@@ -64,7 +64,7 @@ def get_beatmapsets(user_id, token):
     """Fetches all beatmap sets for a user."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
-    set_types = ['graveyard', 'pending', 'ranked', 'loved']
+    set_types = ['ranked', 'loved']
     
     for s_type in set_types:
         offset = 0
