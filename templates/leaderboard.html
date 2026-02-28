@@ -120,6 +120,7 @@
             width: 100%;
             border-collapse: collapse;
             margin-top: 10px;
+            table-layout: fixed;
         }
 
         th {
@@ -129,10 +130,21 @@
             text-align: left;
         }
 
+        th:nth-child(1) {
+            width: 60px;
+        }
+
+        th:nth-child(3) {
+            width: 150px;
+        }
+
         td {
             padding: 12px;
             border-bottom: 1px solid #0f3460;
             color: inherit;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         tbody tr {
