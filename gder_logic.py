@@ -99,14 +99,43 @@ def get_beatmapsets(user_id, token):
                 
     return all_sets
 
-def analyze_sets(beatmapsets, host_id):
-    """Finds GDs in the provided beatmap sets."""
+def analyze_sets(beatmapsets, host_id, token, progress_callback=None):
+    """Finds GDs in the provided beatmap sets using DEEP scan for accuracy."""
     gds = []
-    for bset in beatmapsets:
-        if bset['user_id'] != host_id:
-            continue
+    headers = {'Authorization': f'Bearer {token}'}
+    
+    total = len(beatmapsets)
+    if progress_callback: progress_callback(f"Deep Scanning {total} sets for precise Collab detection...")
+    
+    for i, bset in enumerate(beatmapsets):
+        # Progress update every few sets
+        if i % 5 == 0:
+            if progress_callback: progress_callback(f"Scanning set {i+1}/{total}: {bset['title']}...")
             
-        beats = bset.get('beatmaps', [])
+        try:
+            # FETCH DEEP INFO (Crucial for 'owners' field)
+            url = f'{API_BASE}/beatmapsets/{bset["id"]}'
+            r = requests.get(url, headers=headers, timeout=10)
+            
+            if r.status_code == 200:
+                full_set = r.json()
+            else:
+                # Fallback to shallow data if fetch fails
+                full_set = bset
+            
+            # Rate limit sleep
+            time.sleep(0.15)
+            
+        except Exception as e:
+            print(f"Error fetching deep set {bset['id']}: {e}")
+            full_set = bset
+
+        # Analyze
+        if full_set['user_id'] != host_id:
+             # Even if the set host doesn't match, we check individual maps
+             pass
+
+        beats = full_set.get('beatmaps', [])
         if not beats:
             continue
             
@@ -120,7 +149,7 @@ def analyze_sets(beatmapsets, host_id):
                     if owner['id'] != host_id:
                         gd_entry = {
                             'mapper_id': owner['id'],
-                            'mapper_name': owner['username'], # We get the name for free!
+                            'mapper_name': owner['username'], 
                             'last_updated': beatmap['last_updated']
                         }
                         gds.append(gd_entry)
@@ -134,6 +163,7 @@ def analyze_sets(beatmapsets, host_id):
                         'last_updated': beatmap['last_updated']
                     }
                     gds.append(gd_entry)
+                    
     return gds
 
 def analyze_nominators(beatmapsets, token, progress_callback=None):
@@ -320,7 +350,7 @@ def generate_leaderboard_for_user(username_input, progress_callback=None):
     if progress_callback: progress_callback(f"Found User: {username}. Fetching sets...")
     
     sets = get_beatmapsets(user_id, token)
-    gds = analyze_sets(sets, user_id)
+    gds = analyze_sets(sets, user_id, token, progress_callback)
     
     if not gds:
         return {'username': username, 'leaderboard': []}
