@@ -141,7 +141,7 @@ def process_set(bset, host_id, token):
                     gd_entry = {
                         'mapper_id': owner['id'],
                         'mapper_name': owner['username'], 
-                        'last_updated': beatmap['last_updated']
+                        'last_updated': beatmap['last_updated'].split('T')[0]
                     }
                     gds_in_set.append(gd_entry)
                     seen_mappers_in_set.add(owner['id'])
@@ -151,7 +151,7 @@ def process_set(bset, host_id, token):
                 gd_entry = {
                     'mapper_id': mapper_id,
                     'mapper_name': None, 
-                    'last_updated': beatmap['last_updated']
+                    'last_updated': beatmap['last_updated'].split('T')[0]
                 }
                 gds_in_set.append(gd_entry)
                 seen_mappers_in_set.add(mapper_id)
@@ -162,7 +162,7 @@ def analyze_sets(beatmapsets, host_id, token, progress_callback=None):
     """Finds GDs in the provided beatmap sets using Concurrent Futures for speed."""
     all_gds = []
     total = len(beatmapsets)
-    if progress_callback: progress_callback(f"Deep Scanning {total} sets with 5 threads...")
+    if progress_callback: progress_callback(f"Deep Scanning {total} sets...")
     
     # Use ThreadPool to speed up I/O
     # Max workers = 5 to be safe with rate limits (osu! is lenient but let's not push it)
@@ -214,7 +214,7 @@ def analyze_nominators(beatmapsets, token, progress_callback=None):
                     nominations.append({
                         'nominator_id': nom['user_id'],
                         'set_title': f"{bset['artist']} - {bset['title']}",
-                        'date': bset.get('ranked_date') or bset.get('last_updated') # Approximate date
+                        'date': (bset.get('ranked_date') or bset.get('last_updated')).split('T')[0] # Approximate date
                     })
             time.sleep(0.15) # Respect rate limits
         except Exception as e:
