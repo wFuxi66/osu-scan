@@ -99,72 +99,90 @@ def get_beatmapsets(user_id, token):
                 
     return all_sets
 
-def analyze_sets(beatmapsets, host_id, token, progress_callback=None):
-    """Finds GDs in the provided beatmap sets using DEEP scan for accuracy."""
-    gds = []
+import concurrent.futures
+
+def process_set(bset, host_id, token):
+    """Deep scans a single set and finds unique GDers."""
     headers = {'Authorization': f'Bearer {token}'}
+    gds_in_set = []
     
-    total = len(beatmapsets)
-    if progress_callback: progress_callback(f"Deep Scanning {total} sets for precise Collab detection...")
-    
-    for i, bset in enumerate(beatmapsets):
-        # Progress update every few sets
-        if i % 5 == 0:
-            if progress_callback: progress_callback(f"Scanning set {i+1}/{total}: {bset['title']}...")
-            
-        try:
-            # FETCH DEEP INFO (Crucial for 'owners' field)
-            url = f'{API_BASE}/beatmapsets/{bset["id"]}'
-            r = requests.get(url, headers=headers, timeout=10)
-            
-            if r.status_code == 200:
-                full_set = r.json()
-            else:
-                # Fallback to shallow data if fetch fails
-                full_set = bset
-            
-            # Rate limit sleep
-            time.sleep(0.15)
-            
-        except Exception as e:
-            print(f"Error fetching deep set {bset['id']}: {e}")
+    try:
+        # Full Deep Fetch
+        url = f'{API_BASE}/beatmapsets/{bset["id"]}'
+        r = requests.get(url, headers=headers, timeout=10)
+        
+        if r.status_code == 200:
+            full_set = r.json()
+        else:
             full_set = bset
-
-        # Analyze
-        if full_set['user_id'] != host_id:
-             # Even if the set host doesn't match, we check individual maps
-             pass
-
-        beats = full_set.get('beatmaps', [])
-        if not beats:
-            continue
             
-        for beatmap in beats:
-            # Check for multi-owner support (collabs)
-            owners = beatmap.get('owners', [])
-            
-            if owners:
-                # If owners list exists, credit everyone in it (except the set host)
-                for owner in owners:
-                    if owner['id'] != host_id:
-                        gd_entry = {
-                            'mapper_id': owner['id'],
-                            'mapper_name': owner['username'], 
-                            'last_updated': beatmap['last_updated']
-                        }
-                        gds.append(gd_entry)
-            else:
-                # Fallback to single user_id
-                mapper_id = beatmap['user_id']
-                if mapper_id != host_id:
+    except Exception as e:
+        print(f"Error fetching deep set {bset['id']}: {e}")
+        full_set = bset
+
+    # Analyze
+    if full_set['user_id'] != host_id:
+         pass
+
+    beats = full_set.get('beatmaps', [])
+    if not beats:
+        return []
+
+    # Dedup tracker for THIS set
+    # We only want to count a mapper ONCE per set.
+    seen_mappers_in_set = set()
+
+    for beatmap in beats:
+        owners = beatmap.get('owners', [])
+        
+        if owners:
+            for owner in owners:
+                if owner['id'] != host_id and owner['id'] not in seen_mappers_in_set:
                     gd_entry = {
-                        'mapper_id': mapper_id,
-                        'mapper_name': None, 
+                        'mapper_id': owner['id'],
+                        'mapper_name': owner['username'], 
                         'last_updated': beatmap['last_updated']
                     }
-                    gds.append(gd_entry)
-                    
-    return gds
+                    gds_in_set.append(gd_entry)
+                    seen_mappers_in_set.add(owner['id'])
+        else:
+            mapper_id = beatmap['user_id']
+            if mapper_id != host_id and mapper_id not in seen_mappers_in_set:
+                gd_entry = {
+                    'mapper_id': mapper_id,
+                    'mapper_name': None, 
+                    'last_updated': beatmap['last_updated']
+                }
+                gds_in_set.append(gd_entry)
+                seen_mappers_in_set.add(mapper_id)
+                
+    return gds_in_set
+
+def analyze_sets(beatmapsets, host_id, token, progress_callback=None):
+    """Finds GDs in the provided beatmap sets using Concurrent Futures for speed."""
+    all_gds = []
+    total = len(beatmapsets)
+    if progress_callback: progress_callback(f"Deep Scanning {total} sets with 5 threads...")
+    
+    # Use ThreadPool to speed up I/O
+    # Max workers = 5 to be safe with rate limits (osu! is lenient but let's not push it)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        # Submit all tasks
+        future_to_set = {executor.submit(process_set, bset, host_id, token): bset for bset in beatmapsets}
+        
+        completed = 0
+        for future in concurrent.futures.as_completed(future_to_set):
+            completed += 1
+            if completed % 5 == 0:
+                if progress_callback: progress_callback(f"Scanning progress: {completed}/{total} sets...")
+            
+            try:
+                results = future.result()
+                all_gds.extend(results)
+            except Exception as e:
+                print(f"Set processing generated an exception: {e}")
+                
+    return all_gds
 
 def analyze_nominators(beatmapsets, token, progress_callback=None):
     """Fetches nominators for the provided beatmap sets."""
