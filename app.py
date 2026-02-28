@@ -31,11 +31,16 @@ limiter = Limiter(
 JOBS = {}
 RESULTS_CACHE = {}
 
-# TTL for cleanup (10 minutes)
+# Scan result cache: { 'username_lower:mode': { 'result': {...}, 'created_at': timestamp } }
+# This caches actual scan results to avoid re-scanning same user
+SCAN_CACHE = {}
+SCAN_CACHE_TTL = 1800  # 30 minutes - cached scans stay valid this long
+
+# TTL for cleanup (10 minutes for jobs/results view)
 CACHE_TTL_SECONDS = 600
 
 def cleanup_old_entries():
-    """Remove jobs and results older than CACHE_TTL_SECONDS."""
+    """Remove jobs and results older than their TTLs."""
     now = time.time()
     
     # Cleanup old jobs
@@ -44,14 +49,20 @@ def cleanup_old_entries():
     for jid in old_jobs:
         del JOBS[jid]
     
-    # Cleanup old results
+    # Cleanup old results (view cache)
     old_results = [cid for cid, result in RESULTS_CACHE.items() 
                    if now - result.get('created_at', now) > CACHE_TTL_SECONDS]
     for cid in old_results:
         del RESULTS_CACHE[cid]
     
-    if old_jobs or old_results:
-        print(f"Cleanup: removed {len(old_jobs)} jobs, {len(old_results)} cached results")
+    # Cleanup old scan cache
+    old_scans = [key for key, data in SCAN_CACHE.items()
+                 if now - data.get('created_at', now) > SCAN_CACHE_TTL]
+    for key in old_scans:
+        del SCAN_CACHE[key]
+    
+    if old_jobs or old_results or old_scans:
+        print(f"Cleanup: removed {len(old_jobs)} jobs, {len(old_results)} results, {len(old_scans)} cached scans")
 
 @app.route('/', methods=['GET'])
 def index():
@@ -85,7 +96,7 @@ def run_scan_job(job_id, username, mode, cancel_event):
              JOBS[job_id]['status'] = 'error'
              JOBS[job_id]['error'] = result['error']
         else:
-            # Done
+            # Done - save to results cache
             RESULTS_CACHE[job_id] = {
                 'username': result['username'], 
                 'leaderboard': result['leaderboard'],
@@ -94,6 +105,17 @@ def run_scan_job(job_id, username, mode, cancel_event):
             }
             JOBS[job_id]['status'] = 'done'
             JOBS[job_id]['result_id'] = job_id
+            
+            # Also save to SCAN_CACHE for future requests
+            cache_key = f"{username.lower().strip()}:{mode}"
+            SCAN_CACHE[cache_key] = {
+                'result': {
+                    'username': result['username'],
+                    'leaderboard': result['leaderboard'],
+                    'title_prefix': title_prefix
+                },
+                'created_at': time.time()
+            }
             
     except Exception as e:
         JOBS[job_id]['status'] = 'error'
@@ -110,6 +132,27 @@ def start_scan():
     
     if not username:
         return jsonify({'error': 'Username required'}), 400
+    
+    # Check if we have a cached result for this user+mode
+    cache_key = f"{username.lower().strip()}:{mode}"
+    cached = SCAN_CACHE.get(cache_key)
+    
+    if cached and (time.time() - cached['created_at'] < SCAN_CACHE_TTL):
+        # Return cached result instantly!
+        job_id = str(uuid.uuid4())
+        RESULTS_CACHE[job_id] = {
+            'username': cached['result']['username'],
+            'leaderboard': cached['result']['leaderboard'],
+            'title_prefix': cached['result']['title_prefix'],
+            'created_at': time.time()
+        }
+        JOBS[job_id] = {
+            'status': 'done',
+            'message': 'Loaded from cache',
+            'result_id': job_id,
+            'created_at': time.time()
+        }
+        return jsonify({'job_id': job_id, 'cached': True})
         
     job_id = str(uuid.uuid4())
     cancel_event = threading.Event()
