@@ -36,7 +36,7 @@ def run_scan_job(job_id, username, mode, cancel_event):
             title_prefix = "Mappers Nominated by"
         else:
             result = gder_logic.generate_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
-            title_prefix = "Guest Difficulty"
+            title_prefix = "Guest Difficulties"
             
         if cancel_event.is_set():
             JOBS[job_id]['status'] = 'cancelled'
