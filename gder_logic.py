@@ -457,6 +457,101 @@ def generate_bn_leaderboard_for_user(username_input, progress_callback=None, can
         'type': 'Nominations'
     }
 
+def get_guest_beatmapsets(user_id, token, cancel_event=None):
+    """Fetches all beatmap sets where the user has contributed a guest difficulty."""
+    headers = {'Authorization': f'Bearer {token}'}
+    all_sets = []
+    
+    offset = 0
+    limit = 100
+    
+    while True:
+        if cancel_event and cancel_event.is_set(): return []
+        
+        params = {'limit': limit, 'offset': offset}
+        url = f'{API_BASE}/users/{user_id}/beatmapsets/guest'
+        
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=10)
+            if response.status_code == 404: break
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            if not data: break
+                
+            all_sets.extend(data)
+            
+            if len(data) < limit: break
+            
+            offset += len(data)
+            time.sleep(0.1)
+        except Exception as e:
+            print(f"Warning: Failed to fetch guest sets: {e}")
+            break
+            
+    return all_sets
+
+def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=None, cancel_event=None):
+    """New Mode: Find which mappers the user has made the most GDs for."""
+    token = get_token()
+    if not token: return {'error': 'Authentication failed'}
+    
+    if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
+    
+    user_id, username = get_user_id(username_input, token)
+    if not user_id: return {'error': f'User {username_input} not found'}
+    
+    # 1. Fetch guest beatmapsets (maps where user contributed a GD)
+    if progress_callback: progress_callback(f"Fetching GD sets for {username}...")
+    sets = get_guest_beatmapsets(user_id, token, cancel_event)
+    
+    if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
+    
+    if not sets:
+         return {'username': username, 'leaderboard': []}
+
+    # 2. Count hosts (user_id field in each beatmapset = the host)
+    if progress_callback: progress_callback(f"Analyzing {len(sets)} GD sets...")
+    
+    stats = defaultdict(lambda: {'count': 0, 'last_date': ''})
+    hosts_to_resolve = set()
+    
+    for bset in sets:
+        host_id = bset['user_id']
+        hosts_to_resolve.add(host_id)
+        
+        # Use ranked_date or last_updated as date
+        date = (bset.get('ranked_date') or bset.get('last_updated') or '').split('T')[0]
+        
+        stats[host_id]['count'] += 1
+        if date and date > stats[host_id]['last_date']:
+            stats[host_id]['last_date'] = date
+            
+    # 3. Resolve host names
+    if progress_callback: progress_callback("Resolving host names...")
+    user_cache = resolve_users_parallel(hosts_to_resolve, token, progress_callback)
+    
+    if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
+    
+    # 4. Build leaderboard
+    leaderboard = []
+    for host_id, data in stats.items():
+        name = user_cache.get(host_id, f"ID:{host_id}")
+        leaderboard.append({
+            'mapper_name': name,
+            'total_gds': data['count'],
+            'last_gd_date': data['last_date']
+        })
+        
+    leaderboard.sort(key=lambda x: (-x['total_gds'], x['mapper_name']))
+    
+    return {
+        'username': username,
+        'leaderboard': leaderboard,
+        'type': 'GD Hosts'
+    }
+
 def resolve_and_aggregate(gds, token, progress_callback=None):
     """Resolves names and builds the leaderboard using parallel resolution."""
     
