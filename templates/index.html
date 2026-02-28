@@ -49,9 +49,13 @@
 
             .mode-selection {
                 padding-left: 0;
-                /* Center align items or remove left padding */
-                align-items: center;
-                /* Center items */
+                /* Remove fixed desktop padding */
+                width: fit-content;
+                /* Shrink container to content */
+                margin: 25px auto;
+                /* Center the container */
+                align-items: flex-start;
+                /* Keep items left-aligned relative to each other */
             }
         }
 
