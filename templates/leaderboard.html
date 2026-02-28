@@ -172,26 +172,23 @@
             text-decoration: underline;
         }
 
-        .current-bn {
-            font-size: 10px;
-            background: #2ecc71;
-            color: #fff;
-            padding: 2px 6px;
-            border-radius: 10px;
+        .mode-icon {
+            width: 16px;
+            height: 16px;
+            vertical-align: middle;
+            opacity: 0.75;
+        }
+
+        .mode-icons {
+            display: inline-flex;
+            gap: 3px;
             margin-left: 6px;
+            vertical-align: middle;
         }
 
         .duo-separator {
             color: #e94560;
             margin: 0 4px;
-        }
-
-        .mode-badge {
-            font-size: 11px;
-            padding: 2px 8px;
-            border-radius: 3px;
-            background: rgba(15, 52, 96, 0.8);
-            color: #4facfe;
         }
 
         .scan-info {
@@ -573,6 +570,20 @@
             history.replaceState(null, '', '/leaderboard' + (qs ? '?' + qs : ''));
         }
 
+        const MODE_ICONS = {
+            'osu': 'https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67',
+            'taiko': 'https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67',
+            'catch': 'https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67',
+            'fruits': 'https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67',
+            'mania': 'https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67',
+        };
+
+        function modeIcon(mode) {
+            const url = MODE_ICONS[mode];
+            if (!url) return '';
+            return `<img src="${url}" class="mode-icon" title="${mode}" alt="${mode}">`;
+        }
+
         function rankClass(r) {
             if (r === 1) return 'rank-gold';
             if (r === 2) return 'rank-silver';
@@ -632,8 +643,13 @@
                 let html = '';
                 for (const bn of page) {
                     const rc = rankClass(bn.rank);
-                    const activeBadge = bn.is_current ? '<span class="current-bn">Active</span>' : '';
-                    html += `<tr class="${rc}"><td>${bn.rank}</td><td><a href="https://osu.ppy.sh/users/${bn.osu_id}" target="_blank" class="username-link">${escapeHTML(bn.username)}</a>${activeBadge}</td><td>${bn.display_count}</td></tr>`;
+                    // Show mode icons for all modes the BN participated in (when in All filter)
+                    let icons = '';
+                    if (currentMode === 'all') {
+                        const modes = Object.keys(bn.by_mode || {}).filter(m => (bn.by_mode[m] || 0) > 0);
+                        icons = modes.map(modeIcon).join('');
+                    }
+                    html += `<tr class="${rc}"><td>${bn.rank}</td><td><a href="https://osu.ppy.sh/users/${bn.osu_id}" target="_blank" class="username-link">${escapeHTML(bn.username)}</a>${icons ? '<span class="mode-icons">' + icons + '</span>' : ''}</td><td>${bn.display_count}</td></tr>`;
                 }
                 tbody.innerHTML = html;
             }
@@ -645,16 +661,10 @@
         function renderDuos() {
             const tbody = document.getElementById('duos-tbody');
             const thead = document.getElementById('duos-thead');
-            if (!rawData || !rawData.duos) { tbody.innerHTML = '<tr><td colspan="4" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>'; return; }
+            if (!rawData || !rawData.duos) { tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>'; return; }
 
-            const showMode = currentMode === 'all';
-
-            // Update header
-            if (showMode) {
-                thead.innerHTML = '<tr><th>#</th><th>Duo</th><th>Mode</th><th>Maps Together</th></tr>';
-            } else {
-                thead.innerHTML = '<tr><th>#</th><th>Duo</th><th>Maps Together</th></tr>';
-            }
+            // Always 3 columns - mode icon goes inline in the duo name cell
+            thead.innerHTML = '<tr><th>#</th><th>Duo</th><th>Maps Together</th></tr>';
 
             // Filter by mode
             let duos = rawData.duos;
@@ -678,15 +688,15 @@
             pageDuos = Math.min(pageDuos, totalPages);
             const page = duos.slice((pageDuos - 1) * PER_PAGE, pageDuos * PER_PAGE);
 
-            const cols = showMode ? 4 : 3;
             if (page.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="${cols}" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>`;
+                tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>';
             } else {
                 let html = '';
                 for (const duo of page) {
                     const rc = rankClass(duo.rank);
-                    const modeCol = showMode ? `<td><span class="mode-badge">${escapeHTML(duo.mode || '')}</span></td>` : '';
-                    html += `<tr class="${rc}"><td>${duo.rank}</td><td><a href="https://osu.ppy.sh/users/${duo.bn1_id}" target="_blank" class="username-link">${escapeHTML(duo.bn1_name)}</a><span class="duo-separator">x</span><a href="https://osu.ppy.sh/users/${duo.bn2_id}" target="_blank" class="username-link">${escapeHTML(duo.bn2_name)}</a></td>${modeCol}<td>${duo.count}</td></tr>`;
+                    // Show mode icon inline only in All mode
+                    const icon = currentMode === 'all' ? modeIcon(duo.mode || '') : '';
+                    html += `<tr class="${rc}"><td>${duo.rank}</td><td><a href="https://osu.ppy.sh/users/${duo.bn1_id}" target="_blank" class="username-link">${escapeHTML(duo.bn1_name)}</a><span class="duo-separator">x</span><a href="https://osu.ppy.sh/users/${duo.bn2_id}" target="_blank" class="username-link">${escapeHTML(duo.bn2_name)}</a>${icon ? ' ' + icon : ''}</td><td>${duo.count}</td></tr>`;
                 }
                 tbody.innerHTML = html;
             }
