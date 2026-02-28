@@ -414,7 +414,7 @@
             <!-- Section tabs -->
             <div class="section-tabs" id="section-tabs">
                 <div class="section-tab active" data-section="bns">Top BNs</div>
-                <div class="section-tab" data-section="duos">Iconic Duos</div>
+                <div class="section-tab" data-section="duos">Iconic BNs Duos</div>
             </div>
 
             <!-- Top BNs -->
@@ -439,7 +439,7 @@
                 <div class="pagination" id="bns-pagination"></div>
             </div>
 
-            <!-- Iconic Duos -->
+            <!-- Iconic BNs Duos -->
             <div id="section-duos" class="leaderboard-section">
                 <div class="search-form">
                     <input type="text" class="search-input" id="search-duos" placeholder="Search a duo..."
@@ -763,7 +763,13 @@
                     lastScan = rawData.last_scan;
                 }
             }
-            el.textContent = `Last updated: ${lastScan} | ${rawData.total_bns_scanned || 0} BNs scanned, ${rawData.total_sets_scanned || 0} sets processed`;
+
+            // Calculate 1st of next month for the next scheduled scan
+            const now = new Date();
+            const nextScanDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0));
+            const nextScanStr = nextScanDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+            el.innerHTML = `Last updated: ${lastScan} | ${rawData.total_bns_scanned || 0} BNs scanned, ${rawData.total_sets_scanned || 0} sets processed<br><span style="color: #4facfe; margin-top: 5px; display: inline-block;">Next automated scan: ${nextScanStr}</span>`;
         }
     </script>
 </body>
