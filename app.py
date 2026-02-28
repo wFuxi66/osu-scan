@@ -87,10 +87,10 @@ def run_scan_job(job_id, username, mode, cancel_event):
             title_prefix = "Nominated by"
         elif mode == 'gd_hosts':
             result = gder_logic.generate_gd_hosts_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
-            title_prefix = "Guest Difficulties for"
+            title_prefix = "Guest Difficulties by"
         else:
             result = gder_logic.generate_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
-            title_prefix = "Guest Difficulties by"
+            title_prefix = "Guest Difficulties for"
             
         if cancel_event.is_set():
             JOBS[job_id]['status'] = 'cancelled'
