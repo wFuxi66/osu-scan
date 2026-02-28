@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated reports (keep templates but not generated files)
+gd_report_*.csv
+leaderboard_*.csv
+leaderboard_*.html
+
+# Debug
+debug_api.py
