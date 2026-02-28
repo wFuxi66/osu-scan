@@ -177,151 +177,150 @@
         }
     </style>
     <script>
-        const form = document.getElementById('scanForm');
-        const progressDiv = document.getElementById('progress');
-        const statusText = document.getElementById('status-text');
-        const scanBtn = document.getElementById('scanBtn');
-        const cancelBtn = document.getElementById('cancelBtn');
+        document.addEventListener('DOMContentLoaded', () => {
+            const form = document.getElementById('scanForm');
+            const progressDiv = document.getElementById('progress');
+            const statusText = document.getElementById('status-text');
+            const scanBtn = document.getElementById('scanBtn');
+            const cancelBtn = document.getElementById('cancelBtn');
 
-        let currentJobId = null;
-        let isCancelled = false;
-        let pollInterval = null; // To store the interval ID
+            let currentJobId = null;
+            let isCancelled = false;
+            let pollInterval = null;
 
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
+            if (form) {
+                form.addEventListener('submit', async (e) => {
+                    e.preventDefault();
 
-            const username = document.getElementById('username-input').value; // Changed to username-input
-            const mode = document.querySelector('input[name="mode"]:checked').value;
+                    const usernameInput = document.getElementById('username-input');
+                    const username = usernameInput ? usernameInput.value : '';
+                    const modeInput = document.querySelector('input[name="mode"]:checked');
+                    const mode = modeInput ? modeInput.value : 'gd';
 
-            if (!username) {
-                alert("Please enter a username or ID");
-                return;
-            }
+                    if (!username) {
+                        alert("Please enter a username or ID");
+                        return;
+                    }
 
-            // Reset UI
-            scanBtn.disabled = true;
-            progressDiv.classList.remove('hidden');
-            statusText.textContent = "Initializing...";
-            isCancelled = false;
-            cancelBtn.disabled = false;
-            cancelBtn.textContent = "Cancel Scan";
+                    // Reset UI
+                    scanBtn.disabled = true;
+                    progressDiv.classList.remove('hidden');
+                    statusText.textContent = "Initializing...";
+                    isCancelled = false;
+                    cancelBtn.disabled = false;
+                    cancelBtn.textContent = "Cancel Scan";
 
-            // Clear any previous polling interval
-            if (pollInterval) {
-                clearInterval(pollInterval);
-            }
+                    if (pollInterval) clearInterval(pollInterval);
 
-            try {
-                // Start Job
-                const formData = new FormData();
-                formData.append('username', username);
-                formData.append('mode', mode);
+                    try {
+                        const formData = new FormData();
+                        formData.append('username', username);
+                        formData.append('mode', mode);
 
-                const startRes = await fetch('/api/start_scan', {
-                    method: 'POST',
-                    body: formData
-                });
+                        const startRes = await fetch('/api/start_scan', {
+                            method: 'POST',
+                            body: formData
+                        });
 
-                const startData = await startRes.json();
+                        const startData = await startRes.json();
 
-                if (startData.error) {
-                    alert(startData.error);
-                    resetUI();
-                    return;
-                }
-
-                currentJobId = startData.job_id;
-                pollStatus(currentJobId);
-
-            } catch (err) {
-                console.error(err);
-                alert("Network error starting scan.");
-                resetUI();
-            }
-        });
-
-        cancelBtn.addEventListener('click', async () => {
-            if (!currentJobId) return;
-
-            if (confirm("Stop the current scan?")) {
-                statusText.textContent = "Cancelling...";
-                cancelBtn.disabled = true;
-                isCancelled = true;
-
-                // Clear the polling interval immediately
-                if (pollInterval) {
-                    clearInterval(pollInterval);
-                }
-
-                try {
-                    await fetch(`/api/cancel_scan/${currentJobId}`, { method: 'POST' });
-                } catch (e) {
-                    console.error("Cancel failed", e);
-                } finally {
-                    // Ensure UI is reset even if cancel API fails
-                    setTimeout(() => {
-                        if (isCancelled) { // Only reset if still in cancelled state
-                            statusText.textContent = "Scan cancelled.";
+                        if (startData.error) {
+                            alert(startData.error);
                             resetUI();
+                            return;
                         }
-                    }, 1000);
-                }
+
+                        currentJobId = startData.job_id;
+                        pollStatus(currentJobId);
+
+                    } catch (err) {
+                        console.error(err);
+                        alert("Network error starting scan.");
+                        resetUI();
+                    }
+                });
             }
-        });
 
-        function pollStatus(jobId) {
-            if (isCancelled) return;
+            if (cancelBtn) {
+                cancelBtn.addEventListener('click', async () => {
+                    if (!currentJobId) return;
 
-            pollInterval = setInterval(async () => {
-                if (isCancelled) {
-                    clearInterval(pollInterval);
-                    resetUI();
-                    return;
-                }
+                    if (confirm("Stop the current scan?")) {
+                        statusText.textContent = "Cancelling...";
+                        cancelBtn.disabled = true;
+                        isCancelled = true;
 
-                try {
-                    const res = await fetch(`/api/status/${jobId}`);
-                    if (res.status === 404) {
+                        if (pollInterval) clearInterval(pollInterval);
+
+                        try {
+                            await fetch(`/api/cancel_scan/${currentJobId}`, { method: 'POST' });
+                        } catch (e) {
+                            console.error("Cancel failed", e);
+                        } finally {
+                            setTimeout(() => {
+                                if (isCancelled) {
+                                    statusText.textContent = "Scan cancelled.";
+                                    resetUI();
+                                }
+                            }, 1000);
+                        }
+                    }
+                });
+            }
+
+            function pollStatus(jobId) {
+                if (isCancelled) return;
+
+                pollInterval = setInterval(async () => {
+                    if (isCancelled) {
                         clearInterval(pollInterval);
-                        alert("Job lost.");
                         resetUI();
                         return;
                     }
 
-                    const data = await res.json();
+                    try {
+                        const res = await fetch(`/api/status/${jobId}`);
+                        if (res.status === 404) {
+                            clearInterval(pollInterval);
+                            alert("Job lost.");
+                            resetUI();
+                            return;
+                        }
 
-                    if (data.status === 'running') {
-                        statusText.textContent = data.message;
-                    } else if (data.status === 'done') {
-                        clearInterval(pollInterval);
-                        window.location.href = `/results_view/${jobId}`;
-                    } else if (data.status === 'cancelled') {
-                        clearInterval(pollInterval);
-                        statusText.textContent = "Scan cancelled.";
-                        setTimeout(resetUI, 1500);
-                    } else if (data.status === 'error') {
-                        clearInterval(pollInterval);
-                        alert("Error: " + data.error);
-                        resetUI();
+                        const data = await res.json();
+
+                        if (data.status === 'running') {
+                            statusText.textContent = data.message;
+                        } else if (data.status === 'done') {
+                            clearInterval(pollInterval);
+                            window.location.href = `/results_view/${jobId}`;
+                        } else if (data.status === 'cancelled') {
+                            clearInterval(pollInterval);
+                            statusText.textContent = "Scan cancelled.";
+                            setTimeout(resetUI, 1500);
+                        } else if (data.status === 'error') {
+                            clearInterval(pollInterval);
+                            alert("Error: " + data.error);
+                            resetUI();
+                        }
+
+                    } catch (err) {
+                        console.warn("Polling error:", err);
                     }
-
-                } catch (err) {
-                    // Ignore transient network errors, but log them
-                    console.warn("Polling error:", err);
-                }
-            }, 1000);
-        }
-
-        function resetUI() {
-            scanBtn.disabled = false;
-            progressDiv.classList.add('hidden');
-            currentJobId = null;
-            isCancelled = false; // Reset cancellation flag
-            if (pollInterval) {
-                clearInterval(pollInterval);
-                pollInterval = null;
+                }, 1000);
             }
-        }
+
+            function resetUI() {
+                if (scanBtn) scanBtn.disabled = false;
+                if (progressDiv) progressDiv.classList.add('hidden');
+                currentJobId = null;
+                isCancelled = false;
+                if (pollInterval) {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                }
+            }
+        });
     </script>
 </head>
 
