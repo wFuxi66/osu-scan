@@ -207,53 +207,48 @@ def process_nominator_set(bset, token):
             # If fetch fails, we skip specific nominator data for this set
             pass
             
-    except Exception as e:
-        print(f"Error fetching set {bset['id']}: {e}")
-        
+# Global Cache
+USER_CACHE = {}
+
 def resolve_users_parallel(user_ids, token, progress_callback=None):
-    """Resolves a list of user IDs to usernames using threading."""
-    user_cache = {}
+    """Resolves a list of user IDs to usernames using threading, with caching."""
     headers = {'Authorization': f'Bearer {token}'}
-    unique_ids = list(user_ids)
-    total = len(unique_ids)
     
-    if total == 0:
-        return {}
+    # Identify which IDs are missing from cache
+    missing_ids = [uid for uid in user_ids if uid not in USER_CACHE and uid != 0]
+    total_missing = len(missing_ids)
+    
+    if total_missing > 0:
+        msg = f"Resolving {total_missing} new users (Cache hit: {len(user_ids) - total_missing})..."
+        print(msg)
+        if progress_callback: progress_callback(msg)
 
-    msg = f"Resolving {total} users in parallel..."
-    print(msg)
-    if progress_callback: progress_callback(msg)
-
-    def fetch_user(uid):
-        if uid == 0: return (uid, None)
-        try:
-            r = requests.get(f'{API_BASE}/users/{uid}', headers=headers, timeout=5)
-            if r.status_code == 200:
-                return (uid, r.json()['username'])
-        except:
-            pass
-        return (uid, f"User_{uid}")
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_uid = {executor.submit(fetch_user, uid): uid for uid in unique_ids}
-        
-        completed = 0
-        for future in concurrent.futures.as_completed(future_to_uid):
-            completed += 1
-            if completed % 10 == 0:
-                 if progress_callback: progress_callback(f"Resolving names {completed}/{total}...")
-            
+        def fetch_user(uid):
             try:
-                uid, name = future.result()
-                if name:
-                    user_cache[uid] = name
-                else:
-                    user_cache[uid] = f"User_{uid}"
+                r = requests.get(f'{API_BASE}/users/{uid}', headers=headers, timeout=5)
+                if r.status_code == 200:
+                    return (uid, r.json()['username'])
             except:
-                # Should be caught inside fetch_user mostly
                 pass
+            return (uid, f"User_{uid}")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_uid = {executor.submit(fetch_user, uid): uid for uid in missing_ids}
+            
+            completed = 0
+            for future in concurrent.futures.as_completed(future_to_uid):
+                completed += 1
+                if completed % 10 == 0:
+                     if progress_callback: progress_callback(f"Resolving names {completed}/{total_missing}...")
                 
-    return user_cache
+                try:
+                    uid, name = future.result()
+                    USER_CACHE[uid] = name
+                except:
+                    pass
+    
+    # Build result from cache
+    return {uid: USER_CACHE.get(uid, f"User_{uid}") for uid in user_ids if uid != 0}
 
 def analyze_nominators(beatmapsets, token, progress_callback=None):
     """Fetches nominators for the provided beatmap sets using threading."""
