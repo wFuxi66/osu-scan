@@ -110,7 +110,7 @@
             display: block;
         }
 
-        /* Table - matches results.html */
+        /* Table */
         .table-wrapper {
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
@@ -147,17 +147,17 @@
             background-color: rgba(233, 69, 96, 0.15);
         }
 
-        .rank-1 {
+        .rank-gold {
             color: #ffd700;
             font-weight: bold;
         }
 
-        .rank-2 {
+        .rank-silver {
             color: #c0c0c0;
             font-weight: bold;
         }
 
-        .rank-3 {
+        .rank-bronze {
             color: #cd7f32;
             font-weight: bold;
         }
@@ -207,13 +207,14 @@
         }
 
         /* Search bar */
-        .search-wrapper {
+        .search-form {
+            display: flex;
+            gap: 8px;
             margin-bottom: 14px;
         }
 
         .search-input {
-            width: 100%;
-            box-sizing: border-box;
+            flex: 1;
             padding: 10px 14px;
             background: rgba(15, 52, 96, 0.5);
             border: 1px solid #0f3460;
@@ -230,6 +231,34 @@
 
         .search-input:focus {
             border-color: #e94560;
+        }
+
+        .search-btn {
+            padding: 10px 16px;
+            background: rgba(233, 69, 96, 0.2);
+            border: 1px solid #e94560;
+            border-radius: 6px;
+            color: #e94560;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .search-btn:hover {
+            background: #e94560;
+            color: #fff;
+        }
+
+        .clear-search {
+            font-size: 12px;
+            color: #aeb2b8;
+            text-decoration: none;
+            display: inline-block;
+            margin-bottom: 10px;
+        }
+
+        .clear-search:hover {
+            color: #e94560;
         }
 
         /* Pagination */
@@ -251,16 +280,18 @@
             cursor: pointer;
             font-size: 14px;
             transition: all 0.2s;
+            text-decoration: none;
+            display: inline-block;
         }
 
-        .pagination-btn:hover:not(:disabled) {
+        .pagination-btn:hover {
             border-color: #e94560;
             color: #fff;
         }
 
-        .pagination-btn:disabled {
+        .pagination-btn.disabled {
             opacity: 0.35;
-            cursor: default;
+            pointer-events: none;
         }
 
         .pagination-info {
@@ -269,6 +300,12 @@
             gap: 4px;
             color: #aeb2b8;
             font-size: 14px;
+        }
+
+        .page-jump-form {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
         }
 
         .page-input {
@@ -381,18 +418,26 @@
 
         <!-- Section tabs -->
         <div class="section-tabs">
-            <div class="section-tab active" onclick="showSection('bns', this)">Top BNs</div>
-            <div class="section-tab" onclick="showSection('duos', this)">Iconic Duos</div>
+            <div class="section-tab {% if section == 'duos' %}{% else %}active{% endif %}"
+                onclick="showSection('bns', this)">Top BNs</div>
+            <div class="section-tab {% if section == 'duos' %}active{% endif %}" onclick="showSection('duos', this)">
+                Iconic Duos</div>
         </div>
 
         <!-- Top BNs -->
-        <div id="section-bns" class="leaderboard-section active">
-            <div class="search-wrapper">
-                <input type="text" class="search-input" id="search-bns" placeholder="Search a nominator..."
-                    autocomplete="off">
-            </div>
+        <div id="section-bns" class="leaderboard-section {% if section == 'duos' %}{% else %}active{% endif %}">
+            <form class="search-form" method="get" action="/leaderboard">
+                <input type="hidden" name="mode" value="{{ mode }}">
+                <input type="hidden" name="section" value="bns">
+                <input type="text" class="search-input" name="q_bns" value="{{ q_bns }}"
+                    placeholder="Search a nominator..." autocomplete="off">
+                <button type="submit" class="search-btn">Search</button>
+            </form>
+            {% if q_bns %}
+            <a class="clear-search" href="/leaderboard?mode={{ mode }}&section=bns">Clear search</a>
+            {% endif %}
             <div class="table-wrapper">
-                <table id="table-bns">
+                <table>
                     <thead>
                         <tr>
                             <th>#</th>
@@ -402,9 +447,10 @@
                     </thead>
                     <tbody>
                         {% for bn in top_bns %}
-                        <tr class="{% if loop.index <= 3 %}rank-{{ loop.index }}{% endif %}"
-                            data-name="{{ bn.username|lower }}">
-                            <td>{{ loop.index }}</td>
+                        {% set r = bn.rank %}
+                        <tr
+                            class="{% if r == 1 %}rank-gold{% elif r == 2 %}rank-silver{% elif r == 3 %}rank-bronze{% endif %}">
+                            <td>{{ r }}</td>
                             <td>
                                 <a href="https://osu.ppy.sh/users/{{ bn.osu_id }}" target="_blank"
                                     class="username-link">{{ bn.username }}</a>
@@ -412,21 +458,47 @@
                             </td>
                             <td>{{ bn.display_count }}</td>
                         </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="3" style="color:#666; text-align:center; padding:20px;">No results found.</td>
+                        </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
-            <div class="pagination" id="pagination-bns"></div>
+            {% if total_pages_bns > 1 %}
+            <div class="pagination">
+                <a class="pagination-btn {% if page_bns <= 1 %}disabled{% endif %}"
+                    href="/leaderboard?mode={{ mode }}&section=bns&q_bns={{ q_bns }}&page_bns={{ page_bns - 1 }}">&#9664;</a>
+                <span class="pagination-info">
+                    <form class="page-jump-form" method="get" action="/leaderboard">
+                        <input type="hidden" name="mode" value="{{ mode }}">
+                        <input type="hidden" name="section" value="bns">
+                        <input type="hidden" name="q_bns" value="{{ q_bns }}">
+                        Page <input type="number" class="page-input" name="page_bns" value="{{ page_bns }}" min="1"
+                            max="{{ total_pages_bns }}"> / {{ total_pages_bns }}
+                    </form>
+                </span>
+                <a class="pagination-btn {% if page_bns >= total_pages_bns %}disabled{% endif %}"
+                    href="/leaderboard?mode={{ mode }}&section=bns&q_bns={{ q_bns }}&page_bns={{ page_bns + 1 }}">&#9654;</a>
+            </div>
+            {% endif %}
         </div>
 
         <!-- Iconic Duos -->
-        <div id="section-duos" class="leaderboard-section">
-            <div class="search-wrapper">
-                <input type="text" class="search-input" id="search-duos" placeholder="Search a duo..."
+        <div id="section-duos" class="leaderboard-section {% if section == 'duos' %}active{% endif %}">
+            <form class="search-form" method="get" action="/leaderboard">
+                <input type="hidden" name="mode" value="{{ mode }}">
+                <input type="hidden" name="section" value="duos">
+                <input type="text" class="search-input" name="q_duos" value="{{ q_duos }}" placeholder="Search a duo..."
                     autocomplete="off">
-            </div>
+                <button type="submit" class="search-btn">Search</button>
+            </form>
+            {% if q_duos %}
+            <a class="clear-search" href="/leaderboard?mode={{ mode }}&section=duos">Clear search</a>
+            {% endif %}
             <div class="table-wrapper">
-                <table id="table-duos">
+                <table>
                     <thead>
                         <tr>
                             <th>#</th>
@@ -437,9 +509,10 @@
                     </thead>
                     <tbody>
                         {% for duo in duos %}
-                        <tr class="{% if loop.index <= 3 %}rank-{{ loop.index }}{% endif %}"
-                            data-name="{{ duo.bn1_name|lower }} {{ duo.bn2_name|lower }}">
-                            <td>{{ loop.index }}</td>
+                        {% set r = duo.rank %}
+                        <tr
+                            class="{% if r == 1 %}rank-gold{% elif r == 2 %}rank-silver{% elif r == 3 %}rank-bronze{% endif %}">
+                            <td>{{ r }}</td>
                             <td>
                                 <a href="https://osu.ppy.sh/users/{{ duo.bn1_id }}" target="_blank"
                                     class="username-link">{{ duo.bn1_name }}</a>
@@ -450,15 +523,36 @@
                             {% if mode == 'all' %}<td><span class="mode-badge">{{ duo.mode }}</span></td>{% endif %}
                             <td>{{ duo.count }}</td>
                         </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="{% if mode == 'all' %}4{% else %}3{% endif %}"
+                                style="color:#666; text-align:center; padding:20px;">No results found.</td>
+                        </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
-            <div class="pagination" id="pagination-duos"></div>
+            {% if total_pages_duos > 1 %}
+            <div class="pagination">
+                <a class="pagination-btn {% if page_duos <= 1 %}disabled{% endif %}"
+                    href="/leaderboard?mode={{ mode }}&section=duos&q_duos={{ q_duos }}&page_duos={{ page_duos - 1 }}">&#9664;</a>
+                <span class="pagination-info">
+                    <form class="page-jump-form" method="get" action="/leaderboard">
+                        <input type="hidden" name="mode" value="{{ mode }}">
+                        <input type="hidden" name="section" value="duos">
+                        <input type="hidden" name="q_duos" value="{{ q_duos }}">
+                        Page <input type="number" class="page-input" name="page_duos" value="{{ page_duos }}" min="1"
+                            max="{{ total_pages_duos }}"> / {{ total_pages_duos }}
+                    </form>
+                </span>
+                <a class="pagination-btn {% if page_duos >= total_pages_duos %}disabled{% endif %}"
+                    href="/leaderboard?mode={{ mode }}&section=duos&q_duos={{ q_duos }}&page_duos={{ page_duos + 1 }}">&#9654;</a>
+            </div>
+            {% endif %}
         </div>
 
         <div class="scan-info">
-            Last updated: {{ data.last_scan | default('Never') }}
+            Last updated: {{ last_scan }}
             | {{ data.total_bns_scanned | default(0) }} BNs scanned, {{ data.total_sets_scanned | default(0) }} sets
             processed
         </div>
@@ -475,6 +569,10 @@
     </div>
 
     <script>
+        // Section tab switching - purely cosmetic, no data manipulation
+        const params = new URLSearchParams(window.location.search);
+        const activeSection = params.get('section') || 'bns';
+
         function showSection(section, clicked) {
             document.querySelectorAll('.leaderboard-section').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.section-tab').forEach(el => el.classList.remove('active'));
@@ -482,122 +580,11 @@
             clicked.classList.add('active');
         }
 
-        // Pagination + Search logic
-        (function () {
-            const PER_PAGE = 50;
-
-            function setupTable(tableId, searchId, paginationId) {
-                const table = document.getElementById(tableId);
-                if (!table) return;
-                const tbody = table.querySelector('tbody');
-                if (!tbody) return;
-
-                const allRows = Array.from(tbody.querySelectorAll('tr'));
-                const searchInput = document.getElementById(searchId);
-                const paginationDiv = document.getElementById(paginationId);
-
-                let currentPage = 1;
-                let filteredRows = allRows;
-
-                function getFilteredRows() {
-                    const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
-                    if (!query) return allRows;
-                    return allRows.filter(row => {
-                        const name = row.getAttribute('data-name') || '';
-                        return name.includes(query);
-                    });
-                }
-
-                function render() {
-                    filteredRows = getFilteredRows();
-                    const totalPages = Math.max(1, Math.ceil(filteredRows.length / PER_PAGE));
-                    if (currentPage > totalPages) currentPage = totalPages;
-
-                    const start = (currentPage - 1) * PER_PAGE;
-                    const end = start + PER_PAGE;
-                    const visibleSet = new Set(filteredRows.slice(start, end));
-
-                    allRows.forEach(row => {
-                        row.style.display = visibleSet.has(row) ? '' : 'none';
-                    });
-
-                    renderPagination(totalPages);
-                }
-
-                function renderPagination(totalPages) {
-                    if (!paginationDiv) return;
-                    paginationDiv.innerHTML = '';
-
-                    if (filteredRows.length <= PER_PAGE) return;
-
-                    const prevBtn = document.createElement('button');
-                    prevBtn.className = 'pagination-btn';
-                    prevBtn.textContent = '◀';
-                    prevBtn.disabled = currentPage <= 1;
-                    prevBtn.onclick = () => { currentPage--; render(); };
-
-                    const info = document.createElement('span');
-                    info.className = 'pagination-info';
-
-                    const label = document.createElement('span');
-                    label.textContent = 'Page';
-
-                    const input = document.createElement('input');
-                    input.type = 'number';
-                    input.className = 'page-input';
-                    input.value = currentPage;
-                    input.min = 1;
-                    input.max = totalPages;
-
-                    input.addEventListener('keydown', (e) => {
-                        if (e.key === 'Enter') {
-                            let val = parseInt(input.value, 10);
-                            if (isNaN(val) || val < 1) val = 1;
-                            if (val > totalPages) val = totalPages;
-                            currentPage = val;
-                            render();
-                        }
-                    });
-
-                    input.addEventListener('blur', () => {
-                        let val = parseInt(input.value, 10);
-                        if (isNaN(val) || val < 1) val = 1;
-                        if (val > totalPages) val = totalPages;
-                        currentPage = val;
-                        render();
-                    });
-
-                    const total = document.createElement('span');
-                    total.textContent = '/ ' + totalPages;
-
-                    info.appendChild(label);
-                    info.appendChild(input);
-                    info.appendChild(total);
-
-                    const nextBtn = document.createElement('button');
-                    nextBtn.className = 'pagination-btn';
-                    nextBtn.textContent = '▶';
-                    nextBtn.disabled = currentPage >= totalPages;
-                    nextBtn.onclick = () => { currentPage++; render(); };
-
-                    paginationDiv.appendChild(prevBtn);
-                    paginationDiv.appendChild(info);
-                    paginationDiv.appendChild(nextBtn);
-                }
-
-                if (searchInput) {
-                    searchInput.addEventListener('input', () => {
-                        currentPage = 1;
-                        render();
-                    });
-                }
-
-                render();
-            }
-
-            setupTable('table-bns', 'search-bns', 'pagination-bns');
-            setupTable('table-duos', 'search-duos', 'pagination-duos');
-        })();
+        // Page jump forms: submit on Enter (default form behavior handles it)
+        // Also submit on blur of page input
+        document.querySelectorAll('.page-input').forEach(input => {
+            input.addEventListener('blur', () => input.form.submit());
+        });
     </script>
 </body>
 
