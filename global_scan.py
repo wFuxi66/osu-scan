@@ -238,6 +238,10 @@ def run_global_scan(progress_callback=None, cancel_event=None, since_date=None):
             elif not mode:
                 mode = nom.get('mode', 'osu')
             
+            # Map osu! API 'fruits' to 'catch' for consistency with Mapper's Guild and frontend
+            if mode == 'fruits':
+                mode = 'catch'
+            
             if user_id:
                 mode_groups[mode].append(user_id)
                 bn_mode_counts[user_id][mode] += 1
