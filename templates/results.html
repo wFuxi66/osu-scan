@@ -143,7 +143,11 @@
         <h1>{{ title_prefix }} for {{ username }}</h1>
         {% endif %}
         {% if not leaderboard %}
-        <p>No {{ title_prefix }}s found for this user.</p>
+        {% if 'Nominated by' in title_prefix %}
+        <p>No Mappers Nominated by this user.</p>
+        {% else %}
+        <p>No {{ title_prefix }} found for this user.</p>
+        {% endif %}
         {% else %}
         <div class="table-wrapper">
             <table>
