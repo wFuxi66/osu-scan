@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 import threading
 import time
 import uuid
-import gder_logic
+import scan_logic
 from flask_limiter import Limiter
 
 load_dotenv()
@@ -80,16 +80,16 @@ def run_scan_job(job_id, username, mode, cancel_event):
             
     try:
         if mode == 'nominators':
-            result = gder_logic.generate_nominator_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
+            result = scan_logic.generate_nominator_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
             title_prefix = "Nominated for"
         elif mode == 'bn':
-            result = gder_logic.generate_bn_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
+            result = scan_logic.generate_bn_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
             title_prefix = "Nominated by"
         elif mode == 'gd_hosts':
-            result = gder_logic.generate_gd_hosts_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
+            result = scan_logic.generate_gd_hosts_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
             title_prefix = "Guest Difficulties by"
         else:
-            result = gder_logic.generate_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
+            result = scan_logic.generate_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
             title_prefix = "Guest Difficulties for"
             
         if cancel_event.is_set():

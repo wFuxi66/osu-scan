@@ -1,79 +1,75 @@
 # osu!scan
 
-**osu!scan** is a powerful web tool designed to help osu! mappers and players analyze their beatmap history.
+osu!scan is a web-based analytical tool designed for osu! mappers to evaluate their beatmap and nomination history using the osu! API v2.
 
-**Live Site:** [https://osu-scan.onrender.com](https://osu-scan.onrender.com)
+**Live Instance:** [https://osu-scan.onrender.com](https://osu-scan.onrender.com)
 
-## Features
+## Core Capabilities
 
-### 🔍 Guest Difficulty Scanner
-Find who made the most GD in your sets.
--   Detects **Collaborations** hidden in the description.
--   Recursively checks beatmaps where the set owner might not be the creator.
+### Guest Difficulty Analysis
+Identifies contributors for guest difficulties within a user's beatmap sets.
+- Detects collaborations through deep-set inspection.
+- Provides a comprehensive leaderboard of contributors.
 
-### 🎯 GD Hosts Scanner (New!)
-Find which mapper you made the most GD for.
--   See a leaderboard of mappers whose sets you contributed to.
--   Perfect for seeing who you collaborate with the most!
+### Guest Difficulty Host Analytics
+Analyzes a user's contributions to other mappers' sets.
+- Tracks which hosts a user has collaborated with most frequently.
+- Aggregates contribution data into a ranked leaderboard.
 
-### 🏆 Nominator Scanner
-Find which BN nominated your maps the most.
--   Generates a leaderboard of your "Top Nominators".
--   See who has nominated the most of your mapsets.
+### Nominator Analysis
+Identifies the Beatmap Nominators who have most frequently nominated a user's mapsets.
+- Useful for tracking nomination history and identifying consistent supporters.
 
-### 🕵️‍♂️ BN Scanner
-Find which mappers a BN nominated the most.
--   Enter a BN's username to see **every map they have nominated**.
--   View a leaderboard of which mappers they nominate the most.
--   Perfect for finding BNs who might be interested in your style.
+### Beatmap Nominator Analytics
+Evaluates a specific Beatmap Nominator's activity.
+- Lists mappers most frequently nominated by a specific BN.
+- Provides insight into a nominator's stylistic preferences and active collaborations.
 
-### ⚡ Smart & Fast
--   **Parallel Processing**: Uses multi-threading to scan thousands of maps in seconds.
--   **Smart Caching**: Remembers usernames to speed up repeat scans.
--   **Exportable**: Download your results as an HTML file to keep forever.
+## System Features
 
----
+### High Performance
+Utilizes multi-threaded parallel processing to analyze extensive datasets efficiently.
 
-## Running Locally
+### Intelligent Caching
+Implements a caching layer for usernames and scan results to minimize API overhead and improve response times.
 
-If you want to run this code on your own machine:
+### Data Portability
+Supports exporting analysis results as standalone HTML reports for offline viewing and archival purposes.
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/wFuxi66/osu-scan.git
-    cd osu-scan
-    ```
+## Local Development
 
-2.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+### Prerequisites
+- Python 3.8+
+- osu! API v2 Client Credentials
 
-3.  **Configure Environment:**
-    -   Create a `.env` file in the root folder.
-    -   Add your osu! API credentials (get them [here](https://osu.ppy.sh/home/account/edit#oauth)):
-        ```env
-        OSU_CLIENT_ID=your_id
-        OSU_CLIENT_SECRET=your_secret
-        ```
+### Installation
 
-4.  **Run the app:**
-    ```bash
-    # Run with Gunicorn (Recommended for stability like production)
-    gunicorn app:app --workers 1 --threads 8
-    
-    # Or plain Python for debugging
-    python app.py
-    ```
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/wFuxi66/osu-scan.git
+   cd osu-scan
+   ```
 
-5.  Open `http://127.0.0.1:8000` (or `5000` if using `python app.py`)
+2. Install required dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-## Technologies
+3. Environment Configuration:
+   Create a `.env` file in the root directory with your osu! API credentials:
+   ```env
+   OSU_CLIENT_ID=your_id_here
+   OSU_CLIENT_SECRET=your_secret_here
+   ```
 
--   **Backend**: Python (Flask), Gunicorn, Threading
--   **Data**: osu! API v2 (OAuth Client Credentials)
--   **Frontend**: HTML5, CSS3 (Responsive Design)
--   **Deployment**: Render (Auto-deploy from GitHub)
+4. Execution:
+   ```bash
+   python app.py
+   ```
+   The application will be accessible at `http://127.0.0.1:5000`.
 
----
-*Made with ❤️ by [Fuxi66](https://osu.ppy.sh/users/24230576)*
+## Technical Stack
+- **Backend**: Python, Flask, Concurrent Futures
+- **API**: osu! API v2 (OAuth2)
+- **Frontend**: HTML5, CSS3
+- **Deployment**: Render

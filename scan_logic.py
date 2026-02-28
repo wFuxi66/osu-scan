@@ -590,7 +590,7 @@ def resolve_and_aggregate(gds, token, progress_callback=None):
     return leaderboard
 
 def generate_leaderboard_for_user(username_input, progress_callback=None, cancel_event=None):
-    """Main entry point for web app."""
+    """Main entry point for the scan engine."""
     token = get_token()
     if not token:
         return {'error': 'Authentication failed'}
