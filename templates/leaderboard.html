@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global BN Leaderboard - osu!scan</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a2e;
+            color: #fff;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #ff66aa;
+            margin-bottom: 5px;
+            font-size: 1.8em;
+        }
+
+        .header p {
+            color: #aeb2b8;
+            font-size: 14px;
+        }
+
+        .back-link {
+            color: #4facfe;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        /* Mode filter tabs */
+        .mode-tabs {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+        }
+
+        .mode-tab {
+            padding: 8px 16px;
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 20px;
+            color: #ccc;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+            text-decoration: none;
+        }
+
+        .mode-tab:hover {
+            border-color: #ff66aa;
+            color: #fff;
+        }
+
+        .mode-tab.active {
+            background: linear-gradient(135deg, #ff66aa 0%, #e94560 100%);
+            border-color: transparent;
+            color: #fff;
+        }
+
+        /* Section tabs (Top BNs / Iconic Duos) */
+        .section-tabs {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .section-tab {
+            padding: 10px 24px;
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 6px;
+            color: #ccc;
+            cursor: pointer;
+            font-size: 15px;
+            transition: all 0.3s;
+        }
+
+        .section-tab:hover {
+            border-color: #e94560;
+            color: #fff;
+        }
+
+        .section-tab.active {
+            background: #e94560;
+            border-color: #e94560;
+            color: #fff;
+        }
+
+        /* Leaderboard table */
+        .leaderboard-section {
+            display: none;
+        }
+
+        .leaderboard-section.active {
+            display: block;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #16213e;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th {
+            background: #0f3460;
+            padding: 12px 16px;
+            text-align: left;
+            font-size: 13px;
+            color: #4facfe;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        td {
+            padding: 10px 16px;
+            border-bottom: 1px solid #1a1a2e;
+            font-size: 14px;
+        }
+
+        tr:hover {
+            background: #1a2744;
+        }
+
+        .rank {
+            font-weight: bold;
+            color: #ff66aa;
+            width: 50px;
+        }
+
+        .rank-1 { color: #ffd700; }
+        .rank-2 { color: #c0c0c0; }
+        .rank-3 { color: #cd7f32; }
+
+        .username-link {
+            color: #4facfe;
+            text-decoration: none;
+        }
+
+        .username-link:hover {
+            text-decoration: underline;
+        }
+
+        .count {
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .current-bn {
+            font-size: 10px;
+            background: #2ecc71;
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 6px;
+        }
+
+        .duo-cell {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .duo-separator {
+            color: #ff66aa;
+            font-weight: bold;
+        }
+
+        .mode-badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: #0f3460;
+            color: #4facfe;
+        }
+
+        .scan-info {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-size: 16px;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .footer a {
+            color: #ff66aa;
+            text-decoration: none;
+        }
+
+        @media (max-width: 600px) {
+            td, th {
+                padding: 8px 10px;
+                font-size: 13px;
+            }
+
+            .mode-tabs {
+                gap: 4px;
+            }
+
+            .mode-tab {
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <a href="/" class="back-link">back to osu!scan</a>
+            <h1>Global BN Leaderboard</h1>
+            <p>All-time nomination rankings for Beatmap Nominators</p>
+        </div>
+
+        {% if not data %}
+        <div class="no-data">
+            No leaderboard data available yet. Scan has not been run.
+        </div>
+        {% else %}
+
+        <!-- Mode filter tabs -->
+        <div class="mode-tabs">
+            <a class="mode-tab {% if mode == 'all' %}active{% endif %}" href="/leaderboard?mode=all">All Modes</a>
+            <a class="mode-tab {% if mode == 'osu' %}active{% endif %}" href="/leaderboard?mode=osu">osu!</a>
+            <a class="mode-tab {% if mode == 'taiko' %}active{% endif %}" href="/leaderboard?mode=taiko">Taiko</a>
+            <a class="mode-tab {% if mode == 'catch' %}active{% endif %}" href="/leaderboard?mode=catch">Catch</a>
+            <a class="mode-tab {% if mode == 'mania' %}active{% endif %}" href="/leaderboard?mode=mania">Mania</a>
+        </div>
+
+        <!-- Section tabs -->
+        <div class="section-tabs">
+            <div class="section-tab active" onclick="showSection('bns')">Top BNs</div>
+            <div class="section-tab" onclick="showSection('duos')">Iconic Duos</div>
+        </div>
+
+        <!-- Top BNs table -->
+        <div id="section-bns" class="leaderboard-section active">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Nominator</th>
+                        <th>Nominations</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for bn in top_bns %}
+                    <tr>
+                        <td class="rank {% if loop.index <= 3 %}rank-{{ loop.index }}{% endif %}">#{{ loop.index }}</td>
+                        <td>
+                            <a href="https://osu.ppy.sh/users/{{ bn.osu_id }}" target="_blank" class="username-link">{{ bn.username }}</a>
+                            {% if bn.is_current %}<span class="current-bn">Current BN</span>{% endif %}
+                        </td>
+                        <td class="count">{{ bn.display_count }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Iconic Duos table -->
+        <div id="section-duos" class="leaderboard-section">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Duo</th>
+                        {% if mode == 'all' %}<th>Mode</th>{% endif %}
+                        <th>Maps Together</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for duo in duos %}
+                    <tr>
+                        <td class="rank {% if loop.index <= 3 %}rank-{{ loop.index }}{% endif %}">#{{ loop.index }}</td>
+                        <td>
+                            <div class="duo-cell">
+                                <a href="https://osu.ppy.sh/users/{{ duo.bn1_id }}" target="_blank" class="username-link">{{ duo.bn1_name }}</a>
+                                <span class="duo-separator">x</span>
+                                <a href="https://osu.ppy.sh/users/{{ duo.bn2_id }}" target="_blank" class="username-link">{{ duo.bn2_name }}</a>
+                            </div>
+                        </td>
+                        {% if mode == 'all' %}<td><span class="mode-badge">{{ duo.mode }}</span></td>{% endif %}
+                        <td class="count">{{ duo.count }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="scan-info">
+            Last updated: {{ data.last_scan | default('Never') }}<br>
+            {{ data.total_bns_scanned | default(0) }} BNs scanned, {{ data.total_sets_scanned | default(0) }} sets processed
+        </div>
+
+        {% endif %}
+
+        <div class="footer">
+            Made by <a href="https://osu.ppy.sh/users/24230576">Fuxi66</a>
+            - Data from <a href="https://osu.ppy.sh">osu!</a> and <a href="https://bn.mappersguild.com">Mapper's Guild</a>
+        </div>
+    </div>
+
+    <script>
+        function showSection(section) {
+            document.querySelectorAll('.leaderboard-section').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.section-tab').forEach(el => el.classList.remove('active'));
+            document.getElementById('section-' + section).classList.add('active');
+            event.target.classList.add('active');
+        }
+    </script>
+</body>
+
+</html>

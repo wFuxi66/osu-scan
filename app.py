@@ -3,7 +3,9 @@ from dotenv import load_dotenv
 import threading
 import time
 import uuid
+import os
 import scan_logic
+import global_scan
 from flask_limiter import Limiter
 
 load_dotenv()
@@ -227,6 +229,112 @@ def download_report(cache_id):
         mimetype="text/html",
         headers={"Content-Disposition": f"attachment;filename={filename}"}
     )
+
+# ---- Global BN Leaderboard ----
+
+GLOBAL_SCAN_RUNNING = False
+
+@app.route('/leaderboard')
+def leaderboard():
+    mode = request.args.get('mode', 'all')
+    data = global_scan.load_from_firebase()
+    
+    top_bns = []
+    duos = []
+    
+    if data and 'top_bns' in data:
+        for bn in data['top_bns']:
+            if mode == 'all':
+                display_count = bn.get('total', 0)
+            else:
+                display_count = bn.get('by_mode', {}).get(mode, 0)
+            
+            if display_count > 0:
+                bn_entry = dict(bn)
+                bn_entry['display_count'] = display_count
+                top_bns.append(bn_entry)
+        
+        # Re-sort by the filtered count
+        top_bns.sort(key=lambda x: -x['display_count'])
+    
+    if data and 'duos' in data:
+        for duo in data['duos']:
+            if mode == 'all' or duo.get('mode') == mode:
+                duos.append(duo)
+    
+    return render_template('leaderboard.html', 
+                           data=data, 
+                           top_bns=top_bns, 
+                           duos=duos, 
+                           mode=mode)
+
+@app.route('/api/run_global_scan', methods=['POST'])
+def trigger_global_scan():
+    global GLOBAL_SCAN_RUNNING
+    
+    # Check secret key
+    secret = request.form.get('secret') or request.args.get('secret') or ''
+    expected = os.environ.get('SCAN_SECRET', '')
+    
+    if not expected or secret != expected:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    if GLOBAL_SCAN_RUNNING:
+        return jsonify({'error': 'Scan already running'}), 409
+    
+    # Check for incremental mode
+    incremental = request.form.get('incremental', 'false').lower() == 'true'
+    since_date = None
+    
+    if incremental:
+        existing = global_scan.load_from_firebase()
+        if existing and 'last_scan' in existing:
+            since_date = existing['last_scan']
+    
+    GLOBAL_SCAN_RUNNING = True
+    
+    def run():
+        global GLOBAL_SCAN_RUNNING
+        try:
+            global_scan.run_global_scan(since_date=since_date)
+        except Exception as e:
+            print(f"Global scan error: {e}")
+        finally:
+            GLOBAL_SCAN_RUNNING = False
+    
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    
+    return jsonify({'status': 'started', 'incremental': incremental})
+
+# Monthly auto-scan scheduler
+def monthly_scan_scheduler():
+    """Runs on the 1st of each month at midnight UTC."""
+    import datetime
+    while True:
+        now = datetime.datetime.utcnow()
+        # Calculate next 1st of month
+        if now.month == 12:
+            next_run = datetime.datetime(now.year + 1, 1, 1, 0, 0, 0)
+        else:
+            next_run = datetime.datetime(now.year, now.month + 1, 1, 0, 0, 0)
+        
+        wait_seconds = (next_run - now).total_seconds()
+        print(f"Next global scan scheduled for {next_run.isoformat()} ({wait_seconds:.0f}s from now)")
+        time.sleep(wait_seconds)
+        
+        print("Starting monthly global scan...")
+        try:
+            # Try incremental first
+            existing = global_scan.load_from_firebase()
+            since_date = existing.get('last_scan') if existing else None
+            global_scan.run_global_scan(since_date=since_date)
+        except Exception as e:
+            print(f"Monthly scan error: {e}")
+
+# Start scheduler in background
+scheduler_thread = threading.Thread(target=monthly_scan_scheduler, daemon=True)
+scheduler_thread.start()
 
 if __name__ == '__main__':
     print("Starting osu!scan...")
