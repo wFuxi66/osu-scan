@@ -81,16 +81,16 @@ def run_scan_job(job_id, username, mode, cancel_event):
     try:
         if mode == 'nominators':
             result = gder_logic.generate_nominator_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
-            title_prefix = "Nominators"
+            title_prefix = "Nominated for"
         elif mode == 'bn':
             result = gder_logic.generate_bn_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
-            title_prefix = "Mappers Nominated by"
+            title_prefix = "Nominated by"
         elif mode == 'gd_hosts':
             result = gder_logic.generate_gd_hosts_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
-            title_prefix = "GD Hosts"
+            title_prefix = "Guest Difficulties for"
         else:
             result = gder_logic.generate_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
-            title_prefix = "Guest Difficulties"
+            title_prefix = "Guest Difficulties by"
             
         if cancel_event.is_set():
             JOBS[job_id]['status'] = 'cancelled'
@@ -217,7 +217,10 @@ def download_report(cache_id):
                            title_prefix=data['title_prefix'],
                            cache_id=None)
                            
-    filename = f"leaderboard_{data['username']}_{data.get('title_prefix', 'GD')}.html"
+    # Filename matches the page title: "{title_prefix} {username}.html"
+    title_prefix = data.get('title_prefix', 'Results')
+    username = data['username']
+    filename = f"{title_prefix} {username}.html"
     
     return Response(
         html,
