@@ -98,7 +98,7 @@
                 <tr>
                     <th>#</th>
                     <th>User</th>
-                    <th>Total {{ type }}</th>
+                    <th>{% if 'Nominated by' in title_prefix %}Nominations{% else %}Total{% endif %}</th>
                     <th>Last Date</th>
                 </tr>
             </thead>

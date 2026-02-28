@@ -60,16 +60,19 @@ def get_user_id(username_or_id, token):
             
     return None, None
 
-def get_beatmapsets(user_id, token):
+
+def get_beatmapsets(user_id, token, cancel_event=None):
     """Fetches all beatmap sets for a user."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
     set_types = ['ranked', 'loved']
     
     for s_type in set_types:
+        if cancel_event and cancel_event.is_set(): return []
         offset = 0
         limit = 100
         while True:
+            if cancel_event and cancel_event.is_set(): return []
             params = {'limit': limit, 'offset': offset}
             url = f'{API_BASE}/users/{user_id}/beatmapsets/{s_type}'
             
@@ -97,6 +100,45 @@ def get_beatmapsets(user_id, token):
                 print(f"Warning: Failed to fetch {s_type} sets: {e}")
                 break
                 
+                
+    return all_sets
+
+def get_nominated_beatmapsets(user_id, token, cancel_event=None):
+    """Fetches all beatmap sets nominated by a user."""
+    headers = {'Authorization': f'Bearer {token}'}
+    all_sets = []
+    
+    offset = 0
+    limit = 50 # Unknown limit for this endpoint, safe bet
+    
+    while True:
+        if cancel_event and cancel_event.is_set(): return []
+        
+        # This is a hidden endpoint, pagination support is assumed but not guaranteed.
+        # If pagination doesn't accept 'offset', we might only get the first page.
+        # But most osu! endpoints use offset/limit.
+        params = {'limit': limit, 'offset': offset}
+        url = f'{API_BASE}/users/{user_id}/beatmapsets/nominated'
+        
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=10)
+            if response.status_code == 404: break
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            if not data: break
+                
+            all_sets.extend(data)
+            
+            if len(data) < limit: break
+            
+            offset += len(data)
+            time.sleep(0.1)
+        except Exception as e:
+            print(f"Warning: Failed to fetch nominated sets: {e}")
+            break
+            
     return all_sets
 
 import concurrent.futures
@@ -158,11 +200,13 @@ def process_set(bset, host_id, token):
                 
     return gds_in_set
 
-def analyze_sets(beatmapsets, host_id, token, progress_callback=None):
+def analyze_sets(beatmapsets, host_id, token, progress_callback=None, cancel_event=None):
     """Finds GDs in the provided beatmap sets using Concurrent Futures for speed."""
     all_gds = []
     total = len(beatmapsets)
     if progress_callback: progress_callback(f"Deep Scanning {total} sets...")
+    
+    if cancel_event and cancel_event.is_set(): return []
     
     # Use ThreadPool to speed up I/O
     # Max workers = 5 to be safe with rate limits (osu! is lenient but let's not push it)
@@ -172,6 +216,10 @@ def analyze_sets(beatmapsets, host_id, token, progress_callback=None):
         
         completed = 0
         for future in concurrent.futures.as_completed(future_to_set):
+            if cancel_event and cancel_event.is_set():
+                executor.shutdown(wait=False, cancel_futures=True)
+                return []
+                
             completed += 1
             if completed % 5 == 0:
                 if progress_callback: progress_callback(f"Scanning progress: {completed}/{total} sets...")
@@ -257,7 +305,7 @@ def resolve_users_parallel(user_ids, token, progress_callback=None):
     # Build result from cache
     return {uid: USER_CACHE.get(uid, f"User_{uid}") for uid in user_ids if uid != 0}
 
-def analyze_nominators(beatmapsets, token, progress_callback=None):
+def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=None):
     """Fetches nominators for the provided beatmap sets using threading."""
     all_nominations = []
     
@@ -266,6 +314,8 @@ def analyze_nominators(beatmapsets, token, progress_callback=None):
     
     msg = f"Scanning {total} sets for Nominators..."
     if progress_callback: progress_callback(msg)
+    
+    if cancel_event and cancel_event.is_set(): return []
     
     # Create a thread-local session factory or just pass a session?
     # Actually requests.Session is not thread-safe if shared across threads heavily?
@@ -320,7 +370,7 @@ def resolve_and_aggregate_nominators(noms, token, progress_callback=None):
     leaderboard.sort(key=lambda x: (-x['total_gds'], x['mapper_name']))
     return leaderboard
 
-def generate_nominator_leaderboard_for_user(username_input, progress_callback=None):
+def generate_nominator_leaderboard_for_user(username_input, progress_callback=None, cancel_event=None):
     token = get_token()
     if not token:
         return {'error': 'Authentication failed'}
@@ -331,10 +381,14 @@ def generate_nominator_leaderboard_for_user(username_input, progress_callback=No
         
     # Fetch sets
     if progress_callback: progress_callback(f"Fetching beatmap sets for {username}...")
-    sets = get_beatmapsets(user_id, token)
+    sets = get_beatmapsets(user_id, token, cancel_event)
+    
+    if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     # Analyze
-    noms = analyze_nominators(sets, token, progress_callback)
+    noms = analyze_nominators(sets, token, progress_callback, cancel_event)
+    
+    if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     if not noms:
          return {'username': username, 'leaderboard': []}
@@ -345,6 +399,67 @@ def generate_nominator_leaderboard_for_user(username_input, progress_callback=No
         'username': username,
         'leaderboard': leaderboard,
         'type': 'Nominators'
+    }
+
+def generate_bn_leaderboard_for_user(username_input, progress_callback=None, cancel_event=None):
+    """New Mode: Find mappers nominated by this BN."""
+    token = get_token()
+    if not token: return {'error': 'Authentication failed'}
+    
+    if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
+    
+    user_id, username = get_user_id(username_input, token)
+    if not user_id: return {'error': f'User {username_input} not found'}
+    
+    # 1. Fetch nominated sets
+    if progress_callback: progress_callback(f"Fetching maps nominated by {username}...")
+    sets = get_nominated_beatmapsets(user_id, token, cancel_event)
+    
+    if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
+    
+    if not sets:
+         return {'username': username, 'leaderboard': []}
+
+    # 2. Count mappers (user_id field in beatmapset)
+    if progress_callback: progress_callback(f"Analyzing {len(sets)} nominations...")
+    
+    stats = defaultdict(lambda: {'count': 0, 'last_date': ''})
+    mappers_to_resolve = set()
+    
+    for bset in sets:
+        mapper_id = bset['user_id']
+        mappers_to_resolve.add(mapper_id)
+        
+        # Approximate date (ranked_date or last_updated)
+        date = (bset.get('ranked_date') or bset.get('last_updated') or '').split('T')[0]
+        
+        # We store by ID temporarily
+        stats[mapper_id]['count'] += 1
+        if date and date > stats[mapper_id]['last_date']:
+            stats[mapper_id]['last_date'] = date
+            
+    # 3. Resolve names
+    if progress_callback: progress_callback("Resolving mapper names...")
+    user_cache = resolve_users_parallel(mappers_to_resolve, token, progress_callback)
+    
+    if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
+    
+    # 4. Build leaderboard
+    leaderboard = []
+    for mid, data in stats.items():
+        name = user_cache.get(mid, f"ID:{mid}")
+        leaderboard.append({
+            'mapper_name': name,
+            'total_gds': data['count'],
+            'last_gd_date': data['last_date']
+        })
+        
+    leaderboard.sort(key=lambda x: (-x['total_gds'], x['mapper_name']))
+    
+    return {
+        'username': username,
+        'leaderboard': leaderboard,
+        'type': 'Nominations'
     }
 
 def resolve_and_aggregate(gds, token, progress_callback=None):
@@ -384,7 +499,7 @@ def resolve_and_aggregate(gds, token, progress_callback=None):
     leaderboard.sort(key=lambda x: (-x['total_gds'], x['mapper_name']))
     return leaderboard
 
-def generate_leaderboard_for_user(username_input, progress_callback=None):
+def generate_leaderboard_for_user(username_input, progress_callback=None, cancel_event=None):
     """Main entry point for web app."""
     token = get_token()
     if not token:
@@ -396,8 +511,13 @@ def generate_leaderboard_for_user(username_input, progress_callback=None):
         
     if progress_callback: progress_callback(f"Found User: {username}. Fetching sets...")
     
-    sets = get_beatmapsets(user_id, token)
-    gds = analyze_sets(sets, user_id, token, progress_callback)
+    sets = get_beatmapsets(user_id, token, cancel_event)
+    
+    if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
+    
+    gds = analyze_sets(sets, user_id, token, progress_callback, cancel_event)
+    
+    if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     if not gds:
         return {'username': username, 'leaderboard': []}
