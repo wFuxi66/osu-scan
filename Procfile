@@ -1,1 +1,1 @@
-﻿web: gunicorn app:app -b 0.0.0.0:$PORT --workers 1 --threads 8
+web: gunicorn -c gunicorn_config.py app:app
