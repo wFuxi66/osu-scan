@@ -39,14 +39,15 @@ def save_to_firebase(data, path='leaderboard'):
 def load_from_firebase(path='leaderboard'):
     """Loads data from Firebase Realtime Database."""
     if not FIREBASE_URL:
-        # Try local file fallback
         try:
             with open('leaderboard_cache.json', 'r') as f:
                 return json.load(f)
         except FileNotFoundError:
             return None
-    
-    url = f'{FIREBASE_URL}/{path}.json'
+
+    # Use secret for reading too if available
+    auth_suffix = f'?auth={FIREBASE_SECRET}' if FIREBASE_SECRET else ''
+    url = f'{FIREBASE_URL}/{path}.json{auth_suffix}'
     try:
         r = requests.get(url, timeout=15)
         r.raise_for_status()
@@ -54,6 +55,7 @@ def load_from_firebase(path='leaderboard'):
         return data
     except Exception as e:
         print(f"Error loading from Firebase: {e}")
+        return None
         return None
 
 # ---- Scan logic ----
