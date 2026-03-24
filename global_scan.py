@@ -56,7 +56,6 @@ def load_from_firebase(path='leaderboard'):
     except Exception as e:
         print(f"Error loading from Firebase: {e}")
         return None
-        return None
 
 # ---- Scan logic ----
 
