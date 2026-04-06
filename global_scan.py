@@ -176,69 +176,86 @@ def run_global_scan(progress_callback=None, cancel_event=None, since_date=None):
             if new_token:
                 token = new_token
     
-    progress(f"Found {len(all_set_ids)} unique sets to deep-fetch for duo pairs...")
+    progress(f"Found {len(all_set_ids)} unique sets. Building nomination counts...")
 
     if cancel_event and cancel_event.is_set():
         return {'error': 'Cancelled'}
 
     # 4. Build per-mode nomination counts directly from API fetch results.
-    # This matches the osu! site's "Nominated Ranked Beatmaps" count, which is simply
-    # the number of sets returned by /beatmapsets/nominated — not current_nominations.
+    # The /beatmapsets/nominated endpoint returns all sets a BN has ever nominated,
+    # including already-ranked sets. current_nominations is cleared when a set ranks,
+    # so counting from there would miss the majority of nominations.
+
+    # Build bn_lookup early so mode attribution can use BN's known modes
+    bn_lookup = {bn['osu_id']: bn for bn in all_bns}
+
     bn_mode_counts = defaultdict(lambda: defaultdict(int))
 
     for bn_id, sets in bn_nomination_sets.items():
+        bn_modes = bn_lookup.get(bn_id, {}).get('modes', [])
         for bset in sets:
-            # Determine mode from nominations_summary or beatmaps list
-            mode = 'osu'  # default
-            noms_summary = bset.get('nominations_summary', {})
-            rulesets = noms_summary.get('eligible_main_rulesets', [])
-            if rulesets:
-                mode = rulesets[0]
-            elif bset.get('beatmaps'):
-                mode = bset['beatmaps'][0].get('mode', 'osu')
+            # Determine which mode this nomination belongs to.
+            # Intersect the set's eligible rulesets with the BN's known modes.
+            # This prevents std-only BNs from being credited with mania/taiko nominations.
+            eligible = bset.get('nominations_summary', {}).get('eligible_main_rulesets', [])
+            # Normalize 'fruits' -> 'catch'
+            eligible = ['catch' if m == 'fruits' else m for m in eligible]
 
-            # Map 'fruits' -> 'catch' for consistency
-            if mode == 'fruits':
-                mode = 'catch'
+            if bn_modes:
+                # Use the intersection of BN's modes and set's eligible modes
+                matched = [m for m in bn_modes if m in eligible]
+                if matched:
+                    mode = matched[0]
+                else:
+                    # BN mode not in eligible (old set / data gap) — use BN's primary mode
+                    mode = bn_modes[0]
+            elif eligible:
+                mode = eligible[0]
+            else:
+                # Last resort: look at the first beatmap's mode
+                beatmaps = bset.get('beatmaps', [])
+                raw = beatmaps[0].get('mode', 'osu') if beatmaps else 'osu'
+                mode = 'catch' if raw == 'fruits' else raw
 
             bn_mode_counts[bn_id][mode] += 1
 
     # 5. Deep-fetch all unique sets for duo counts only
-    set_nominations = {}  # set_id -> list of nominators {user_id, mode}
-
+    set_nominations = {}  # set_id -> list of {user_id, mode}
+    
     set_ids_list = list(all_set_ids)
     total_sets = len(set_ids_list)
-
+    
     def fetch_set_noms(set_id):
         data = deep_fetch_set(set_id, token)
         if data:
             noms = data.get('current_nominations', [])
             return (set_id, noms)
         return (set_id, [])
-
+    
     completed = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(fetch_set_noms, sid): sid for sid in set_ids_list}
-
+        
         for future in concurrent.futures.as_completed(futures):
             if cancel_event and cancel_event.is_set():
                 executor.shutdown(wait=False, cancel_futures=True)
                 return {'error': 'Cancelled'}
-
+            
             completed += 1
             if completed % 50 == 0:
                 progress(f"Deep-fetching sets: {completed}/{total_sets}...")
-
+            
             try:
                 set_id, noms = future.result()
                 if noms:
                     set_nominations[set_id] = noms
             except Exception as e:
                 print(f"Deep-fetch error: {e}")
-
+    
     progress(f"Deep-fetched {len(set_nominations)} sets. Building duo leaderboard...")
 
-    # 6. Build duo counts (Iconic BN Duos) from current_nominations
+    # 6. Build duo counts (Iconic BN Duos) from current_nominations.
+    # Note: current_nominations is only populated for pending/qualified sets.
     # (bn1_id, bn2_id, mode) -> count  (bn1 < bn2 to avoid duplicates)
     duo_counts = defaultdict(int)
 
@@ -251,14 +268,11 @@ def run_global_scan(progress_callback=None, cancel_event=None, since_date=None):
                 mode = mode[0]
             elif not mode:
                 mode = nom.get('mode', 'osu')
-
             if mode == 'fruits':
                 mode = 'catch'
-
-            if user_id is not None:
+            if user_id:
                 mode_groups[mode].append(user_id)
 
-        # Build duos per mode
         for mode, nominators in mode_groups.items():
             if len(nominators) >= 2:
                 for i in range(len(nominators)):
@@ -266,10 +280,8 @@ def run_global_scan(progress_callback=None, cancel_event=None, since_date=None):
                         pair = tuple(sorted([nominators[i], nominators[j]]))
                         duo_key = f"{pair[0]}:{pair[1]}:{mode}"
                         duo_counts[duo_key] += 1
-    
-    # 8. Build BN lookup for names
-    bn_lookup = {bn['osu_id']: bn for bn in all_bns}
-    
+
+    # 7. Resolve unknown nominator names (nominators not in bn_lookup)
     # Try to resolve unknown BN IDs from the nomination data
     unknown_ids = [uid for uid in bn_mode_counts if uid not in bn_lookup]
     
