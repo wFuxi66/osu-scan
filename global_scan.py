@@ -183,35 +183,31 @@ def run_global_scan(progress_callback=None, cancel_event=None):
     # Build bn_lookup early so mode attribution can use BN's known modes
     bn_lookup = {bn['osu_id']: bn for bn in all_bns}
 
+    def attribute_mode(bset, bn_modes):
+        """Determine which mode a nomination belongs to for a given BN."""
+        eligible = bset.get('nominations_summary', {}).get('eligible_main_rulesets', [])
+        eligible = ['catch' if m == 'fruits' else m for m in eligible]
+        if bn_modes:
+            matched = [m for m in bn_modes if m in eligible]
+            if matched:
+                return matched[0]
+            # BN mode not in eligible (old set / data gap) — use BN's primary mode
+            return bn_modes[0]
+        if eligible:
+            return eligible[0]
+        # Last resort: look at the first beatmap's mode
+        beatmaps = bset.get('beatmaps', [])
+        raw = beatmaps[0].get('mode', 'osu') if beatmaps else 'osu'
+        return 'catch' if raw == 'fruits' else raw
+
     bn_mode_counts = defaultdict(lambda: defaultdict(int))
 
     for bn_id, sets in bn_nomination_sets.items():
         bn_modes = bn_lookup.get(bn_id, {}).get('modes', [])
         for bset in sets:
-            # Determine which mode this nomination belongs to.
             # Intersect the set's eligible rulesets with the BN's known modes.
             # This prevents std-only BNs from being credited with mania/taiko nominations.
-            eligible = bset.get('nominations_summary', {}).get('eligible_main_rulesets', [])
-            # Normalize 'fruits' -> 'catch'
-            eligible = ['catch' if m == 'fruits' else m for m in eligible]
-
-            if bn_modes:
-                # Use the intersection of BN's modes and set's eligible modes
-                matched = [m for m in bn_modes if m in eligible]
-                if matched:
-                    mode = matched[0]
-                else:
-                    # BN mode not in eligible (old set / data gap) — use BN's primary mode
-                    mode = bn_modes[0]
-            elif eligible:
-                mode = eligible[0]
-            else:
-                # Last resort: look at the first beatmap's mode
-                beatmaps = bset.get('beatmaps', [])
-                raw = beatmaps[0].get('mode', 'osu') if beatmaps else 'osu'
-                mode = 'catch' if raw == 'fruits' else raw
-
-            bn_mode_counts[bn_id][mode] += 1
+            bn_mode_counts[bn_id][attribute_mode(bset, bn_modes)] += 1
 
     # 5. Deep-fetch all unique sets for duo counts only
     set_nominations = {}  # set_id -> list of {user_id, mode}
@@ -247,6 +243,29 @@ def run_global_scan(progress_callback=None, cancel_event=None):
                 print(f"Deep-fetch error: {e}")
     
     progress(f"Deep-fetched {len(set_nominations)} sets. Building duo leaderboard...")
+
+    # 5b. Catch old BNs who appear in current_nominations but weren't in all_bns.
+    # These are nominators (e.g. very old BNs predating Mapper's Guild) that the
+    # bn_data lists miss. In the old code they were counted via current_nominations;
+    # now we explicitly fetch their full history from /beatmapsets/nominated.
+    extra_ids = set()
+    for noms in set_nominations.values():
+        for nom in noms:
+            uid = nom.get('user_id')
+            if uid and uid not in bn_nomination_sets:
+                extra_ids.add(uid)
+
+    if extra_ids:
+        progress(f"Found {len(extra_ids)} nominators not in BN lists — fetching their nominations...")
+        for uid in extra_ids:
+            if cancel_event and cancel_event.is_set():
+                return {'error': 'Cancelled'}
+            sets = fetch_bn_nominations(uid, token, cancel_event)
+            bn_nomination_sets[uid] = sets
+            # Count their nominations (no known modes since they're not in bn_lookup)
+            for bset in sets:
+                bn_mode_counts[uid][attribute_mode(bset, [])] += 1
+            time.sleep(0.05)
 
     # 6. Build duo counts (Iconic BN Duos) from current_nominations.
     # Note: current_nominations is only populated for pending/qualified sets.
