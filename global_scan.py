@@ -218,6 +218,12 @@ def run_global_scan(progress_callback=None, cancel_event=None, since_date=None):
                 print(f"Deep-fetch error: {e}")
     
     progress(f"Deep-fetched {len(set_nominations)} sets with nomination data. Building leaderboards...")
+
+    # DEBUG: Log how many sets were fetched vs how many have nominations
+    total_sets_fetched = len(set_ids_list)
+    sets_with_noms = len(set_nominations)
+    sets_without_noms = total_sets_fetched - sets_with_noms
+    progress(f"[DEBUG] Total sets to fetch: {total_sets_fetched}, Sets with nominations: {sets_with_noms}, Sets without: {sets_without_noms}")
     
     # 6. Build per-mode nomination counts (Top BNs)
     # bn_id -> { mode -> count }
