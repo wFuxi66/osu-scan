@@ -238,12 +238,16 @@ def run_global_scan(progress_callback=None, cancel_event=None, since_date=None):
                 mode = mode[0]
             elif not mode:
                 mode = nom.get('mode', 'osu')
-            
+
             # Map osu! API 'fruits' to 'catch' for consistency with Mapper's Guild and frontend
             if mode == 'fruits':
                 mode = 'catch'
-            
-            if user_id:
+
+            # DEBUG: Log nominations with missing user_id
+            if not user_id:
+                print(f"[DEBUG] Set {set_id}: Missing user_id in nomination. Full nom data: {nom}")
+
+            if user_id is not None:  # Changed from 'if user_id:' to allow user_id=0 if it ever happens
                 mode_groups[mode].append(user_id)
                 bn_mode_counts[user_id][mode] += 1
         
