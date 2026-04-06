@@ -289,7 +289,7 @@ def trigger_global_scan():
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
     
-    return jsonify({'status': 'started', 'incremental': incremental})
+    return jsonify({'status': 'started'})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
