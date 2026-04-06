@@ -275,21 +275,12 @@ def trigger_global_scan():
     if GLOBAL_SCAN_RUNNING:
         return jsonify({'error': 'Scan already running'}), 409
     
-    # Check for incremental mode
-    incremental = request.form.get('incremental', 'false').lower() == 'true'
-    since_date = None
-    
-    if incremental:
-        existing = global_scan.load_from_firebase()
-        if existing and 'last_scan' in existing:
-            since_date = existing['last_scan']
-    
     GLOBAL_SCAN_RUNNING = True
-    
+
     def run():
         global GLOBAL_SCAN_RUNNING
         try:
-            global_scan.run_global_scan(since_date=since_date)
+            global_scan.run_global_scan()
         except Exception as e:
             print(f"Global scan error: {e}")
         finally:

@@ -110,15 +110,14 @@ def deep_fetch_set(set_id, token):
     
     return None
 
-def run_global_scan(progress_callback=None, cancel_event=None, since_date=None):
+def run_global_scan(progress_callback=None, cancel_event=None):
     """
-    Main scan function.
-    
+    Main scan function. Always does a full scan.
+
     Args:
         progress_callback: function(msg) for progress updates
         cancel_event: threading.Event to cancel
-        since_date: ISO date string, only scan sets ranked after this date (incremental)
-    
+
     Returns:
         dict with leaderboard data
     """
@@ -157,11 +156,6 @@ def run_global_scan(progress_callback=None, cancel_event=None, since_date=None):
             progress(f"Fetching nominations: {i + 1}/{total_bns} BNs...")
         
         sets = fetch_bn_nominations(bn['osu_id'], token, cancel_event)
-        
-        # Filter by date if incremental
-        if since_date:
-            sets = [s for s in sets if (s.get('ranked_date') or '') > since_date]
-        
         bn_nomination_sets[bn['osu_id']] = sets
         
         for s in sets:
