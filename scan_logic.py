@@ -1,6 +1,7 @@
 import requests
 import time
 import os
+import concurrent.futures
 from collections import defaultdict
 
 # Configuration constants
@@ -141,8 +142,6 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
             
     return all_sets
 
-import concurrent.futures
-
 def process_set(bset, host_id, token):
     """Deep scans a single set and finds unique GDers."""
     headers = {'Authorization': f'Bearer {token}'}
@@ -249,10 +248,6 @@ def process_nominator_set(bset, token, session=None):
                     'set_title': f"{bset['artist']} - {bset['title']}",
                     'date': (bset.get('ranked_date') or bset.get('last_updated')).split('T')[0]
                 })
-        else:
-            # If fetch fails, we skip specific nominator data for this set
-            pass
-            
     except Exception as e:
         print(f"Error fetching set {bset['id']}: {e}")
         
