@@ -313,7 +313,7 @@ def run_global_scan(progress_callback=None, cancel_event=None):
             except:
                 bn_lookup[uid] = {'osu_id': uid, 'username': f'User_{uid}', 'modes': [], 'is_current': False}
     
-    # 9. Format Top BNs leaderboard
+    # 8. Format Top BNs leaderboard
     top_bns = []
     for uid, mode_counts_dict in bn_mode_counts.items():
         bn_info = bn_lookup.get(uid, {'username': f'User_{uid}', 'modes': [], 'is_current': False})
@@ -329,7 +329,7 @@ def run_global_scan(progress_callback=None, cancel_event=None):
     
     top_bns.sort(key=lambda x: -x['total'])
     
-    # 10. Format Iconic BN Duos leaderboard
+    # 9. Format Iconic BN Duos leaderboard
     duos = []
     for duo_key, count in duo_counts.items():
         parts = duo_key.split(':')
@@ -356,7 +356,7 @@ def run_global_scan(progress_callback=None, cancel_event=None):
         'duos': duos,
     }
     
-    # 11. Save to Firebase
+    # 10. Save to Firebase
     progress("Saving results to Firebase...")
     save_to_firebase(result)
     
