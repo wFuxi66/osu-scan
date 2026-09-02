@@ -59,12 +59,13 @@ def load_from_firebase(path='leaderboard'):
 
 # ---- Scan logic ----
 
-def fetch_bn_nominations(osu_id, token, cancel_event=None):
+def fetch_bn_nominations(osu_id, token, cancel_event=None, session=None):
     """Fetches all nominated sets for a BN via osu! API."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
     offset = 0
     limit = 50
+    req_func = session.get if session else requests.get
     
     while True:
         if cancel_event and cancel_event.is_set():
@@ -74,7 +75,7 @@ def fetch_bn_nominations(osu_id, token, cancel_event=None):
         url = f'https://osu.ppy.sh/api/v2/users/{osu_id}/beatmapsets/nominated'
         
         try:
-            r = requests.get(url, headers=headers, params=params, timeout=15)
+            r = req_func(url, headers=headers, params=params, timeout=15)
             if r.status_code == 404:
                 break
             r.raise_for_status()
@@ -89,20 +90,21 @@ def fetch_bn_nominations(osu_id, token, cancel_event=None):
                 break
             
             offset += len(data)
-            time.sleep(0.05)
+            time.sleep(0.02)
         except Exception as e:
             print(f"Error fetching nominations for user {osu_id}: {e}")
             break
     
     return all_sets
 
-def deep_fetch_set(set_id, token):
+def deep_fetch_set(set_id, token, session=None):
     """Deep-fetches a beatmapset to get current_nominations."""
     headers = {'Authorization': f'Bearer {token}'}
+    req_func = session.get if session else requests.get
     
     try:
         url = f'https://osu.ppy.sh/api/v2/beatmapsets/{set_id}'
-        r = requests.get(url, headers=headers, timeout=15)
+        r = req_func(url, headers=headers, timeout=15)
         if r.status_code == 200:
             return r.json()
     except Exception as e:
@@ -141,34 +143,44 @@ def run_global_scan(progress_callback=None, cancel_event=None):
     
     progress(f"Found {len(all_bns)} BNs. Fetching their nominations...")
     
-    # 3. Fetch nominations for every BN
+    # 3. Fetch nominations for every BN in parallel
     # Collect all nominated set IDs and track which BN nominated which set
     bn_nomination_sets = {}  # osu_id -> list of set dicts
     all_set_ids = set()
-    
     total_bns = len(all_bns)
     
-    for i, bn in enumerate(all_bns):
-        if cancel_event and cancel_event.is_set():
-            return {'error': 'Cancelled'}
-        
-        if (i + 1) % 10 == 0 or i == 0:
-            progress(f"Fetching nominations: {i + 1}/{total_bns} BNs...")
-        
-        sets = fetch_bn_nominations(bn['osu_id'], token, cancel_event)
-        bn_nomination_sets[bn['osu_id']] = sets
-        
-        for s in sets:
-            all_set_ids.add(s['id'])
-        
-        # Rate limiting
-        time.sleep(0.05)
-        
-        # Refresh token periodically (every 200 BNs)
-        if (i + 1) % 200 == 0:
-            new_token = scan_logic.get_token()
-            if new_token:
-                token = new_token
+    session_bns = requests.Session()
+    adapter_bns = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
+    session_bns.mount('https://', adapter_bns)
+    session_bns.mount('http://', adapter_bns)
+
+    def fetch_single_bn(bn_info):
+        uid = bn_info['osu_id']
+        sets = fetch_bn_nominations(uid, token, cancel_event, session=session_bns)
+        return uid, sets
+
+    completed = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(fetch_single_bn, bn): bn for bn in all_bns}
+        for future in concurrent.futures.as_completed(futures):
+            if cancel_event and cancel_event.is_set():
+                executor.shutdown(wait=False, cancel_futures=True)
+                session_bns.close()
+                return {'error': 'Cancelled'}
+            
+            completed += 1
+            if completed % 50 == 0 or completed == total_bns:
+                progress(f"Fetching nominations: {completed}/{total_bns} BNs...")
+            
+            try:
+                uid, sets = future.result()
+                bn_nomination_sets[uid] = sets
+                for s in sets:
+                    all_set_ids.add(s['id'])
+            except Exception as e:
+                print(f"Error in BN fetch: {e}")
+
+    session_bns.close()
     
     progress(f"Found {len(all_set_ids)} unique sets. Building nomination counts...")
 
@@ -215,24 +227,30 @@ def run_global_scan(progress_callback=None, cancel_event=None):
     set_ids_list = list(all_set_ids)
     total_sets = len(set_ids_list)
     
+    session_sets = requests.Session()
+    adapter_sets = requests.adapters.HTTPAdapter(pool_connections=25, pool_maxsize=25)
+    session_sets.mount('https://', adapter_sets)
+    session_sets.mount('http://', adapter_sets)
+
     def fetch_set_noms(set_id):
-        data = deep_fetch_set(set_id, token)
+        data = deep_fetch_set(set_id, token, session=session_sets)
         if data:
             noms = data.get('current_nominations', [])
             return (set_id, noms)
         return (set_id, [])
     
     completed = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=14) as executor:
         futures = {executor.submit(fetch_set_noms, sid): sid for sid in set_ids_list}
         
         for future in concurrent.futures.as_completed(futures):
             if cancel_event and cancel_event.is_set():
                 executor.shutdown(wait=False, cancel_futures=True)
+                session_sets.close()
                 return {'error': 'Cancelled'}
             
             completed += 1
-            if completed % 50 == 0:
+            if completed % 250 == 0 or completed == total_sets:
                 progress(f"Deep-fetching sets: {completed}/{total_sets}...")
             
             try:
@@ -242,6 +260,7 @@ def run_global_scan(progress_callback=None, cancel_event=None):
             except Exception as e:
                 print(f"Deep-fetch error: {e}")
     
+    session_sets.close()
     progress(f"Deep-fetched {len(set_nominations)} sets. Building duo leaderboard...")
 
     # 5b. Catch old BNs who appear in current_nominations but weren't in all_bns.
@@ -257,15 +276,18 @@ def run_global_scan(progress_callback=None, cancel_event=None):
 
     if extra_ids:
         progress(f"Found {len(extra_ids)} nominators not in BN lists — fetching their nominations...")
+        session_extra = requests.Session()
         for uid in extra_ids:
             if cancel_event and cancel_event.is_set():
+                session_extra.close()
                 return {'error': 'Cancelled'}
-            sets = fetch_bn_nominations(uid, token, cancel_event)
+            sets = fetch_bn_nominations(uid, token, cancel_event, session=session_extra)
             bn_nomination_sets[uid] = sets
             # Count their nominations (no known modes since they're not in bn_lookup)
             for bset in sets:
                 bn_mode_counts[uid][attribute_mode(bset, [])] += 1
-            time.sleep(0.05)
+            time.sleep(0.02)
+        session_extra.close()
 
     # 6. Build duo counts (Iconic BN Duos) from current_nominations.
     # Note: current_nominations is only populated for pending/qualified sets.
@@ -300,18 +322,10 @@ def run_global_scan(progress_callback=None, cancel_event=None):
     
     if unknown_ids:
         progress(f"Resolving {len(unknown_ids)} unknown nominator names...")
-        headers = {'Authorization': f'Bearer {token}'}
+        resolved = scan_logic.resolve_users_parallel(unknown_ids, token, progress_callback)
         for uid in unknown_ids:
-            try:
-                r = requests.get(f'https://osu.ppy.sh/api/v2/users/{uid}', headers=headers, timeout=10)
-                if r.status_code == 200:
-                    user_data = r.json()
-                    bn_lookup[uid] = {'osu_id': uid, 'username': user_data.get('username', f'User_{uid}'), 'modes': [], 'is_current': False}
-                else:
-                    bn_lookup[uid] = {'osu_id': uid, 'username': f'User_{uid}', 'modes': [], 'is_current': False}
-                time.sleep(0.05)
-            except:
-                bn_lookup[uid] = {'osu_id': uid, 'username': f'User_{uid}', 'modes': [], 'is_current': False}
+            username = resolved.get(uid, f'User_{uid}')
+            bn_lookup[uid] = {'osu_id': uid, 'username': username, 'modes': [], 'is_current': False}
     
     # 8. Format Top BNs leaderboard
     top_bns = []
