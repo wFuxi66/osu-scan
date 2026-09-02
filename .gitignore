@@ -21,5 +21,9 @@ gd_report_*.csv
 leaderboard_*.csv
 leaderboard_*.html
 
+# Cache
+user_cache.json
+leaderboard_cache.json
+
 # Debug
 debug_api.py

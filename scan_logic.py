@@ -1,6 +1,7 @@
 import requests
 import time
 import os
+import json
 import concurrent.futures
 from collections import defaultdict
 
@@ -67,18 +68,23 @@ def get_beatmapsets(user_id, token, cancel_event=None):
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
     set_types = ['ranked', 'loved']
+    session = requests.Session()
     
     for s_type in set_types:
-        if cancel_event and cancel_event.is_set(): return []
+        if cancel_event and cancel_event.is_set():
+            session.close()
+            return []
         offset = 0
         limit = 100
         while True:
-            if cancel_event and cancel_event.is_set(): return []
+            if cancel_event and cancel_event.is_set():
+                session.close()
+                return []
             params = {'limit': limit, 'offset': offset}
             url = f'{API_BASE}/users/{user_id}/beatmapsets/{s_type}'
             
             try:
-                response = requests.get(url, headers=headers, params=params, timeout=10)
+                response = session.get(url, headers=headers, params=params, timeout=10)
                 if response.status_code == 404:
                     break 
                 
@@ -96,24 +102,27 @@ def get_beatmapsets(user_id, token, cancel_event=None):
                     break
                 
                 offset += len(data)
-                time.sleep(0.1) 
+                time.sleep(0.05) 
             except Exception as e:
                 print(f"Warning: Failed to fetch {s_type} sets: {e}")
                 break
                 
-                
+    session.close()
     return all_sets
 
 def get_nominated_beatmapsets(user_id, token, cancel_event=None):
     """Fetches all beatmap sets nominated by a user."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
+    session = requests.Session()
     
     offset = 0
     limit = 50 # Unknown limit for this endpoint, safe bet
     
     while True:
-        if cancel_event and cancel_event.is_set(): return []
+        if cancel_event and cancel_event.is_set():
+            session.close()
+            return []
         
         # This is a hidden endpoint, pagination support is assumed but not guaranteed.
         # If pagination doesn't accept 'offset', we might only get the first page.
@@ -122,7 +131,7 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
         url = f'{API_BASE}/users/{user_id}/beatmapsets/nominated'
         
         try:
-            response = requests.get(url, headers=headers, params=params, timeout=10)
+            response = session.get(url, headers=headers, params=params, timeout=10)
             if response.status_code == 404: break
             
             response.raise_for_status()
@@ -135,33 +144,31 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
             if len(data) < limit: break
             
             offset += len(data)
-            time.sleep(0.1)
+            time.sleep(0.05)
         except Exception as e:
             print(f"Warning: Failed to fetch nominated sets: {e}")
             break
             
+    session.close()
     return all_sets
 
-def process_set(bset, host_id, token):
-    """Deep scans a single set and finds unique GDers."""
-    headers = {'Authorization': f'Bearer {token}'}
+def process_set(bset, host_id, token=None):
+    """Scans a single set and finds unique GDers."""
     gds_in_set = []
     
-    try:
-        # Full Deep Fetch
-        url = f'{API_BASE}/beatmapsets/{bset["id"]}'
-        r = requests.get(url, headers=headers, timeout=10)
-        
-        if r.status_code == 200:
-            full_set = r.json()
-        else:
-            full_set = bset
-            
-    except Exception as e:
-        print(f"Error fetching deep set {bset['id']}: {e}")
-        full_set = bset
+    beats = bset.get('beatmaps')
+    if beats is None and token:
+        headers = {'Authorization': f'Bearer {token}'}
+        try:
+            url = f'{API_BASE}/beatmapsets/{bset["id"]}'
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                full_set = r.json()
+                beats = full_set.get('beatmaps', [])
+        except Exception as e:
+            print(f"Error fetching deep set {bset['id']}: {e}")
+            beats = []
 
-    beats = full_set.get('beatmaps', [])
     if not beats:
         return []
 
@@ -177,53 +184,36 @@ def process_set(bset, host_id, token):
                 if owner['id'] != host_id and owner['id'] not in seen_mappers_in_set:
                     gd_entry = {
                         'mapper_id': owner['id'],
-                        'mapper_name': owner['username'], 
-                        'last_updated': beatmap['last_updated'].split('T')[0]
+                        'mapper_name': owner.get('username'), 
+                        'last_updated': beatmap.get('last_updated', '').split('T')[0]
                     }
                     gds_in_set.append(gd_entry)
                     seen_mappers_in_set.add(owner['id'])
         else:
-            mapper_id = beatmap['user_id']
-            if mapper_id != host_id and mapper_id not in seen_mappers_in_set:
+            mapper_id = beatmap.get('user_id')
+            if mapper_id and mapper_id != host_id and mapper_id not in seen_mappers_in_set:
                 gd_entry = {
                     'mapper_id': mapper_id,
                     'mapper_name': None, 
-                    'last_updated': beatmap['last_updated'].split('T')[0]
+                    'last_updated': beatmap.get('last_updated', '').split('T')[0]
                 }
                 gds_in_set.append(gd_entry)
                 seen_mappers_in_set.add(mapper_id)
                 
     return gds_in_set
 
-def analyze_sets(beatmapsets, host_id, token, progress_callback=None, cancel_event=None):
-    """Finds GDs in the provided beatmap sets using Concurrent Futures for speed."""
+def analyze_sets(beatmapsets, host_id, token=None, progress_callback=None, cancel_event=None):
+    """Finds GDs in the provided beatmap sets directly from memory (instant)."""
     all_gds = []
     total = len(beatmapsets)
-    if progress_callback: progress_callback(f"Deep Scanning {total} sets...")
+    if progress_callback: progress_callback(f"Analyzing {total} sets...")
     
     if cancel_event and cancel_event.is_set(): return []
     
-    # Use ThreadPool to speed up I/O
-    # Max workers = 5 to be safe with rate limits (osu! is lenient but let's not push it)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        # Submit all tasks
-        future_to_set = {executor.submit(process_set, bset, host_id, token): bset for bset in beatmapsets}
-        
-        completed = 0
-        for future in concurrent.futures.as_completed(future_to_set):
-            if cancel_event and cancel_event.is_set():
-                executor.shutdown(wait=False, cancel_futures=True)
-                return []
-                
-            completed += 1
-            if completed % 5 == 0:
-                if progress_callback: progress_callback(f"Scanning progress: {completed}/{total} sets...")
-            
-            try:
-                results = future.result()
-                all_gds.extend(results)
-            except Exception as e:
-                print(f"Set processing generated an exception: {e}")
+    for bset in beatmapsets:
+        if cancel_event and cancel_event.is_set(): return []
+        results = process_set(bset, host_id, token)
+        all_gds.extend(results)
                 
     return all_gds
 
@@ -253,8 +243,28 @@ def process_nominator_set(bset, token, session=None):
         
     return nominations
             
-# Global Cache
+# User Cache with persistent file storage
+USER_CACHE_FILE = 'user_cache.json'
 USER_CACHE = {}
+
+def load_user_cache():
+    global USER_CACHE
+    if os.path.exists(USER_CACHE_FILE):
+        try:
+            with open(USER_CACHE_FILE, 'r') as f:
+                data = json.load(f)
+                USER_CACHE = {int(k): v for k, v in data.items()}
+        except Exception as e:
+            print(f"Error loading user cache: {e}")
+
+def save_user_cache():
+    try:
+        with open(USER_CACHE_FILE, 'w') as f:
+            json.dump(USER_CACHE, f)
+    except Exception as e:
+        print(f"Error saving user cache: {e}")
+
+load_user_cache()
 
 def resolve_users_parallel(user_ids, token, progress_callback=None):
     """Resolves a list of user IDs to usernames using threading, with caching."""
@@ -268,16 +278,19 @@ def resolve_users_parallel(user_ids, token, progress_callback=None):
         msg = f"Resolving {total_missing} usernames..."
         if progress_callback: progress_callback(msg)
 
+        session = requests.Session()
+
         def fetch_user(uid):
             try:
-                r = requests.get(f'{API_BASE}/users/{uid}', headers=headers, timeout=10)
+                r = session.get(f'{API_BASE}/users/{uid}', headers=headers, timeout=10)
                 if r.status_code == 200:
-                    return (uid, r.json()['username'])
+                    return (uid, r.json().get('username', f"User_{uid}"))
             except:
                 pass
             return (uid, f"User_{uid}")
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        new_entries = False
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             future_to_uid = {executor.submit(fetch_user, uid): uid for uid in missing_ids}
             
             completed = 0
@@ -289,8 +302,13 @@ def resolve_users_parallel(user_ids, token, progress_callback=None):
                 try:
                     uid, name = future.result()
                     USER_CACHE[uid] = name
+                    new_entries = True
                 except:
                     pass
+        session.close()
+
+        if new_entries:
+            save_user_cache()
     
     # Build result from cache
     return {uid: USER_CACHE.get(uid, f"User_{uid}") for uid in user_ids if uid != 0}
@@ -307,14 +325,9 @@ def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=
     
     if cancel_event and cancel_event.is_set(): return []
     
-    # Create a thread-local session factory or just pass a session?
-    # Actually requests.Session is not thread-safe if shared across threads heavily?
-    # Documentation says Session is thread-safe.
-    # But for safety, we can create one session per thread if we want, but sharing is usually fine for read-only.
-    # Let's try sharing one session to reuse connections.
     session = requests.Session()
     
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         future_to_set = {executor.submit(process_nominator_set, bset, token, session): bset for bset in target_sets}
         
         completed = 0
@@ -456,18 +469,21 @@ def get_guest_beatmapsets(user_id, token, cancel_event=None):
     """Fetches all beatmap sets where the user has contributed a guest difficulty."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
+    session = requests.Session()
     
     offset = 0
     limit = 100
     
     while True:
-        if cancel_event and cancel_event.is_set(): return []
+        if cancel_event and cancel_event.is_set():
+            session.close()
+            return []
         
         params = {'limit': limit, 'offset': offset}
         url = f'{API_BASE}/users/{user_id}/beatmapsets/guest'
         
         try:
-            response = requests.get(url, headers=headers, params=params, timeout=10)
+            response = session.get(url, headers=headers, params=params, timeout=10)
             if response.status_code == 404: break
             
             response.raise_for_status()
@@ -480,11 +496,12 @@ def get_guest_beatmapsets(user_id, token, cancel_event=None):
             if len(data) < limit: break
             
             offset += len(data)
-            time.sleep(0.1)
+            time.sleep(0.05)
         except Exception as e:
             print(f"Warning: Failed to fetch guest sets: {e}")
             break
             
+    session.close()
     return all_sets
 
 def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=None, cancel_event=None):
