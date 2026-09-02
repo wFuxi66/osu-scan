@@ -41,7 +41,9 @@ jobs:
         python run_scan.py
 
     - name: Keep Workflow Alive
-      uses: gautamkrishnar/keepalive-workflow@v2
-      with:
-        use_api: true
-        time_elapsed: 45
+      continue-on-error: true
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git commit --allow-empty -m "chore: keepalive [skip ci]" || true
+        git push || true
