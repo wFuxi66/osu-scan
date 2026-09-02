@@ -181,6 +181,12 @@ def run_global_scan(progress_callback=None, cancel_event=None):
         
         time.sleep(0.12)
 
+        # Refresh token periodically (every 200 BNs) to keep fresh rate limit buckets
+        if (i + 1) % 200 == 0:
+            new_token = scan_logic.get_token()
+            if new_token:
+                token = new_token
+
     session_bns.close()
     
     progress(f"Found {len(all_set_ids)} unique sets. Building nomination counts...")
