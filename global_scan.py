@@ -57,15 +57,37 @@ def load_from_firebase(path='leaderboard'):
         print(f"Error loading from Firebase: {e}")
         return None
 
-# ---- Scan logic ----
+# ---- API Helpers with Rate Limit Resilience ----
+
+def safe_api_get(url, headers, params=None, timeout=15, session=None, max_retries=5):
+    """Executes a GET request with automatic 429 backoff retry and error handling."""
+    req_func = session.get if session else requests.get
+    for attempt in range(max_retries):
+        try:
+            r = req_func(url, headers=headers, params=params, timeout=timeout)
+            if r.status_code == 429:
+                retry_after = int(r.headers.get('Retry-After', 2))
+                sleep_time = max(retry_after, 2) + attempt
+                print(f"[Rate Limited 429] Waiting {sleep_time}s before retry (attempt {attempt+1}/{max_retries})...")
+                time.sleep(sleep_time)
+                continue
+            if r.status_code == 404:
+                return None
+            r.raise_for_status()
+            return r
+        except requests.exceptions.RequestException as e:
+            if attempt == max_retries - 1:
+                print(f"Request failed after {max_retries} attempts for {url}: {e}")
+                return None
+            time.sleep(1 + attempt)
+    return None
 
 def fetch_bn_nominations(osu_id, token, cancel_event=None, session=None):
-    """Fetches all nominated sets for a BN via osu! API."""
+    """Fetches all nominated sets for a BN via osu! API with rate-limit retry."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
     offset = 0
     limit = 50
-    req_func = session.get if session else requests.get
     
     while True:
         if cancel_event and cancel_event.is_set():
@@ -74,42 +96,31 @@ def fetch_bn_nominations(osu_id, token, cancel_event=None, session=None):
         params = {'limit': limit, 'offset': offset}
         url = f'https://osu.ppy.sh/api/v2/users/{osu_id}/beatmapsets/nominated'
         
-        try:
-            r = req_func(url, headers=headers, params=params, timeout=15)
-            if r.status_code == 404:
-                break
-            r.raise_for_status()
-            data = r.json()
-            
-            if not data:
-                break
-            
-            all_sets.extend(data)
-            
-            if len(data) < limit:
-                break
-            
-            offset += len(data)
-            time.sleep(0.02)
-        except Exception as e:
-            print(f"Error fetching nominations for user {osu_id}: {e}")
+        r = safe_api_get(url, headers=headers, params=params, timeout=15, session=session)
+        if not r:
             break
+            
+        data = r.json()
+        if not data:
+            break
+        
+        all_sets.extend(data)
+        
+        if len(data) < limit:
+            break
+        
+        offset += len(data)
+        time.sleep(0.05)
     
     return all_sets
 
 def deep_fetch_set(set_id, token, session=None):
-    """Deep-fetches a beatmapset to get current_nominations."""
+    """Deep-fetches a beatmapset to get current_nominations with rate-limit retry."""
     headers = {'Authorization': f'Bearer {token}'}
-    req_func = session.get if session else requests.get
-    
-    try:
-        url = f'https://osu.ppy.sh/api/v2/beatmapsets/{set_id}'
-        r = req_func(url, headers=headers, timeout=15)
-        if r.status_code == 200:
-            return r.json()
-    except Exception as e:
-        print(f"Error deep-fetching set {set_id}: {e}")
-    
+    url = f'https://osu.ppy.sh/api/v2/beatmapsets/{set_id}'
+    r = safe_api_get(url, headers=headers, timeout=15, session=session)
+    if r and r.status_code == 200:
+        return r.json()
     return None
 
 def run_global_scan(progress_callback=None, cancel_event=None):
@@ -160,7 +171,7 @@ def run_global_scan(progress_callback=None, cancel_event=None):
         return uid, sets
 
     completed = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(fetch_single_bn, bn): bn for bn in all_bns}
         for future in concurrent.futures.as_completed(futures):
             if cancel_event and cancel_event.is_set():
@@ -240,7 +251,7 @@ def run_global_scan(progress_callback=None, cancel_event=None):
         return (set_id, [])
     
     completed = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=14) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         futures = {executor.submit(fetch_set_noms, sid): sid for sid in set_ids_list}
         
         for future in concurrent.futures.as_completed(futures):
