@@ -66,8 +66,9 @@ def safe_api_get(url, headers, params=None, timeout=15, session=None, max_retrie
         try:
             r = req_func(url, headers=headers, params=params, timeout=timeout)
             if r.status_code == 429:
-                retry_after = int(r.headers.get('Retry-After', 2))
-                sleep_time = max(retry_after, 2) + attempt
+                # Cap rate limit pause to max 5s so CI doesn't lock up
+                raw_retry = int(r.headers.get('Retry-After', 2))
+                sleep_time = min(max(raw_retry, 2), 5) + attempt
                 print(f"[Rate Limited 429] Waiting {sleep_time}s before retry (attempt {attempt+1}/{max_retries})...")
                 time.sleep(sleep_time)
                 continue
@@ -110,7 +111,7 @@ def fetch_bn_nominations(osu_id, token, cancel_event=None, session=None):
             break
         
         offset += len(data)
-        time.sleep(0.05)
+        time.sleep(0.08)
     
     return all_sets
 
@@ -154,42 +155,31 @@ def run_global_scan(progress_callback=None, cancel_event=None):
     
     progress(f"Found {len(all_bns)} BNs. Fetching their nominations...")
     
-    # 3. Fetch nominations for every BN in parallel
-    # Collect all nominated set IDs and track which BN nominated which set
+    # 3. Fetch nominations for every BN with clean, polite pacing
     bn_nomination_sets = {}  # osu_id -> list of set dicts
     all_set_ids = set()
     total_bns = len(all_bns)
     
     session_bns = requests.Session()
-    adapter_bns = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
+    adapter_bns = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=10)
     session_bns.mount('https://', adapter_bns)
     session_bns.mount('http://', adapter_bns)
 
-    def fetch_single_bn(bn_info):
-        uid = bn_info['osu_id']
+    for i, bn in enumerate(all_bns):
+        if cancel_event and cancel_event.is_set():
+            session_bns.close()
+            return {'error': 'Cancelled'}
+        
+        if (i + 1) % 50 == 0 or i == 0 or (i + 1) == total_bns:
+            progress(f"Fetching nominations: {i + 1}/{total_bns} BNs...")
+        
+        uid = bn['osu_id']
         sets = fetch_bn_nominations(uid, token, cancel_event, session=session_bns)
-        return uid, sets
-
-    completed = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(fetch_single_bn, bn): bn for bn in all_bns}
-        for future in concurrent.futures.as_completed(futures):
-            if cancel_event and cancel_event.is_set():
-                executor.shutdown(wait=False, cancel_futures=True)
-                session_bns.close()
-                return {'error': 'Cancelled'}
-            
-            completed += 1
-            if completed % 50 == 0 or completed == total_bns:
-                progress(f"Fetching nominations: {completed}/{total_bns} BNs...")
-            
-            try:
-                uid, sets = future.result()
-                bn_nomination_sets[uid] = sets
-                for s in sets:
-                    all_set_ids.add(s['id'])
-            except Exception as e:
-                print(f"Error in BN fetch: {e}")
+        bn_nomination_sets[uid] = sets
+        for s in sets:
+            all_set_ids.add(s['id'])
+        
+        time.sleep(0.08)
 
     session_bns.close()
     
