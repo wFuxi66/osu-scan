@@ -66,10 +66,10 @@ def safe_api_get(url, headers, params=None, timeout=15, session=None, max_retrie
         try:
             r = req_func(url, headers=headers, params=params, timeout=timeout)
             if r.status_code == 429:
-                # Cap rate limit pause to max 5s so CI doesn't lock up
-                raw_retry = int(r.headers.get('Retry-After', 2))
-                sleep_time = min(max(raw_retry, 2), 5) + attempt
-                print(f"[Rate Limited 429] Waiting {sleep_time}s before retry (attempt {attempt+1}/{max_retries})...")
+                # Wait full 30s cooldown so the osu! rate limit bucket completely resets
+                raw_retry = int(r.headers.get('Retry-After', 30))
+                sleep_time = max(raw_retry, 30)
+                print(f"[Rate Limited 429] Cooling down for {sleep_time}s before retry (attempt {attempt+1}/{max_retries})...", flush=True)
                 time.sleep(sleep_time)
                 continue
             if r.status_code == 404:
@@ -78,9 +78,9 @@ def safe_api_get(url, headers, params=None, timeout=15, session=None, max_retrie
             return r
         except requests.exceptions.RequestException as e:
             if attempt == max_retries - 1:
-                print(f"Request failed after {max_retries} attempts for {url}: {e}")
+                print(f"Request failed after {max_retries} attempts for {url}: {e}", flush=True)
                 return None
-            time.sleep(1 + attempt)
+            time.sleep(2 + attempt * 2)
     return None
 
 def fetch_bn_nominations(osu_id, token, cancel_event=None, session=None):
@@ -111,7 +111,7 @@ def fetch_bn_nominations(osu_id, token, cancel_event=None, session=None):
             break
         
         offset += len(data)
-        time.sleep(0.08)
+        time.sleep(0.15)
     
     return all_sets
 
@@ -179,7 +179,7 @@ def run_global_scan(progress_callback=None, cancel_event=None):
         for s in sets:
             all_set_ids.add(s['id'])
         
-        time.sleep(0.08)
+        time.sleep(0.12)
 
     session_bns.close()
     
