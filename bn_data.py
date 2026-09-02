@@ -88,8 +88,27 @@ def fetch_alumni():
     
     return alumni
 
+# Historical BATs / early nominators who predate Mapper's Guild and are missing from osu! Alumni (group 16)
+LEGACY_BNS = [
+    {'osu_id': 12328, 'username': 'Larto', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+    {'osu_id': 91341, 'username': 'Derekku', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+    {'osu_id': 2, 'username': 'peppy', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+    {'osu_id': 119134, 'username': 'Leorda', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+    {'osu_id': 164061, 'username': 'Shinto', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+    {'osu_id': 626907, 'username': 'Stefan', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+    {'osu_id': 452, 'username': 'Kharl', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+    {'osu_id': 25615, 'username': 'Jarby', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+    {'osu_id': 23062, 'username': 'Gens', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+    {'osu_id': 275300, 'username': 'wring', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+    {'osu_id': 43108, 'username': 'Sushi', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+    {'osu_id': 2650, 'username': 'awp', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+    {'osu_id': 139493, 'username': 'ouranhshc', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+    {'osu_id': 95480, 'username': 'alvisto', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+    {'osu_id': 57057, 'username': 'Gabi', 'modes': ['osu'], 'is_current': False, 'bn_duration': 0, 'nat_duration': 0},
+]
+
 def get_all_bns():
-    """Fetches and merges all BNs (current + former + alumni) into a deduplicated list."""
+    """Fetches and merges all BNs (current + former + alumni + legacy) into a deduplicated list."""
     print("Fetching current BNs from Mapper's Guild...")
     current = fetch_current_bns()
     print(f"Found {len(current)} current BNs/NATs")
@@ -128,6 +147,16 @@ def get_all_bns():
             all_bns.append(al)
             alumni_added += 1
     print(f"Added {alumni_added} new Alumni not in Mapper's Guild")
+    
+    # Then Legacy / Historical BATs (catches early nominators missing from Alumni & Mapper's Guild)
+    legacy_added = 0
+    for leg in LEGACY_BNS:
+        if leg['osu_id'] not in seen_ids:
+            seen_ids.add(leg['osu_id'])
+            all_bns.append(leg)
+            legacy_added += 1
+    if legacy_added:
+        print(f"Added {legacy_added} legacy BATs/BNs not in Mapper's Guild or Alumni")
     
     print(f"Total unique BNs/NATs: {len(all_bns)}")
     return all_bns
