@@ -60,17 +60,22 @@ def load_from_firebase(path='leaderboard'):
 # ---- API Helpers with Rate Limit Resilience ----
 
 def safe_api_get(url, headers, params=None, timeout=15, session=None, max_retries=5):
-    """Executes a GET request with automatic 429 backoff retry and error handling."""
+    """Executes a GET request with automatic 429 backoff retry and unauthenticated web fallback."""
     req_func = session.get if session else requests.get
+    current_headers = dict(headers)
     for attempt in range(max_retries):
         try:
-            r = req_func(url, headers=headers, params=params, timeout=timeout)
+            r = req_func(url, headers=current_headers, params=params, timeout=timeout)
             if r.status_code == 429:
-                # Wait full 30s cooldown so the osu! rate limit bucket completely resets
-                raw_retry = int(r.headers.get('Retry-After', 30))
-                sleep_time = max(raw_retry, 30)
-                print(f"[Rate Limited 429] Cooling down for {sleep_time}s before retry (attempt {attempt+1}/{max_retries})...", flush=True)
-                time.sleep(sleep_time)
+                # If OAuth token rate-limited, fallback to web endpoint without token
+                if 'Authorization' in current_headers:
+                    current_headers.pop('Authorization', None)
+                    current_headers['X-Requested-With'] = 'XMLHttpRequest'
+                    time.sleep(1)
+                    continue
+                retry_after = min(int(r.headers.get('Retry-After', 5)), 15)
+                print(f"[Rate Limited 429] Waiting {retry_after}s before retry (attempt {attempt+1}/{max_retries})...", flush=True)
+                time.sleep(retry_after)
                 continue
             if r.status_code == 404:
                 return None
@@ -80,22 +85,28 @@ def safe_api_get(url, headers, params=None, timeout=15, session=None, max_retrie
             if attempt == max_retries - 1:
                 print(f"Request failed after {max_retries} attempts for {url}: {e}", flush=True)
                 return None
-            time.sleep(2 + attempt * 2)
+            time.sleep(1 + attempt)
     return None
 
 def fetch_bn_nominations(osu_id, token, cancel_event=None, session=None):
-    """Fetches all nominated sets for a BN via osu! API with rate-limit retry."""
-    headers = {'Authorization': f'Bearer {token}'}
+    """Fetches all nominated sets for a BN via osu! API or web endpoint with rate-limit resilience."""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'X-Requested-With': 'XMLHttpRequest'
+    }
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+        
     all_sets = []
     offset = 0
-    limit = 50
+    limit = 100
     
     while True:
         if cancel_event and cancel_event.is_set():
             return []
         
         params = {'limit': limit, 'offset': offset}
-        url = f'https://osu.ppy.sh/api/v2/users/{osu_id}/beatmapsets/nominated'
+        url = f'https://osu.ppy.sh/users/{osu_id}/beatmapsets/nominated'
         
         r = safe_api_get(url, headers=headers, params=params, timeout=15, session=session)
         if not r:
@@ -111,7 +122,7 @@ def fetch_bn_nominations(osu_id, token, cancel_event=None, session=None):
             break
         
         offset += len(data)
-        time.sleep(0.15)
+        time.sleep(0.04)
     
     return all_sets
 
