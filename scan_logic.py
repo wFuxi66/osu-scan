@@ -279,6 +279,9 @@ def resolve_users_parallel(user_ids, token, progress_callback=None):
         if progress_callback: progress_callback(msg)
 
         session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
+        session.mount('https://', adapter)
+        session.mount('http://', adapter)
 
         def fetch_user(uid):
             try:
@@ -290,7 +293,7 @@ def resolve_users_parallel(user_ids, token, progress_callback=None):
             return (uid, f"User_{uid}")
 
         new_entries = False
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
             future_to_uid = {executor.submit(fetch_user, uid): uid for uid in missing_ids}
             
             completed = 0
