@@ -38,3 +38,9 @@ jobs:
         FIREBASE_SECRET: ${{ secrets.FIREBASE_SECRET }}
       run: |
         python run_scan.py
+
+    - name: Keep Workflow Alive
+      uses: gautamkrishnar/keepalive-workflow@v2
+      with:
+        use_api: true
+        time_elapsed: 45
