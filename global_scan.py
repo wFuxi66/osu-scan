@@ -135,7 +135,7 @@ def run_global_scan(progress_callback=None, cancel_event=None):
         dict with leaderboard data
     """
     def progress(msg):
-        print(msg)
+        print(msg, flush=True)
         if progress_callback:
             progress_callback(msg)
     
