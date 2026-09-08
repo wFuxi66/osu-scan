@@ -41,7 +41,7 @@ BEATMAP_IDS_PER_CALL = 50
 # An owners pass adds ~5 calls per page; pace them to stay a polite guest on the API.
 OWNERS_PACING = 0.15
 # Bumped whenever the checkpoint layout changes, so an old one is discarded, not misread.
-STATE_VERSION = 2
+STATE_VERSION = 3
 
 
 class AuthRejected(Exception):
@@ -79,14 +79,22 @@ def _int_dd():
 BUCKETS = (('ranked', 'own'), ('ranked', 'guest'), ('loved', 'own'), ('loved', 'guest'))
 
 
+ROLES = ('own', 'guest')
+
+
 def new_stats():
     """Per-mapper totals, split by map status and by whether the mapper hosted the set."""
-    return {bucket: {
+    stats = {bucket: {
         'pc': defaultdict(int),
         'maps': defaultdict(int),
         'mode_pc': defaultdict(_int_dd),
         'mode_maps': defaultdict(_int_dd),
     } for bucket in BUCKETS}
+    # Mapset counts are keyed by role alone: a set holding both loved and ranked
+    # difficulties would otherwise be counted once per status.
+    stats['sets'] = {role: {'count': defaultdict(int), 'modes': defaultdict(_int_dd)}
+                     for role in ROLES}
+    return stats
 
 
 def save_state(state, path=None):
@@ -199,10 +207,15 @@ def diff_owners(bmap, owners_by_diff=None):
 # ---- Aggregation ----
 
 def aggregate_page(beatmapsets, stats, names, owners_by_diff=None):
-    """Folds one search page into the running per-mapper totals."""
+    """Folds one search page into the running per-mapper totals.
+
+    Every mapset reaches this function once, so a mapper's set count is incremented here
+    rather than tracked through a growing set of ids.
+    """
     for bset in beatmapsets:
         if bset.get('creator'):
             names[bset['user_id']] = bset['creator']
+        set_modes = defaultdict(set)  # (uid, role) -> modes the mapper worked in on this set
         for bmap in bset.get('beatmaps', []):
             # ponytail: a loved set can hold non-loved diffs; those land in the ranked bucket. ~0.1% of diffs.
             status = bmap.get('status') or bset.get('status')
@@ -212,11 +225,18 @@ def aggregate_page(beatmapsets, stats, names, owners_by_diff=None):
             # A collab counts in full for every author, so each co-mapper shows its plays.
             for uid in diff_owners(bmap, owners_by_diff):
                 # Hosting the set makes it your own map; anyone else on it is a guest mapper.
-                b = stats[(state, 'own' if uid == bset.get('user_id') else 'guest')]
+                role = 'own' if uid == bset.get('user_id') else 'guest'
+                b = stats[(state, role)]
                 b['pc'][uid] += pc
                 b['maps'][uid] += 1
                 b['mode_pc'][uid][mode] += pc
                 b['mode_maps'][uid][mode] += 1
+                set_modes[(uid, role)].add(mode)
+
+        for (uid, role), modes in set_modes.items():
+            stats['sets'][role]['count'][uid] += 1
+            for mode in modes:
+                stats['sets'][role]['modes'][uid][mode] += 1
 
 
 def prefer_name(resolved, stored):
@@ -371,8 +391,8 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         return {'error': msg, 'total_sets_scanned': total_sets, 'reported_total': state['reported_total']}
 
     all_ids = set()
-    for b in stats.values():
-        all_ids |= set(b['pc'])
+    for bucket in BUCKETS:
+        all_ids |= set(stats[bucket]['pc'])
     progress(f"Aggregated {total_sets} mapsets, {len(all_ids)} mappers. Ranking...")
 
     def total_pc(uid):
@@ -415,6 +435,10 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
             'own_maps_by_mode': modes(own, 'mode_maps'),
             'own_loved_playcount': stats[('loved', 'own')]['pc'][uid],
             'own_loved_by_mode': dict(stats[('loved', 'own')]['mode_pc'][uid]),
+            'sets': sum(stats['sets'][r]['count'][uid] for r in ROLES),
+            'own_sets': stats['sets']['own']['count'][uid],
+            'sets_by_mode': merge_modes(*(stats['sets'][r]['modes'][uid] for r in ROLES)),
+            'own_sets_by_mode': dict(stats['sets']['own']['modes'][uid]),
         }
 
     mappers = [row(uid) for uid in top_ids]
@@ -470,6 +494,14 @@ if __name__ == '__main__':
     # A non-loved diff inside a loved set falls in the ranked bucket, credited to its host.
     assert dict(stats[('loved', 'own')]['pc']) == {}
     assert own['pc'][3] == 7
+
+    # Mapset counts: user 2 guest-mapped two diffs on set 1, which is still one mapset.
+    sets_own, sets_gd = stats['sets']['own']['count'], stats['sets']['guest']['count']
+    assert dict(sets_own) == {1: 1, 3: 1, 4: 1}, dict(sets_own)
+    assert dict(sets_gd) == {2: 2, 5: 1, 6: 1}, dict(sets_gd)
+    # The loved set holds one diff of user 2 and one of its host: one mapset each, not two.
+    assert sets_gd[2] == 2 and sets_own[3] == 1
+    assert dict(stats['sets']['guest']['modes'][2]) == {'osu': 2, 'catch': 1}, "modes counted per set" 
     assert dict(guest['mode_pc'][2]) == {'osu': 5, 'catch': 3}
     assert merge_modes(guest['mode_pc'][2], stats[('loved', 'guest')]['mode_pc'][2]) == {'osu': 105, 'catch': 3}
     assert names == {1: 'Host', 3: 'LovedHost', 4: 'CollabHost'}

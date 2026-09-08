@@ -32,6 +32,7 @@
                 <button type="button" class="section-tab active" data-section="bns">Top BNs</button>
                 <button type="button" class="section-tab" data-section="duos">Iconic BN Duos</button>
                 <button type="button" class="section-tab" data-section="mappers">Most Played Mappers</button>
+                <button type="button" class="section-tab" data-section="sets">Most Ranked Sets</button>
             </div>
 
             <!-- Top BNs -->
@@ -78,13 +79,14 @@
                 <div class="pagination" id="duos-pagination"></div>
             </div>
 
+            <div class="scope-tabs" id="scope-tabs">
+                <button type="button" class="scope-tab active" data-scope="all">Maps + GDs</button>
+                <button type="button" class="scope-tab" data-scope="own">Their own maps</button>
+                <button type="button" class="scope-tab" data-scope="guest">Their GDs</button>
+            </div>
+
             <!-- Most Played Mappers -->
             <div id="section-mappers" class="leaderboard-section">
-                <div class="scope-tabs" id="scope-tabs">
-                    <button type="button" class="scope-tab active" data-scope="all">Maps + GDs</button>
-                    <button type="button" class="scope-tab" data-scope="own">Their own maps</button>
-                    <button type="button" class="scope-tab" data-scope="guest">Their GDs</button>
-                </div>
                 <div class="search-form">
                     <input type="text" class="search-input" id="search-mappers" placeholder="Search a mapper..."
                         autocomplete="off">
@@ -104,6 +106,29 @@
                     </table>
                 </div>
                 <div class="pagination" id="mappers-pagination"></div>
+            </div>
+
+            <!-- Most Ranked Sets -->
+            <div id="section-sets" class="leaderboard-section">
+                <div class="search-form">
+                    <input type="text" class="search-input" id="search-sets" placeholder="Search a mapper..."
+                        autocomplete="off">
+                    <button class="search-btn" id="search-sets-btn">Search</button>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th class="col-rank">#</th>
+                                <th>Mapper</th>
+                                <th class="col-count" id="sets-header">Mapsets</th>
+                                <th class="col-count col-optional" id="sets-diff-header">Difficulties</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sets-tbody"></tbody>
+                    </table>
+                </div>
+                <div class="pagination" id="sets-pagination"></div>
             </div>
 
             <div class="scan-info" id="scan-info"></div>
@@ -133,6 +158,9 @@
         let searchDuos = '';
         let searchMappers = '';
         let currentScope = 'all';
+        let searchSets = '';
+        let pageSets = 1;
+        let scopeAvailable = false;
         let pageBns = 1;
         let pageDuos = 1;
         let pageMappers = 1;
@@ -168,12 +196,11 @@
             .then(data => {
                 mapperData = data;
                 // Data from a scan predating the split has no 'own' figures to filter on.
-                const splitAvailable = (data && data.mappers || []).some(m => 'own_playcount' in m);
-                if (!splitAvailable) {
-                    currentScope = 'all';
-                    document.getElementById('scope-tabs').hidden = true;
-                }
+                scopeAvailable = (data && data.mappers || []).some(m => 'own_playcount' in m);
+                if (!scopeAvailable) currentScope = 'all';
+                updateScopeVisibility();
                 renderMappers();
+                renderSets();
                 renderScanInfo();
             })
             .catch(() => { });
@@ -188,6 +215,7 @@
                     pageBns = 1;
                     pageDuos = 1;
                     pageMappers = 1;
+                    pageSets = 1;
                     document.querySelectorAll('#mode-tabs .mode-tab').forEach(t => t.classList.remove('active'));
                     tab.classList.add('active');
                     updateURL();
@@ -205,6 +233,7 @@
                     tab.classList.add('active');
                     document.querySelectorAll('.leaderboard-section').forEach(s => s.classList.remove('active'));
                     document.getElementById('section-' + currentSection).classList.add('active');
+                    updateScopeVisibility();
                     updateURL();
                     renderScanInfo();
                 });
@@ -213,6 +242,7 @@
             // Show correct section
             document.querySelectorAll('.leaderboard-section').forEach(s => s.classList.remove('active'));
             document.getElementById('section-' + currentSection).classList.add('active');
+            updateScopeVisibility();
 
             // Search - BNs
             const searchBnsInput = document.getElementById('search-bns');
@@ -245,10 +275,12 @@
                 tab.addEventListener('click', () => {
                     currentScope = tab.dataset.scope;
                     pageMappers = 1;
+                    pageSets = 1;
                     document.querySelectorAll('#scope-tabs .scope-tab').forEach(t => t.classList.remove('active'));
                     tab.classList.add('active');
                     updateURL();
                     renderMappers();
+                    renderSets();
                 });
             });
 
@@ -263,6 +295,24 @@
             searchMappersInput.addEventListener('keydown', e => {
                 if (e.key === 'Enter') { e.preventDefault(); searchMappersBtn.click(); }
             });
+
+            // Search - Sets
+            const searchSetsInput = document.getElementById('search-sets');
+            const searchSetsBtn = document.getElementById('search-sets-btn');
+            searchSetsBtn.addEventListener('click', () => {
+                searchSets = searchSetsInput.value.trim().toLowerCase();
+                pageSets = 1;
+                renderSets();
+            });
+            searchSetsInput.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { e.preventDefault(); searchSetsBtn.click(); }
+            });
+        }
+
+        // The scope filter drives both mapper ladders and means nothing on the BN ones.
+        function updateScopeVisibility() {
+            const el = document.getElementById('scope-tabs');
+            el.hidden = !['mappers', 'sets'].includes(currentSection) || !scopeAvailable;
         }
 
         function updateURL() {
@@ -308,7 +358,79 @@
             renderBNs();
             renderDuos();
             renderMappers();
+            renderSets();
             renderScanInfo();
+        }
+
+        function renderSets() {
+            const tbody = document.getElementById('sets-tbody');
+            if (!tbody) return;
+            if (!mapperData || !mapperData.mappers) {
+                tbody.innerHTML = '<tr><td colspan="4" style="color:#666;text-align:center;padding:20px;">Mapper data not available yet.</td></tr>';
+                return;
+            }
+            if (!('sets' in (mapperData.mappers[0] || {}))) {
+                tbody.innerHTML = '<tr><td colspan="4" style="color:#666;text-align:center;padding:20px;">This ladder needs a newer scan.</td></tr>';
+                return;
+            }
+
+            let rows = mapperRows('display_sets');
+            if (searchSets) rows = rows.filter(m => (m.username || '').toLowerCase().includes(searchSets));
+
+            const totalPages = Math.max(1, Math.ceil(rows.length / PER_PAGE));
+            pageSets = Math.min(pageSets, totalPages);
+            const page = rows.slice((pageSets - 1) * PER_PAGE, pageSets * PER_PAGE);
+
+            if (page.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>';
+            } else {
+                let html = '';
+                for (const m of page) {
+                    let icons = '';
+                    if (currentMode === 'all') {
+                        icons = Object.keys(m.by_mode || {}).filter(k => (m.by_mode[k] || 0) > 0).map(modeIcon).join('');
+                    }
+                    html += `<tr class="${rankClass(m.rank)}"><td>${m.rank}</td><td><a href="https://osu.ppy.sh/users/${m.osu_id}" target="_blank" class="username-link">${escapeHTML(m.username)}</a>${icons ? '<span class="mode-icons">' + icons + '</span>' : ''}</td><td>${m.display_sets}</td><td class="col-optional">${m.display_maps}</td></tr>`;
+                }
+                tbody.innerHTML = html;
+            }
+
+            document.getElementById('sets-header').textContent =
+                { all: 'Mapsets', own: 'Own mapsets', guest: 'Mapsets guested on' }[currentScope];
+
+            renderPagination('sets-pagination', pageSets, totalPages, p => { pageSets = p; renderSets(); });
+        }
+
+        // Totals cover maps + GDs; only the 'own' figures are stored, so GDs are the remainder.
+        function mapperRows(sortKey) {
+            const rows = [];
+            for (const m of mapperData.mappers) {
+                const total = k => m[k] || 0;
+                const perMode = k => {
+                    const d = m[k] || {};
+                    if (currentMode === 'catch') return (d.catch || 0) + (d.fruits || 0);
+                    return d[currentMode] || 0;
+                };
+                const pick = currentMode === 'all' ? total : perMode;
+                const fields = currentMode === 'all'
+                    ? ['playcount', 'own_playcount', 'maps', 'own_maps', 'loved_playcount', 'own_loved_playcount', 'sets', 'own_sets']
+                    : ['by_mode', 'own_by_mode', 'maps_by_mode', 'own_maps_by_mode', 'loved_by_mode', 'own_loved_by_mode', 'sets_by_mode', 'own_sets_by_mode'];
+                const [allPc, ownPc, allMaps, ownMaps, allLoved, ownLoved, allSets, ownSets] = fields.map(pick);
+
+                let pc, maps, loved, sets;
+                if (currentScope === 'own') {
+                    pc = ownPc; maps = ownMaps; loved = ownLoved; sets = ownSets;
+                } else if (currentScope === 'guest') {
+                    pc = allPc - ownPc; maps = allMaps - ownMaps; loved = allLoved - ownLoved; sets = allSets - ownSets;
+                } else {
+                    pc = allPc; maps = allMaps; loved = allLoved; sets = allSets;
+                }
+                if (pc > 0) rows.push({ ...m, display_pc: pc, display_maps: maps, display_loved: loved, display_sets: sets });
+            }
+            // Ties on set count are common, so playcount breaks them rather than leaving them arbitrary.
+            rows.sort((a, b) => (b[sortKey] - a[sortKey]) || (b.display_pc - a.display_pc));
+            for (let i = 0; i < rows.length; i++) rows[i].rank = i + 1;
+            return rows;
         }
 
         function renderMappers() {
@@ -319,35 +441,7 @@
                 return;
             }
 
-            // Filter/score by mode
-            let mappers = [];
-            for (const m of mapperData.mappers) {
-                // Totals cover maps + GDs; 'own' is stored, so GDs are what is left over.
-                const total = k => m[k] || 0;
-                const perMode = k => {
-                    const d = m[k] || {};
-                    if (currentMode === 'catch') return (d.catch || 0) + (d.fruits || 0);
-                    return d[currentMode] || 0;
-                };
-                const pick = currentMode === 'all' ? total : perMode;
-                const fields = currentMode === 'all'
-                    ? ['playcount', 'own_playcount', 'maps', 'own_maps', 'loved_playcount', 'own_loved_playcount']
-                    : ['by_mode', 'own_by_mode', 'maps_by_mode', 'own_maps_by_mode', 'loved_by_mode', 'own_loved_by_mode'];
-                const [allPc, ownPc, allMaps, ownMaps, allLoved, ownLoved] = fields.map(pick);
-
-                let pc, maps, loved;
-                if (currentScope === 'own') {
-                    pc = ownPc; maps = ownMaps; loved = ownLoved;
-                } else if (currentScope === 'guest') {
-                    pc = allPc - ownPc; maps = allMaps - ownMaps; loved = allLoved - ownLoved;
-                } else {
-                    pc = allPc; maps = allMaps; loved = allLoved;
-                }
-                if (pc > 0) mappers.push({ ...m, display_pc: pc, display_maps: maps, display_loved: loved });
-            }
-            mappers.sort((a, b) => b.display_pc - a.display_pc);
-            for (let i = 0; i < mappers.length; i++) mappers[i].rank = i + 1;
-
+            let mappers = mapperRows('display_pc');
             if (searchMappers) mappers = mappers.filter(m => (m.username || '').toLowerCase().includes(searchMappers));
 
             const totalPages = Math.max(1, Math.ceil(mappers.length / PER_PAGE));
@@ -514,7 +608,8 @@
             if (!rawData) { el.textContent = ''; return; }
 
             let lastScan = 'Never';
-            const stamp = currentSection === 'mappers' && mapperData ? mapperData.last_scan : rawData.last_scan;
+            const onMapperLadder = ['mappers', 'sets'].includes(currentSection);
+            const stamp = onMapperLadder && mapperData ? mapperData.last_scan : rawData.last_scan;
             if (stamp) {
                 try {
                     const dt = new Date(stamp);
@@ -530,7 +625,7 @@
             const nextScanStr = nextScanDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
             const n = v => (v || 0).toLocaleString('en-US');
-            const source = currentSection === 'mappers'
+            const source = onMapperLadder
                 ? `${n(mapperData && mapperData.total_mappers)} mappers over ${n(mapperData && mapperData.total_sets_scanned)} ranked & loved mapsets`
                 : `${n(rawData.total_bns_scanned)} BNs scanned, ${n(rawData.total_sets_scanned)} sets processed`;
             el.innerHTML = `Last updated: ${lastScan} | ${source}<br><span class="next-scan">Next automated scan: ${nextScanStr}</span>`;
