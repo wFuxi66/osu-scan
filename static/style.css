@@ -67,6 +67,11 @@ a {
     display: none !important;
 }
 
+/* Layout rules like `display: flex` otherwise beat the hidden attribute. */
+[hidden] {
+    display: none !important;
+}
+
 /* --- Buttons & inputs --- */
 
 button {

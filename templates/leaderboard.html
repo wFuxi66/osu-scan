@@ -165,7 +165,17 @@
 
         fetch('/api/mappers_data')
             .then(r => r.json())
-            .then(data => { mapperData = data; renderMappers(); renderScanInfo(); })
+            .then(data => {
+                mapperData = data;
+                // Data from a scan predating the split has no 'own' figures to filter on.
+                const splitAvailable = (data && data.mappers || []).some(m => 'own_playcount' in m);
+                if (!splitAvailable) {
+                    currentScope = 'all';
+                    document.getElementById('scope-tabs').hidden = true;
+                }
+                renderMappers();
+                renderScanInfo();
+            })
             .catch(() => { });
 
         function initUI() {
