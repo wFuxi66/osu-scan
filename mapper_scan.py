@@ -214,6 +214,17 @@ def aggregate_page(beatmapsets, stats, names, owners_by_diff=None):
                 b['mode_maps'][uid][mode] += 1
 
 
+def prefer_name(resolved, stored):
+    """The API's current username wins, except when the lookup failed.
+
+    A failed lookup comes back as the placeholder User_<id>, which is worse than the
+    possibly-outdated name the mapset carries.
+    """
+    if resolved and not resolved.startswith('User_'):
+        return resolved
+    return stored or resolved
+
+
 def merge_modes(*dicts):
     """Sums several {mode: count} dicts into one."""
     out = defaultdict(int)
@@ -366,10 +377,17 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
     if TOP_N:
         top_ids = top_ids[:TOP_N]
 
-    # Most mappers are known from a set they hosted; resolve the rest by API.
-    unknown = [uid for uid in top_ids if uid not in names]
-    if unknown and token:
-        names.update(scan_logic.resolve_users_parallel(unknown, token, progress_callback))
+    # A mapset carries the name its host had when it ranked, so `creator` goes stale on every
+    # rename. Re-resolve every mapper against the API; the stored name is only a fallback.
+    names_current = False
+    if token:
+        progress(f"Refreshing {len(top_ids)} usernames...")
+        resolved = scan_logic.resolve_users_parallel(top_ids, token, progress_callback, refresh=True)
+        for uid, name in resolved.items():
+            names[uid] = prefer_name(name, names.get(uid))
+        names_current = True
+    else:
+        progress("No API token: usernames stay as they were stored on each mapset.")
 
     # Guest-difficulty figures are the totals minus the "own" ones, so they need no storage.
     def row(uid):
@@ -402,6 +420,7 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         'reported_total': state['reported_total'],
         'total_mappers': len(all_ids),
         'collab_credit': state['owners_mode'] != 'none',
+        'names_current': names_current,
         'mappers': mappers,
     }
 
@@ -449,6 +468,12 @@ if __name__ == '__main__':
     assert dict(guest['mode_pc'][2]) == {'osu': 5, 'catch': 3}
     assert merge_modes(guest['mode_pc'][2], stats[('loved', 'guest')]['mode_pc'][2]) == {'osu': 105, 'catch': 3}
     assert names == {1: 'Host', 3: 'LovedHost', 4: 'CollabHost'}
+
+    # Renames are why the ladder cannot trust the name stored on a mapset.
+    assert prefer_name('Andrea', 'osuplayer111') == 'Andrea', "a current name must win"
+    assert prefer_name('User_33599', 'osuplayer111') == 'osuplayer111', "a failed lookup must not erase a real name"
+    assert prefer_name('User_33599', None) == 'User_33599'
+    assert prefer_name(None, 'osuplayer111') == 'osuplayer111'
 
     # A checkpoint must come back with its counters and totals intact.
     probe = 'mapper_scan_state.selfcheck'

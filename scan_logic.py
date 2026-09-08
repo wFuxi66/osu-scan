@@ -266,12 +266,16 @@ def save_user_cache():
 
 load_user_cache()
 
-def resolve_users_parallel(user_ids, token, progress_callback=None):
-    """Resolves a list of user IDs to usernames using threading, with caching."""
+def resolve_users_parallel(user_ids, token, progress_callback=None, refresh=False):
+    """Resolves a list of user IDs to usernames using threading, with caching.
+
+    Pass refresh=True to re-fetch names that are already cached. Players rename, and a
+    cached name is never otherwise revisited.
+    """
     headers = {'Authorization': f'Bearer {token}'}
     
     # Identify which IDs are missing from cache
-    missing_ids = [uid for uid in user_ids if uid not in USER_CACHE and uid != 0]
+    missing_ids = [uid for uid in user_ids if (refresh or uid not in USER_CACHE) and uid != 0]
     total_missing = len(missing_ids)
     
     if total_missing > 0:
