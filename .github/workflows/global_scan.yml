@@ -65,6 +65,13 @@ jobs:
         path: mapper_scan_state.pickle
         key: mapper-scan-${{ github.run_id }}-${{ github.run_attempt }}
 
+    # continue-on-error keeps the BN scan alive, but a silent green run would hide three
+    # failed mapper attempts, so surface it once the BN scan has had its turn.
+    - name: Report mapper scan failure
+      if: always() && steps.mapper_scan.outcome == 'failure'
+      run: |
+        echo "::error::Mapper scan failed after 3 attempts. Its checkpoint is cached; re-run to continue."
+
     - name: Run BN Scan
       env:
         PYTHONUNBUFFERED: "1"
@@ -82,3 +89,7 @@ jobs:
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git commit --allow-empty -m "chore: keepalive [skip ci]" || true
         git push || true
+
+    - name: Fail the run if the mapper scan never finished
+      if: always() && steps.mapper_scan.outcome == 'failure'
+      run: exit 1
