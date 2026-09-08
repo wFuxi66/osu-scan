@@ -115,6 +115,7 @@ input[type="text"]:focus {
 /* --- Tabs --- */
 
 .mode-tabs,
+.scope-tabs,
 .section-tabs {
     display: flex;
     gap: 8px;
@@ -126,11 +127,13 @@ input[type="text"]:focus {
 }
 
 .mode-tabs::-webkit-scrollbar,
+.scope-tabs::-webkit-scrollbar,
 .section-tabs::-webkit-scrollbar {
     display: none;
 }
 
 .mode-tab,
+.scope-tab,
 .section-tab {
     flex: 0 0 auto;
     background: transparent;
@@ -142,10 +145,12 @@ input[type="text"]:focus {
     white-space: nowrap;
 }
 
-.mode-tab {
+.mode-tab,
+.scope-tab {
     padding: 6px 14px;
     font-size: 13px;
     background: var(--line-soft);
+    font-family: inherit;
 }
 
 .section-tab {
@@ -155,12 +160,14 @@ input[type="text"]:focus {
 }
 
 .mode-tab:hover,
+.scope-tab:hover,
 .section-tab:hover {
     border-color: var(--accent);
     color: var(--text);
 }
 
-.mode-tab.active {
+.mode-tab.active,
+.scope-tab.active {
     background: var(--accent);
     border-color: var(--accent);
     color: var(--text);
@@ -507,6 +514,7 @@ tr:hover {
     }
 
     .mode-tabs,
+    .scope-tabs,
     .section-tabs {
         flex-wrap: wrap;
         overflow-x: visible;

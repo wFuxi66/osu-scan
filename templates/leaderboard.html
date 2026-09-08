@@ -80,10 +80,10 @@
 
             <!-- Most Played Mappers -->
             <div id="section-mappers" class="leaderboard-section">
-                <div class="mode-tabs" id="scope-tabs">
-                    <button type="button" class="mode-tab active" data-scope="all">Maps + GDs</button>
-                    <button type="button" class="mode-tab" data-scope="own">Their own maps</button>
-                    <button type="button" class="mode-tab" data-scope="guest">Their GDs</button>
+                <div class="scope-tabs" id="scope-tabs">
+                    <button type="button" class="scope-tab active" data-scope="all">Maps + GDs</button>
+                    <button type="button" class="scope-tab" data-scope="own">Their own maps</button>
+                    <button type="button" class="scope-tab" data-scope="guest">Their GDs</button>
                 </div>
                 <div class="search-form">
                     <input type="text" class="search-input" id="search-mappers" placeholder="Search a mapper..."
@@ -180,7 +180,7 @@
 
         function initUI() {
             // Mode tabs
-            document.querySelectorAll('.mode-tab').forEach(tab => {
+            document.querySelectorAll('#mode-tabs .mode-tab').forEach(tab => {
                 if (tab.dataset.mode === currentMode) tab.classList.add('active');
                 else tab.classList.remove('active');
                 tab.addEventListener('click', () => {
@@ -188,7 +188,7 @@
                     pageBns = 1;
                     pageDuos = 1;
                     pageMappers = 1;
-                    document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('#mode-tabs .mode-tab').forEach(t => t.classList.remove('active'));
                     tab.classList.add('active');
                     updateURL();
                     render();
@@ -239,13 +239,13 @@
             });
 
             // Scope tabs (own maps vs guest difficulties)
-            document.querySelectorAll('#scope-tabs .mode-tab').forEach(tab => {
+            document.querySelectorAll('#scope-tabs .scope-tab').forEach(tab => {
                 if (tab.dataset.scope === currentScope) tab.classList.add('active');
                 else tab.classList.remove('active');
                 tab.addEventListener('click', () => {
                     currentScope = tab.dataset.scope;
                     pageMappers = 1;
-                    document.querySelectorAll('#scope-tabs .mode-tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('#scope-tabs .scope-tab').forEach(t => t.classList.remove('active'));
                     tab.classList.add('active');
                     updateURL();
                     renderMappers();
