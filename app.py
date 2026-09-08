@@ -268,16 +268,22 @@ def leaderboard_data():
 GZIP_CACHE = {}
 
 def gzipped_json(payload, cache_key):
-    """JSON response, gzipped when the caller accepts it."""
-    body = json.dumps(payload, separators=(',', ':')).encode()
-    if 'gzip' not in request.headers.get('Accept-Encoding', ''):
-        return Response(body, mimetype='application/json')
+    """JSON response, gzipped when the caller accepts it.
 
+    Serialising megabytes per request would dwarf the work of serving them, so both the
+    encoded and the compressed body are kept until the scan behind them changes.
+    """
+    version = (payload or {}).get('last_scan')
     cached = GZIP_CACHE.get(cache_key)
-    if not cached or cached['raw_len'] != len(body):
-        cached = {'raw_len': len(body), 'body': gzip.compress(body, 6)}
+    if not cached or cached['version'] != version:
+        body = json.dumps(payload, separators=(',', ':')).encode()
+        cached = {'version': version, 'raw': body, 'gzip': gzip.compress(body, 6)}
         GZIP_CACHE[cache_key] = cached
-    return Response(cached['body'], mimetype='application/json',
+
+    if 'gzip' not in request.headers.get('Accept-Encoding', ''):
+        return Response(cached['raw'], mimetype='application/json',
+                        headers={'Vary': 'Accept-Encoding'})
+    return Response(cached['gzip'], mimetype='application/json',
                     headers={'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding'})
 
 @app.route('/api/mappers_data')

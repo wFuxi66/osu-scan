@@ -39,6 +39,10 @@ STATE_PATH = os.environ.get('MAPPER_SCAN_STATE', 'mapper_scan_state.pickle')
 BEATMAP_IDS_PER_CALL = 50  # the API's documented cap for ids[]
 
 
+class AuthRejected(Exception):
+    """The API refused our token. Waiting cannot fix that, so never retry it."""
+
+
 def get(session, url, headers, params=None):
     """A GET that keeps trying. Returns the response, or None once the patience runs out."""
     for wait in RETRY_WAITS:
@@ -51,6 +55,8 @@ def get(session, url, headers, params=None):
             continue
         if r.status_code == 200:
             return r
+        if r.status_code in (401, 403):
+            raise AuthRejected(f"{r.status_code} from {url}")
         if r.status_code == 404:
             return None
     return None
@@ -110,7 +116,10 @@ def detect_owners_mode(session, token, sample_diff_id, sample_set_id):
         return 'none'
     headers = {**HEADERS, 'Authorization': f'Bearer {token}'}
 
-    r = get(session, API_BEATMAPS_URL, headers, {'ids[]': [sample_diff_id]})
+    try:
+        r = get(session, API_BEATMAPS_URL, headers, {'ids[]': [sample_diff_id]}) if sample_diff_id else None
+    except AuthRejected:
+        return 'none'
     if r is not None:
         maps = r.json().get('beatmaps') or []
         if maps and 'owners' in maps[0]:
@@ -132,26 +141,31 @@ def resolve_owners(session, beatmapsets, token, mode):
     """
     if mode == 'none' or not beatmapsets:
         return {}
+    if not token:
+        return None
     headers = {**HEADERS, 'Authorization': f'Bearer {token}'}
     owners = {}
 
-    if mode == 'bulk':
-        ids = [bmap['id'] for bset in beatmapsets for bmap in bset.get('beatmaps', [])]
-        for i in range(0, len(ids), BEATMAP_IDS_PER_CALL):
-            r = get(session, API_BEATMAPS_URL, headers, {'ids[]': ids[i:i + BEATMAP_IDS_PER_CALL]})
+    try:
+        if mode == 'bulk':
+            ids = [bmap['id'] for bset in beatmapsets for bmap in bset.get('beatmaps', [])]
+            for i in range(0, len(ids), BEATMAP_IDS_PER_CALL):
+                r = get(session, API_BEATMAPS_URL, headers, {'ids[]': ids[i:i + BEATMAP_IDS_PER_CALL]})
+                if r is None:
+                    return None
+                for bmap in r.json().get('beatmaps') or []:
+                    owners[bmap['id']] = [o['id'] for o in (bmap.get('owners') or [])]
+            return owners
+
+        for bset in beatmapsets:
+            r = get(session, f'{API_BEATMAPSET_URL}/{bset["id"]}', headers)
             if r is None:
                 return None
             for bmap in r.json().get('beatmaps') or []:
                 owners[bmap['id']] = [o['id'] for o in (bmap.get('owners') or [])]
         return owners
-
-    for bset in beatmapsets:
-        r = get(session, f'{API_BEATMAPSET_URL}/{bset["id"]}', headers)
-        if r is None:
-            return None
-        for bmap in r.json().get('beatmaps') or []:
-            owners[bmap['id']] = [o['id'] for o in (bmap.get('owners') or [])]
-    return owners
+    except AuthRejected:
+        return None
 
 
 def diff_owners(bmap, owners_by_diff=None):
@@ -196,17 +210,30 @@ def merge_modes(*dicts):
 
 
 def fetch_page(session, cursor, token):
-    """One page of search results, or None once every retry is spent."""
-    url, headers = (API_SEARCH_URL, {**HEADERS, 'Authorization': f'Bearer {token}'}) if token else (SEARCH_URL, HEADERS)
+    """One page of search results.
+
+    Returns (data, token). The token comes back None once the API has refused it, so the
+    caller stops paying the auth round trip on every remaining page.
+    """
     params = {'sort': 'ranked_desc'}
     if cursor:
         params['cursor_string'] = cursor
-    r = get(session, url, headers, params)
-    if r is None and token:
-        # Token refused mid-scan: finish on the public endpoint rather than abandoning.
-        print("API search unavailable, falling back to the public search.", flush=True)
+
+    if token:
+        try:
+            r = get(session, API_SEARCH_URL, {**HEADERS, 'Authorization': f'Bearer {token}'}, params)
+            if r is not None:
+                return r.json(), token
+        except AuthRejected:
+            print("API refused the token; continuing on the public search.", flush=True)
+            token = None
+
+    try:
         r = get(session, SEARCH_URL, HEADERS, params)
-    return r.json() if r is not None else None
+    except AuthRejected:
+        # The public search should never ask for auth; treat it as a dead page, not a crash.
+        return None, token
+    return (r.json() if r is not None else None), token
 
 
 def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, resume=True):
@@ -233,6 +260,13 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
     stats, names = state['stats'], state['names']
     truncated = None
 
+    if state['owners_mode'] not in (None, 'none') and not token:
+        msg = ("Checkpoint was built with collab credit but no API token is available now; "
+               "fix the credentials and re-run so the pass stays consistent.")
+        progress(msg)
+        session.close()
+        return {'error': msg}
+
     progress("Fetching ranked & loved mapsets..." + ("" if token else " (no token: public search, slower)"))
     while True:
         if cancel_event and cancel_event.is_set():
@@ -245,7 +279,13 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
             truncated = f"stopped early at the {max_pages}-page limit"
             break
 
-        data = fetch_page(session, state['cursor'], token)
+        data, still_valid = fetch_page(session, state['cursor'], token)
+        if still_valid is None and token is not None:
+            token = None
+            if state['owners_mode'] not in (None, 'none'):
+                # Half the pass would carry collab credit and half would not: stop instead.
+                truncated = "the API token stopped working, so collab credit would be inconsistent"
+                break
         if data is None:
             truncated = f"search stopped responding after {state['pages']} pages"
             break
@@ -257,8 +297,10 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
             state['reported_total'] = data.get('total')
 
         if state['owners_mode'] is None:
+            probe = next((b for b in page_sets if b.get('beatmaps')), None)
             state['owners_mode'] = detect_owners_mode(
-                session, token, page_sets[0]['beatmaps'][0]['id'], page_sets[0]['id'])
+                session, token, probe['beatmaps'][0]['id'] if probe else None,
+                probe['id'] if probe else None)
             progress({
                 'bulk': "Collab credit on: reading difficulty owners 50 at a time.",
                 'set': "Collab credit on: reading difficulty owners one mapset at a time (slow).",
@@ -381,7 +423,28 @@ if __name__ == '__main__':
     assert load_state(probe) is None
     print("self-check OK")
 
+    # A refused token must fail instantly: retrying auth errors used to sleep ~18 minutes a page.
+    class Refusing:
+        status_code = 401
+        def get(self, *a, **k):
+            Refusing.calls = getattr(Refusing, 'calls', 0) + 1
+            return self
+    refusing = Refusing()
+    started = time.time()
+    try:
+        get(refusing, 'http://example.invalid', {})
+        raise AssertionError("a 401 should raise AuthRejected")
+    except AuthRejected:
+        pass
+    assert Refusing.calls == 1, f"auth error was retried {Refusing.calls} times"
+    assert time.time() - started < 1, "auth error slept before giving up"
+    data, token_after = fetch_page(refusing, None, 'bad-token')
+    assert token_after is None, "a refused token must be dropped for the rest of the scan"
+    assert data is None, "a page that cannot be fetched must come back empty, not raise"
+    assert resolve_owners(refusing, [{'id': 1, 'beatmaps': [{'id': 2}]}], 'bad', 'bulk') is None
+    print("auth handling OK: refused token fails fast and stops collab credit")
+
     # Live check of the network path; a full run is what run_mapper_scan is for.
-    page = fetch_page(requests.Session(), None, scan_logic.get_token())
+    page, _ = fetch_page(requests.Session(), None, scan_logic.get_token())
     assert page and page['beatmapsets'], "search returned nothing"
     print(f"live fetch OK: {len(page['beatmapsets'])} sets of {page.get('total')} reported")
