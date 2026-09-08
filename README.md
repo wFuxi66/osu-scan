@@ -8,6 +8,7 @@ Analytical tool for osu! mappers to evaluate beatmap and nomination history.
 - Guest difficulty analysis (for users and hosts)
 - Beatmap Nominator activity and history tracking
 - Global BN Leaderboards with automated monthly scanning
+- Most Played Mappers ladder (all-time difficulty playcount, guest difficulties included)
 - Multi-threaded processing and result caching
 - Exportable HTML reports
 

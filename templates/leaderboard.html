@@ -415,6 +415,7 @@
             <div class="section-tabs" id="section-tabs">
                 <div class="section-tab active" data-section="bns">Top BNs</div>
                 <div class="section-tab" data-section="duos">Iconic BNs Duos</div>
+                <div class="section-tab" data-section="mappers">Most Played Mappers</div>
             </div>
 
             <!-- Top BNs -->
@@ -462,6 +463,29 @@
                 <div class="pagination" id="duos-pagination"></div>
             </div>
 
+            <!-- Most Played Mappers -->
+            <div id="section-mappers" class="leaderboard-section">
+                <div class="search-form">
+                    <input type="text" class="search-input" id="search-mappers" placeholder="Search a mapper..."
+                        autocomplete="off">
+                    <button class="search-btn" id="search-mappers-btn">Search</button>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Mapper</th>
+                                <th>Difficulties</th>
+                                <th>Total Playcount</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mappers-tbody"></tbody>
+                    </table>
+                </div>
+                <div class="pagination" id="mappers-pagination"></div>
+            </div>
+
             <div class="scan-info" id="scan-info"></div>
         </div>
 
@@ -483,12 +507,15 @@
 
         // State
         let rawData = null;
+        let mapperData = null;
         let currentMode = 'all';
         let currentSection = 'bns';
         let searchBns = '';
         let searchDuos = '';
+        let searchMappers = '';
         let pageBns = 1;
         let pageDuos = 1;
+        let pageMappers = 1;
 
         // Read initial state from URL
         (function readURL() {
@@ -515,6 +542,11 @@
                 document.getElementById('loading').textContent = 'Failed to load data.';
             });
 
+        fetch('/api/mappers_data')
+            .then(r => r.json())
+            .then(data => { mapperData = data; renderMappers(); })
+            .catch(() => { });
+
         function initUI() {
             // Mode tabs
             document.querySelectorAll('.mode-tab').forEach(tab => {
@@ -524,6 +556,7 @@
                     currentMode = tab.dataset.mode;
                     pageBns = 1;
                     pageDuos = 1;
+                    pageMappers = 1;
                     document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
                     tab.classList.add('active');
                     updateURL();
@@ -572,6 +605,18 @@
             searchDuosInput.addEventListener('keydown', e => {
                 if (e.key === 'Enter') { e.preventDefault(); searchDuosBtn.click(); }
             });
+
+            // Search - Mappers
+            const searchMappersInput = document.getElementById('search-mappers');
+            const searchMappersBtn = document.getElementById('search-mappers-btn');
+            searchMappersBtn.addEventListener('click', () => {
+                searchMappers = searchMappersInput.value.trim().toLowerCase();
+                pageMappers = 1;
+                renderMappers();
+            });
+            searchMappersInput.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { e.preventDefault(); searchMappersBtn.click(); }
+            });
         }
 
         function updateURL() {
@@ -612,7 +657,61 @@
         function render() {
             renderBNs();
             renderDuos();
+            renderMappers();
             renderScanInfo();
+        }
+
+        function renderMappers() {
+            const tbody = document.getElementById('mappers-tbody');
+            if (!tbody) return;
+            if (!mapperData || !mapperData.mappers) {
+                tbody.innerHTML = '<tr><td colspan="4" style="color:#666;text-align:center;padding:20px;">Mapper data not available yet.</td></tr>';
+                return;
+            }
+
+            // Filter/score by mode
+            let mappers = [];
+            for (const m of mapperData.mappers) {
+                let pc, maps;
+                if (currentMode === 'all') {
+                    pc = m.playcount || 0;
+                    maps = m.maps || 0;
+                } else {
+                    const byMode = m.by_mode || {}, mapsByMode = m.maps_by_mode || {};
+                    if (currentMode === 'catch') {
+                        pc = (byMode.catch || 0) + (byMode.fruits || 0);
+                        maps = (mapsByMode.catch || 0) + (mapsByMode.fruits || 0);
+                    } else {
+                        pc = byMode[currentMode] || 0;
+                        maps = mapsByMode[currentMode] || 0;
+                    }
+                }
+                if (pc > 0) mappers.push({ ...m, display_pc: pc, display_maps: maps });
+            }
+            mappers.sort((a, b) => b.display_pc - a.display_pc);
+            for (let i = 0; i < mappers.length; i++) mappers[i].rank = i + 1;
+
+            if (searchMappers) mappers = mappers.filter(m => (m.username || '').toLowerCase().includes(searchMappers));
+
+            const totalPages = Math.max(1, Math.ceil(mappers.length / PER_PAGE));
+            pageMappers = Math.min(pageMappers, totalPages);
+            const page = mappers.slice((pageMappers - 1) * PER_PAGE, pageMappers * PER_PAGE);
+
+            if (page.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>';
+            } else {
+                let html = '';
+                for (const m of page) {
+                    let icons = '';
+                    if (currentMode === 'all') {
+                        icons = Object.keys(m.by_mode || {}).filter(k => (m.by_mode[k] || 0) > 0).map(modeIcon).join('');
+                    }
+                    html += `<tr class="${rankClass(m.rank)}"><td>${m.rank}</td><td><a href="https://osu.ppy.sh/users/${m.osu_id}" target="_blank" class="username-link">${escapeHTML(m.username)}</a>${icons ? '<span class="mode-icons">' + icons + '</span>' : ''}</td><td>${m.display_maps}</td><td>${m.display_pc.toLocaleString('en-US')}</td></tr>`;
+                }
+                tbody.innerHTML = html;
+            }
+
+            renderPagination('mappers-pagination', pageMappers, totalPages, p => { pageMappers = p; renderMappers(); });
         }
 
         function renderBNs() {

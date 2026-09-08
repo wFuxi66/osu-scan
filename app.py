@@ -235,17 +235,17 @@ def download_report(cache_id):
 GLOBAL_SCAN_RUNNING = False
 
 # Server-side cache for leaderboard data (avoids hitting Firebase on every request)
-LEADERBOARD_CACHE = {'data': None, 'fetched_at': 0}
+LEADERBOARD_CACHE = {}
 LEADERBOARD_CACHE_TTL = 300  # 5 minutes
 
-def get_leaderboard_data():
+def get_leaderboard_data(path='leaderboard'):
     """Get leaderboard data with server-side caching."""
     now = time.time()
-    if LEADERBOARD_CACHE['data'] is not None and (now - LEADERBOARD_CACHE['fetched_at'] < LEADERBOARD_CACHE_TTL):
-        return LEADERBOARD_CACHE['data']
-    data = global_scan.load_from_firebase()
-    LEADERBOARD_CACHE['data'] = data
-    LEADERBOARD_CACHE['fetched_at'] = now
+    entry = LEADERBOARD_CACHE.get(path)
+    if entry and entry['data'] is not None and (now - entry['fetched_at'] < LEADERBOARD_CACHE_TTL):
+        return entry['data']
+    data = global_scan.load_from_firebase(path)
+    LEADERBOARD_CACHE[path] = {'data': data, 'fetched_at': now}
     return data
 
 @app.route('/leaderboard')
@@ -260,6 +260,12 @@ def leaderboard_data():
     if not data:
         return jsonify(None)
     return jsonify(data)
+
+@app.route('/api/mappers_data')
+@limiter.exempt
+def mappers_data():
+    """Returns the global mapper playcount leaderboard. Client handles filtering/pagination."""
+    return jsonify(get_leaderboard_data('mappers'))
 
 @app.route('/api/run_global_scan', methods=['POST'])
 def trigger_global_scan():

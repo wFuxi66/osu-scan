@@ -19,7 +19,7 @@ def save_to_firebase(data, path='leaderboard'):
     """Saves data to Firebase Realtime Database."""
     if not FIREBASE_URL or not FIREBASE_SECRET:
         print("Firebase not configured, saving to local file instead")
-        with open('leaderboard_cache.json', 'w') as f:
+        with open(f'{path}_cache.json', 'w') as f:
             json.dump(data, f)
         return True
     
@@ -32,7 +32,7 @@ def save_to_firebase(data, path='leaderboard'):
     except Exception as e:
         print(f"Error saving to Firebase: {e}")
         # Fallback to local file
-        with open('leaderboard_cache.json', 'w') as f:
+        with open(f'{path}_cache.json', 'w') as f:
             json.dump(data, f)
         return False
 
@@ -40,7 +40,7 @@ def load_from_firebase(path='leaderboard'):
     """Loads data from Firebase Realtime Database."""
     if not FIREBASE_URL:
         try:
-            with open('leaderboard_cache.json', 'r') as f:
+            with open(f'{path}_cache.json', 'r') as f:
                 return json.load(f)
         except FileNotFoundError:
             return None

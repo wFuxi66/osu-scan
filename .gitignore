@@ -24,6 +24,7 @@ leaderboard_*.html
 # Cache
 user_cache.json
 leaderboard_cache.json
+mappers_cache.json
 
 # Debug
 debug_api.py
