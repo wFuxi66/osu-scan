@@ -1,4 +1,6 @@
 from flask import Flask, render_template, request, Response, jsonify
+import gzip
+import json
 from dotenv import load_dotenv
 import threading
 import time
@@ -261,11 +263,28 @@ def leaderboard_data():
         return jsonify(None)
     return jsonify(data)
 
+# The mapper ladder holds every mapper in the game, so the raw JSON runs to megabytes.
+# gzip cuts it by ~4x; the payload only changes once a month, so compress it once and reuse.
+GZIP_CACHE = {}
+
+def gzipped_json(payload, cache_key):
+    """JSON response, gzipped when the caller accepts it."""
+    body = json.dumps(payload, separators=(',', ':')).encode()
+    if 'gzip' not in request.headers.get('Accept-Encoding', ''):
+        return Response(body, mimetype='application/json')
+
+    cached = GZIP_CACHE.get(cache_key)
+    if not cached or cached['raw_len'] != len(body):
+        cached = {'raw_len': len(body), 'body': gzip.compress(body, 6)}
+        GZIP_CACHE[cache_key] = cached
+    return Response(cached['body'], mimetype='application/json',
+                    headers={'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding'})
+
 @app.route('/api/mappers_data')
 @limiter.exempt
 def mappers_data():
     """Returns the global mapper playcount leaderboard. Client handles filtering/pagination."""
-    return jsonify(get_leaderboard_data('mappers'))
+    return gzipped_json(get_leaderboard_data('mappers'), 'mappers')
 
 @app.route('/api/run_global_scan', methods=['POST'])
 def trigger_global_scan():

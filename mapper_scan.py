@@ -29,7 +29,7 @@ HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'X-Requested-With': 'XMLHttpRequest',
 }
-TOP_N = 1000
+TOP_N = None  # keep every mapper: the whole ladder is ~8k entries
 
 # Retry waits in seconds. The monthly job has hours to spare, so a request gets ~18 minutes
 # of escalating patience before the scan gives up on it and checkpoints instead.
@@ -302,9 +302,11 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
     all_ids = set(ranked['pc']) | set(loved['pc'])
     progress(f"Aggregated {total_sets} mapsets, {len(all_ids)} mappers. Ranking...")
 
-    top_ids = sorted(all_ids, key=lambda uid: -(ranked['pc'][uid] + loved['pc'][uid]))[:TOP_N]
+    top_ids = sorted(all_ids, key=lambda uid: -(ranked['pc'][uid] + loved['pc'][uid]))
+    if TOP_N:
+        top_ids = top_ids[:TOP_N]
 
-    # Most mappers are known from a set they hosted; resolve the rest of the top N by API.
+    # Most mappers are known from a set they hosted; resolve the rest by API.
     unknown = [uid for uid in top_ids if uid not in names]
     if unknown and token:
         names.update(scan_logic.resolve_users_parallel(unknown, token, progress_callback))

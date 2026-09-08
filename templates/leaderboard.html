@@ -256,6 +256,9 @@
             return `<img src="${url}" class="mode-icon" title="${mode}" alt="${mode}">`;
         }
 
+        const COMPACT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+        function compact(n) { return COMPACT.format(n); }
+
         function rankClass(r) {
             if (r === 1) return 'rank-gold';
             if (r === 2) return 'rank-silver';
@@ -324,7 +327,7 @@
                     if (currentMode === 'all') {
                         icons = Object.keys(m.by_mode || {}).filter(k => (m.by_mode[k] || 0) > 0).map(modeIcon).join('');
                     }
-                    html += `<tr class="${rankClass(m.rank)}"><td>${m.rank}</td><td><a href="https://osu.ppy.sh/users/${m.osu_id}" target="_blank" class="username-link">${escapeHTML(m.username)}</a>${icons ? '<span class="mode-icons">' + icons + '</span>' : ''}</td><td class="col-optional">${m.display_maps}</td><td class="col-plays">${m.display_pc.toLocaleString('en-US')}${m.display_loved ? `<span class="loved-count" title="Of which ${m.display_loved.toLocaleString('en-US')} plays are on loved difficulties">incl. ${m.display_loved.toLocaleString('en-US')} loved</span>` : ''}</td></tr>`;
+                    html += `<tr class="${rankClass(m.rank)}"><td>${m.rank}</td><td><a href="https://osu.ppy.sh/users/${m.osu_id}" target="_blank" class="username-link">${escapeHTML(m.username)}</a>${icons ? '<span class="mode-icons">' + icons + '</span>' : ''}</td><td class="col-optional">${m.display_maps}</td><td class="col-plays">${m.display_pc.toLocaleString('en-US')}${m.display_loved ? `<span class="loved-count" title="Of which ${m.display_loved.toLocaleString('en-US')} plays are on loved difficulties">${compact(m.display_loved)} loved</span>` : ''}</td></tr>`;
                 }
                 tbody.innerHTML = html;
             }
