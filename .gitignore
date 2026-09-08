@@ -28,3 +28,6 @@ mappers_cache.json
 
 # Debug
 debug_api.py
+
+mapper_scan_state.pickle
+mapper_scan_state.pickle.tmp

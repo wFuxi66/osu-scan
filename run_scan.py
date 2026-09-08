@@ -1,23 +1,41 @@
-import global_scan
-import mapper_scan
-import os
+"""Entry point for the scheduled scans. `python run_scan.py [mappers|bn]`, default both."""
+import sys
+
 from dotenv import load_dotenv
 
-if __name__ == '__main__':
+import global_scan
+import mapper_scan
+
+SCANS = {
+    # Mapper scan first: it is the resumable one, and the BN scan runs for hours.
+    'mappers': ("Mapper scan", mapper_scan.run_mapper_scan),
+    'bn': ("BN scan", global_scan.run_global_scan),
+}
+
+
+def main(names):
     load_dotenv()
-    print("Starting GitHub Actions global scan (full scan)...")
-
     failed = False
-
-    # Independent scans: a failure in one must not skip the other.
-    # Mapper scan first: it takes ~10 min, the BN scan hours — don't let it eat the runner budget.
-    for name, fn in (("Mapper scan", mapper_scan.run_mapper_scan), ("BN scan", global_scan.run_global_scan)):
+    for name in names:
+        label, fn = SCANS[name]
+        print(f"Starting {label}...")
         try:
-            fn()
-            print(f"{name} finished successfully.")
+            result = fn()
+            if isinstance(result, dict) and result.get('error'):
+                # An incomplete mapper scan keeps its checkpoint; a retry continues it.
+                print(f"{label} did not finish: {result['error']}")
+                failed = True
+            else:
+                print(f"{label} finished successfully.")
         except Exception as e:
-            print(f"Error during {name}: {e}")
+            print(f"Error during {label}: {e}")
             failed = True
+    return 1 if failed else 0
 
-    if failed:
-        exit(1)
+
+if __name__ == '__main__':
+    requested = sys.argv[1:] or list(SCANS)
+    unknown = [n for n in requested if n not in SCANS]
+    if unknown:
+        sys.exit(f"Unknown scan(s): {', '.join(unknown)}. Choose from: {', '.join(SCANS)}")
+    sys.exit(main(requested))

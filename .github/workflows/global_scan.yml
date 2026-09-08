@@ -30,7 +30,18 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Run Global Scan
+    # The mapper scan checkpoints its progress; carrying that file between runs means a
+    # killed runner or a rate-limit wall resumes instead of starting the ~59k mapsets over.
+    - name: Restore mapper scan checkpoint
+      uses: actions/cache/restore@v4
+      with:
+        path: mapper_scan_state.pickle
+        key: mapper-scan-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: mapper-scan-
+
+    - name: Run Mapper Scan
+      id: mapper_scan
+      continue-on-error: true  # a stalled mapper scan must not cancel the BN scan
       env:
         PYTHONUNBUFFERED: "1"
         OSU_CLIENT_ID: ${{ secrets.OSU_CLIENT_ID }}
@@ -38,7 +49,31 @@ jobs:
         FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
         FIREBASE_SECRET: ${{ secrets.FIREBASE_SECRET }}
       run: |
-        python run_scan.py
+        for attempt in 1 2 3; do
+          echo "::group::Mapper scan attempt $attempt"
+          python run_scan.py mappers && exit 0
+          echo "::endgroup::"
+          echo "Attempt $attempt stopped short; resuming from the checkpoint in 2 minutes."
+          sleep 120
+        done
+        exit 1
+
+    - name: Save mapper scan checkpoint
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: mapper_scan_state.pickle
+        key: mapper-scan-${{ github.run_id }}-${{ github.run_attempt }}
+
+    - name: Run BN Scan
+      env:
+        PYTHONUNBUFFERED: "1"
+        OSU_CLIENT_ID: ${{ secrets.OSU_CLIENT_ID }}
+        OSU_CLIENT_SECRET: ${{ secrets.OSU_CLIENT_SECRET }}
+        FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
+        FIREBASE_SECRET: ${{ secrets.FIREBASE_SECRET }}
+      run: |
+        python run_scan.py bn
 
     - name: Keep Workflow Alive
       continue-on-error: true
