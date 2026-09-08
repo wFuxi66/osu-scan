@@ -36,7 +36,10 @@ TOP_N = None  # keep every mapper: the whole ladder is ~8k entries
 RETRY_WAITS = (0, 5, 15, 45, 120, 300, 600)
 CHECKPOINT_EVERY = 20  # pages
 STATE_PATH = os.environ.get('MAPPER_SCAN_STATE', 'mapper_scan_state.pickle')
-BEATMAP_IDS_PER_CALL = 50  # the API's documented cap for ids[]
+# Verified cap: asking for 51 ids returns 50 with no error, so never chunk larger.
+BEATMAP_IDS_PER_CALL = 50
+# An owners pass adds ~5 calls per page; pace them to stay a polite guest on the API.
+OWNERS_PACING = 0.15
 # Bumped whenever the checkpoint layout changes, so an old one is discarded, not misread.
 STATE_VERSION = 2
 
@@ -167,6 +170,7 @@ def resolve_owners(session, beatmapsets, token, mode):
                     return None
                 for bmap in r.json().get('beatmaps') or []:
                     owners[bmap['id']] = [o['id'] for o in (bmap.get('owners') or [])]
+                time.sleep(OWNERS_PACING)
             return owners
 
         for bset in beatmapsets:
@@ -175,6 +179,7 @@ def resolve_owners(session, beatmapsets, token, mode):
                 return None
             for bmap in r.json().get('beatmaps') or []:
                 owners[bmap['id']] = [o['id'] for o in (bmap.get('owners') or [])]
+            time.sleep(OWNERS_PACING)
         return owners
     except AuthRejected:
         return None
