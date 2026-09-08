@@ -6,398 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Global Leaderboards - osu!scan</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #1a1a2e;
-            color: #fff;
-            padding: 40px;
-        }
-
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: #16213e;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
-        }
-
-        h1 {
-            color: #fff;
-            border-bottom: 2px solid #e94560;
-            padding-bottom: 10px;
-        }
-
-        .back-link {
-            display: inline-block;
-            margin-bottom: 20px;
-            color: #e94560;
-            text-decoration: none;
-            font-weight: bold;
-        }
-
-        .back-link:hover {
-            color: #ff66aa;
-        }
-
-        /* Mode filter tabs */
-        .mode-tabs {
-            display: flex;
-            gap: 6px;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }
-
-        .mode-tab {
-            padding: 6px 14px;
-            background: rgba(15, 52, 96, 0.5);
-            border: 1px solid #0f3460;
-            border-radius: 4px;
-            color: #aeb2b8;
-            cursor: pointer;
-            font-size: 13px;
-            transition: all 0.2s;
-            text-decoration: none;
-        }
-
-        .mode-tab:hover {
-            border-color: #e94560;
-            color: #fff;
-        }
-
-        .mode-tab.active {
-            background: #e94560;
-            border-color: #e94560;
-            color: #fff;
-        }
-
-        /* Section tabs */
-        .section-tabs {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 15px;
-        }
-
-        .section-tab {
-            padding: 8px 20px;
-            background: transparent;
-            border: 1px solid #0f3460;
-            border-radius: 4px;
-            color: #aeb2b8;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s;
-        }
-
-        .section-tab:hover {
-            border-color: #e94560;
-            color: #fff;
-        }
-
-        .section-tab.active {
-            background: rgba(233, 69, 96, 0.15);
-            border-color: #e94560;
-            color: #fff;
-        }
-
-        .loved-count {
-            color: #ff66aa;
-            font-size: 12px;
-            margin-left: 5px;
-            white-space: nowrap;
-        }
-
-        /* Leaderboard sections */
-        .leaderboard-section {
-            display: none;
-        }
-
-        .leaderboard-section.active {
-            display: block;
-        }
-
-        /* Table */
-        .table-wrapper {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 10px;
-            table-layout: fixed;
-        }
-
-        th {
-            background-color: #0f3460;
-            color: white;
-            padding: 12px;
-            text-align: left;
-        }
-
-        th:nth-child(1) {
-            width: 60px;
-        }
-
-        th:nth-child(3) {
-            width: 150px;
-        }
-
-        td {
-            padding: 12px;
-            border-bottom: 1px solid #0f3460;
-            color: inherit;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        tbody tr {
-            color: #e0e0e0;
-        }
-
-        tr:nth-child(even) {
-            background-color: rgba(15, 52, 96, 0.3);
-        }
-
-        tr:hover {
-            background-color: rgba(233, 69, 96, 0.15);
-        }
-
-        .rank-gold {
-            color: #ffd700;
-            font-weight: bold;
-        }
-
-        .rank-silver {
-            color: #c0c0c0;
-            font-weight: bold;
-        }
-
-        .rank-bronze {
-            color: #cd7f32;
-            font-weight: bold;
-        }
-
-        .username-link {
-            color: inherit;
-            text-decoration: none;
-        }
-
-        .username-link:hover {
-            color: #ff66aa;
-            text-decoration: underline;
-        }
-
-        .mode-icon {
-            width: 16px;
-            height: 16px;
-            vertical-align: middle;
-            opacity: 0.75;
-        }
-
-        .mode-icons {
-            display: inline-flex;
-            gap: 3px;
-            margin-left: 6px;
-            vertical-align: middle;
-        }
-
-        .duo-separator {
-            color: #e94560;
-            margin: 0 4px;
-        }
-
-        .scan-info {
-            margin-top: 15px;
-            font-size: 12px;
-            color: #666;
-        }
-
-        .no-data {
-            padding: 30px;
-            color: #666;
-            font-size: 15px;
-        }
-
-        /* Search bar */
-        .search-form {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 14px;
-        }
-
-        .search-input {
-            flex: 1;
-            padding: 10px 14px;
-            background: rgba(15, 52, 96, 0.5);
-            border: 1px solid #0f3460;
-            border-radius: 6px;
-            color: #fff;
-            font-size: 14px;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-
-        .search-input::placeholder {
-            color: #666;
-        }
-
-        .search-input:focus {
-            border-color: #e94560;
-        }
-
-        .search-btn {
-            padding: 10px 16px;
-            background: rgba(233, 69, 96, 0.2);
-            border: 1px solid #e94560;
-            border-radius: 6px;
-            color: #e94560;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .search-btn:hover {
-            background: #e94560;
-            color: #fff;
-        }
-
-        /* Pagination */
-        .pagination {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            margin-top: 16px;
-            user-select: none;
-        }
-
-        .pagination-btn {
-            background: rgba(15, 52, 96, 0.5);
-            border: 1px solid #0f3460;
-            color: #aeb2b8;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s;
-            text-decoration: none;
-            display: inline-block;
-        }
-
-        .pagination-btn:hover {
-            border-color: #e94560;
-            color: #fff;
-        }
-
-        .pagination-btn.disabled {
-            opacity: 0.35;
-            pointer-events: none;
-        }
-
-        .pagination-info {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            color: #aeb2b8;
-            font-size: 14px;
-        }
-
-        .page-input {
-            width: 42px;
-            text-align: center;
-            background: rgba(15, 52, 96, 0.5);
-            border: 1px solid #0f3460;
-            border-radius: 4px;
-            color: #fff;
-            font-size: 14px;
-            padding: 4px;
-            outline: none;
-            transition: border-color 0.2s;
-            -moz-appearance: textfield;
-        }
-
-        .page-input::-webkit-outer-spin-button,
-        .page-input::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-        }
-
-        .page-input:focus {
-            border-color: #e94560;
-        }
-
-        /* Ko-fi Support Button */
-        .kofi-btn {
-            display: inline-block;
-            background: linear-gradient(135deg, #ff66aa 0%, #e94560 100%);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
-            text-decoration: none;
-            font-size: 13px;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 8px rgba(233, 69, 96, 0.3);
-            margin-left: 8px;
-        }
-
-        .kofi-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(233, 69, 96, 0.5);
-            background: linear-gradient(135deg, #ff7ab8 0%, #ff2e63 100%);
-        }
-
-        .loading-msg {
-            text-align: center;
-            padding: 40px;
-            color: #aeb2b8;
-            font-size: 15px;
-        }
-
-        /* Mobile */
-        @media (max-width: 600px) {
-            body {
-                padding: 10px;
-            }
-
-            .container {
-                padding: 15px;
-                width: 100%;
-                box-sizing: border-box;
-            }
-
-            h1 {
-                font-size: 22px;
-            }
-
-            table {
-                font-size: 14px;
-                white-space: nowrap;
-            }
-
-            th,
-            td {
-                padding: 8px 5px;
-            }
-
-            .mode-tabs {
-                gap: 4px;
-            }
-
-            .mode-tab {
-                padding: 5px 10px;
-                font-size: 12px;
-            }
-
-            .page-input {
-                width: 36px;
-            }
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 
 <body>
@@ -411,18 +20,18 @@
         <div id="leaderboard-content" style="display:none;">
             <!-- Mode filter -->
             <div class="mode-tabs" id="mode-tabs">
-                <div class="mode-tab active" data-mode="all">All</div>
-                <div class="mode-tab" data-mode="osu">osu!</div>
-                <div class="mode-tab" data-mode="taiko">Taiko</div>
-                <div class="mode-tab" data-mode="catch">Catch</div>
-                <div class="mode-tab" data-mode="mania">Mania</div>
+                <button type="button" class="mode-tab active" data-mode="all">All</button>
+                <button type="button" class="mode-tab" data-mode="osu">osu!</button>
+                <button type="button" class="mode-tab" data-mode="taiko">Taiko</button>
+                <button type="button" class="mode-tab" data-mode="catch">Catch</button>
+                <button type="button" class="mode-tab" data-mode="mania">Mania</button>
             </div>
 
             <!-- Section tabs -->
             <div class="section-tabs" id="section-tabs">
-                <div class="section-tab active" data-section="bns">Top BNs</div>
-                <div class="section-tab" data-section="duos">Iconic BNs Duos</div>
-                <div class="section-tab" data-section="mappers">Most Played Mappers</div>
+                <button type="button" class="section-tab active" data-section="bns">Top BNs</button>
+                <button type="button" class="section-tab" data-section="duos">Iconic BN Duos</button>
+                <button type="button" class="section-tab" data-section="mappers">Most Played Mappers</button>
             </div>
 
             <!-- Top BNs -->
@@ -436,9 +45,9 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>#</th>
+                                <th class="col-rank">#</th>
                                 <th>Nominator</th>
-                                <th>Nominations</th>
+                                <th class="col-count">Nominations</th>
                             </tr>
                         </thead>
                         <tbody id="bns-tbody"></tbody>
@@ -458,10 +67,9 @@
                     <table>
                         <thead id="duos-thead">
                             <tr>
-                                <th>#</th>
+                                <th class="col-rank">#</th>
                                 <th>Duo</th>
-                                <th>Mode</th>
-                                <th>Maps Together</th>
+                                <th class="col-count">Maps Together</th>
                             </tr>
                         </thead>
                         <tbody id="duos-tbody"></tbody>
@@ -481,10 +89,10 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>#</th>
+                                <th class="col-rank">#</th>
                                 <th>Mapper</th>
-                                <th>Difficulties</th>
-                                <th>Total Playcount</th>
+                                <th class="col-count col-optional">Difficulties</th>
+                                <th class="col-plays">Playcount</th>
                             </tr>
                         </thead>
                         <tbody id="mappers-tbody"></tbody>
@@ -500,11 +108,10 @@
             No leaderboard data available yet. Scan has not been run.
         </div>
 
-        <div style="margin-top: 40px; text-align: center; font-size: 12px; color: #666;">
-            Made by <a href="https://osu.ppy.sh/users/24230576"
-                style="color: #ff66aa; text-decoration: none;">Fuxi66</a>
-            - Data from <a href="https://osu.ppy.sh" style="color: #ff66aa; text-decoration: none;">osu!</a>
-            and <a href="https://bn.mappersguild.com" style="color: #ff66aa; text-decoration: none;">Mapper's Guild</a>
+        <div class="site-footer">
+            Made by <a href="https://osu.ppy.sh/users/24230576">Fuxi66</a>
+            - Data from <a href="https://osu.ppy.sh">osu!</a>
+            and <a href="https://bn.mappersguild.com">Mapper's Guild</a>
             - <a href="https://ko-fi.com/fuxi66" target="_blank" class="kofi-btn">Support ☕</a>
         </div>
     </div>
@@ -551,7 +158,7 @@
 
         fetch('/api/mappers_data')
             .then(r => r.json())
-            .then(data => { mapperData = data; renderMappers(); })
+            .then(data => { mapperData = data; renderMappers(); renderScanInfo(); })
             .catch(() => { });
 
         function initUI() {
@@ -582,6 +189,7 @@
                     document.querySelectorAll('.leaderboard-section').forEach(s => s.classList.remove('active'));
                     document.getElementById('section-' + currentSection).classList.add('active');
                     updateURL();
+                    renderScanInfo();
                 });
             });
 
@@ -716,7 +324,7 @@
                     if (currentMode === 'all') {
                         icons = Object.keys(m.by_mode || {}).filter(k => (m.by_mode[k] || 0) > 0).map(modeIcon).join('');
                     }
-                    html += `<tr class="${rankClass(m.rank)}"><td>${m.rank}</td><td><a href="https://osu.ppy.sh/users/${m.osu_id}" target="_blank" class="username-link">${escapeHTML(m.username)}</a>${icons ? '<span class="mode-icons">' + icons + '</span>' : ''}</td><td>${m.display_maps}</td><td>${(m.display_pc - m.display_loved).toLocaleString('en-US')}${m.display_loved ? `<span class="loved-count" title="Playcount on loved difficulties">+${m.display_loved.toLocaleString('en-US')} loved</span>` : ''}</td></tr>`;
+                    html += `<tr class="${rankClass(m.rank)}"><td>${m.rank}</td><td><a href="https://osu.ppy.sh/users/${m.osu_id}" target="_blank" class="username-link">${escapeHTML(m.username)}</a>${icons ? '<span class="mode-icons">' + icons + '</span>' : ''}</td><td class="col-optional">${m.display_maps}</td><td class="col-plays">${m.display_pc.toLocaleString('en-US')}${m.display_loved ? `<span class="loved-count" title="Of which ${m.display_loved.toLocaleString('en-US')} plays are on loved difficulties">incl. ${m.display_loved.toLocaleString('en-US')} loved</span>` : ''}</td></tr>`;
                 }
                 tbody.innerHTML = html;
             }
@@ -785,7 +393,7 @@
             if (!rawData || !rawData.duos) { tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>'; return; }
 
             // Always 3 columns - mode icon goes inline in the duo name cell
-            thead.innerHTML = '<tr><th>#</th><th>Duo</th><th>Maps Together</th></tr>';
+            thead.innerHTML = '<tr><th class="col-rank">#</th><th>Duo</th><th class="col-count">Maps Together</th></tr>';
 
             // Filter by mode
             let duos = rawData.duos;
@@ -864,12 +472,13 @@
             if (!rawData) { el.textContent = ''; return; }
 
             let lastScan = 'Never';
-            if (rawData.last_scan) {
+            const stamp = currentSection === 'mappers' && mapperData ? mapperData.last_scan : rawData.last_scan;
+            if (stamp) {
                 try {
-                    const dt = new Date(rawData.last_scan);
+                    const dt = new Date(stamp);
                     lastScan = dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ', ' + dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
                 } catch (e) {
-                    lastScan = rawData.last_scan;
+                    lastScan = stamp;
                 }
             }
 
@@ -878,7 +487,11 @@
             const nextScanDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0));
             const nextScanStr = nextScanDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
-            el.innerHTML = `Last updated: ${lastScan} | ${rawData.total_bns_scanned || 0} BNs scanned, ${rawData.total_sets_scanned || 0} sets processed<br><span style="color: #4facfe; margin-top: 5px; display: inline-block;">Next automated scan: ${nextScanStr}</span>`;
+            const n = v => (v || 0).toLocaleString('en-US');
+            const source = currentSection === 'mappers'
+                ? `${n(mapperData && mapperData.total_mappers)} mappers over ${n(mapperData && mapperData.total_sets_scanned)} ranked & loved mapsets`
+                : `${n(rawData.total_bns_scanned)} BNs scanned, ${n(rawData.total_sets_scanned)} sets processed`;
+            el.innerHTML = `Last updated: ${lastScan} | ${source}<br><span class="next-scan">Next automated scan: ${nextScanStr}</span>`;
         }
     </script>
 </body>
