@@ -34,6 +34,8 @@ TOP_N = None  # keep every mapper: the whole ladder is ~8k entries
 # Retry waits in seconds. The monthly job has hours to spare, so a request gets ~18 minutes
 # of escalating patience before the scan gives up on it and checkpoints instead.
 RETRY_WAITS = (0, 5, 15, 45, 120, 300, 600)
+# The token endpoint throttles too, and it hands back None rather than raising.
+TOKEN_WAITS = (0, 30, 90, 300, 600)
 CHECKPOINT_EVERY = 20  # pages
 STATE_PATH = os.environ.get('MAPPER_SCAN_STATE', 'mapper_scan_state.pickle')
 # Verified cap: asking for 51 ids returns 50 with no error, so never chunk larger.
@@ -46,6 +48,29 @@ STATE_VERSION = 3
 
 class AuthRejected(Exception):
     """The API refused our token. Waiting cannot fix that, so never retry it."""
+
+
+def authenticate():
+    """Get an API token, insisting when credentials exist.
+
+    Without credentials the scan runs on the public search, losing collab credit and
+    explicit mapsets. That is a fine fallback for someone who never configured any, but a
+    silent one for someone who did, whose token endpoint is merely throttled.
+    """
+    configured = bool(scan_logic.CLIENT_ID and scan_logic.CLIENT_SECRET)
+    for wait in TOKEN_WAITS:
+        if wait:
+            print(f"Could not get an API token, retrying in {wait}s...", flush=True)
+            time.sleep(wait)
+        token = scan_logic.get_token()
+        if token:
+            return token
+        if not configured:
+            return None
+    raise RuntimeError(
+        "osu! credentials are configured but no token could be obtained. Refusing to fall "
+        "back to the public search, which would publish a ladder without collab credit or "
+        "explicit mapsets.")
 
 
 def get(session, url, headers, params=None):
@@ -201,7 +226,9 @@ def diff_owners(bmap, owners_by_diff=None):
     otherwise it falls back to the single stored author.
     """
     owners = (owners_by_diff or {}).get(bmap.get('id')) or [o['id'] for o in (bmap.get('owners') or [])]
-    return owners or ([bmap['user_id']] if bmap.get('user_id') else [])
+    owners = owners or ([bmap['user_id']] if bmap.get('user_id') else [])
+    # An id repeated in owners would credit the same mapper twice for one difficulty.
+    return list(dict.fromkeys(owners))
 
 
 # ---- Aggregation ----
@@ -297,7 +324,7 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         if progress_callback:
             progress_callback(msg)
 
-    token = scan_logic.get_token()
+    token = authenticate()
     session = requests.Session()
 
     state = load_state() if resume else None
@@ -490,6 +517,8 @@ if __name__ == '__main__':
     assert own['maps'][4] == 1 and guest['maps'][5] == 1 and guest['maps'][6] == 1
     assert diff_owners({'id': 99, 'user_id': 4}, {99: [4, 5]}) == [4, 5]
     assert diff_owners({'id': 7, 'user_id': 4}) == [4], "no owners info falls back to the stored author"
+    assert diff_owners({'id': 8, 'user_id': 4}, {8: [4, 5, 4]}) == [4, 5], "a repeated owner must count once"
+    assert diff_owners({'id': 9, 'user_id': 4, 'owners': [{'id': 5}, {'id': 5}]}) == [5]
     assert dict(stats[('loved', 'guest')]['pc']) == {2: 100}
     # A non-loved diff inside a loved set falls in the ranked bucket, credited to its host.
     assert dict(stats[('loved', 'own')]['pc']) == {}
@@ -547,6 +576,26 @@ if __name__ == '__main__':
     assert data is None, "a page that cannot be fetched must come back empty, not raise"
     assert resolve_owners(refusing, [{'id': 1, 'beatmaps': [{'id': 2}]}], 'bad', 'bulk') is None
     print("auth handling OK: refused token fails fast and stops collab credit")
+
+    # Configured credentials must never degrade to the public search in silence.
+    _real_token = scan_logic.get_token
+    scan_logic.get_token = lambda: None
+    try:
+        _id, _sec = scan_logic.CLIENT_ID, scan_logic.CLIENT_SECRET
+        scan_logic.CLIENT_ID = scan_logic.CLIENT_SECRET = None
+        assert authenticate() is None, "no credentials means the public search is fine"
+        scan_logic.CLIENT_ID, scan_logic.CLIENT_SECRET = 'id', 'secret'
+        globals()['TOKEN_WAITS'] = (0,)
+        try:
+            authenticate()
+            raise AssertionError("configured credentials that fail must raise")
+        except RuntimeError:
+            pass
+        print("auth policy OK: silent degradation only when nothing is configured")
+    finally:
+        scan_logic.get_token = _real_token
+        scan_logic.CLIENT_ID, scan_logic.CLIENT_SECRET = _id, _sec
+        globals()['TOKEN_WAITS'] = (0, 30, 90, 300, 600)
 
     # Live check of the network path; a full run is what run_mapper_scan is for.
     page, _ = fetch_page(requests.Session(), None, scan_logic.get_token())
