@@ -101,6 +101,13 @@
             color: #fff;
         }
 
+        .loved-count {
+            color: #ff66aa;
+            font-size: 12px;
+            margin-left: 5px;
+            white-space: nowrap;
+        }
+
         /* Leaderboard sections */
         .leaderboard-section {
             display: none;
@@ -672,21 +679,24 @@
             // Filter/score by mode
             let mappers = [];
             for (const m of mapperData.mappers) {
-                let pc, maps;
+                let pc, maps, loved;
                 if (currentMode === 'all') {
                     pc = m.playcount || 0;
                     maps = m.maps || 0;
+                    loved = m.loved_playcount || 0;
                 } else {
-                    const byMode = m.by_mode || {}, mapsByMode = m.maps_by_mode || {};
+                    const byMode = m.by_mode || {}, mapsByMode = m.maps_by_mode || {}, lovedByMode = m.loved_by_mode || {};
                     if (currentMode === 'catch') {
                         pc = (byMode.catch || 0) + (byMode.fruits || 0);
                         maps = (mapsByMode.catch || 0) + (mapsByMode.fruits || 0);
+                        loved = (lovedByMode.catch || 0) + (lovedByMode.fruits || 0);
                     } else {
                         pc = byMode[currentMode] || 0;
                         maps = mapsByMode[currentMode] || 0;
+                        loved = lovedByMode[currentMode] || 0;
                     }
                 }
-                if (pc > 0) mappers.push({ ...m, display_pc: pc, display_maps: maps });
+                if (pc > 0) mappers.push({ ...m, display_pc: pc, display_maps: maps, display_loved: loved });
             }
             mappers.sort((a, b) => b.display_pc - a.display_pc);
             for (let i = 0; i < mappers.length; i++) mappers[i].rank = i + 1;
@@ -706,7 +716,7 @@
                     if (currentMode === 'all') {
                         icons = Object.keys(m.by_mode || {}).filter(k => (m.by_mode[k] || 0) > 0).map(modeIcon).join('');
                     }
-                    html += `<tr class="${rankClass(m.rank)}"><td>${m.rank}</td><td><a href="https://osu.ppy.sh/users/${m.osu_id}" target="_blank" class="username-link">${escapeHTML(m.username)}</a>${icons ? '<span class="mode-icons">' + icons + '</span>' : ''}</td><td>${m.display_maps}</td><td>${m.display_pc.toLocaleString('en-US')}</td></tr>`;
+                    html += `<tr class="${rankClass(m.rank)}"><td>${m.rank}</td><td><a href="https://osu.ppy.sh/users/${m.osu_id}" target="_blank" class="username-link">${escapeHTML(m.username)}</a>${icons ? '<span class="mode-icons">' + icons + '</span>' : ''}</td><td>${m.display_maps}</td><td>${(m.display_pc - m.display_loved).toLocaleString('en-US')}${m.display_loved ? `<span class="loved-count" title="Playcount on loved difficulties">+${m.display_loved.toLocaleString('en-US')} loved</span>` : ''}</td></tr>`;
                 }
                 tbody.innerHTML = html;
             }
