@@ -37,6 +37,8 @@ RETRY_WAITS = (0, 5, 15, 45, 120, 300, 600)
 CHECKPOINT_EVERY = 20  # pages
 STATE_PATH = os.environ.get('MAPPER_SCAN_STATE', 'mapper_scan_state.pickle')
 BEATMAP_IDS_PER_CALL = 50  # the API's documented cap for ids[]
+# Bumped whenever the checkpoint layout changes, so an old one is discarded, not misread.
+STATE_VERSION = 2
 
 
 class AuthRejected(Exception):
@@ -69,18 +71,24 @@ def _int_dd():
     return defaultdict(int)
 
 
+# Every difficulty falls in one of these four buckets. Keeping them apart is what lets the
+# ladder answer "with or without guest difficulties" without a second scan.
+BUCKETS = (('ranked', 'own'), ('ranked', 'guest'), ('loved', 'own'), ('loved', 'guest'))
+
+
 def new_stats():
-    """Per-mapper totals, split into a 'ranked' and a 'loved' bucket."""
+    """Per-mapper totals, split by map status and by whether the mapper hosted the set."""
     return {bucket: {
         'pc': defaultdict(int),
         'maps': defaultdict(int),
         'mode_pc': defaultdict(_int_dd),
         'mode_maps': defaultdict(_int_dd),
-    } for bucket in ('ranked', 'loved')}
+    } for bucket in BUCKETS}
 
 
 def save_state(state, path=None):
     """Write the checkpoint atomically, so a crash mid-write cannot corrupt it."""
+    state['version'] = STATE_VERSION
     path = path or STATE_PATH
     tmp = f'{path}.tmp'
     with open(tmp, 'wb') as f:
@@ -92,9 +100,13 @@ def load_state(path=None):
     """Read a checkpoint left by an interrupted run, or None to start fresh."""
     try:
         with open(path or STATE_PATH, 'rb') as f:
-            return pickle.load(f)
-    except (FileNotFoundError, EOFError, pickle.UnpicklingError):
+            state = pickle.load(f)
+    except (FileNotFoundError, EOFError, pickle.UnpicklingError, AttributeError, ImportError):
         return None
+    if state.get('version') != STATE_VERSION:
+        print("Checkpoint was written by an older scan layout; starting fresh.", flush=True)
+        return None
+    return state
 
 
 def clear_state(path=None):
@@ -189,11 +201,13 @@ def aggregate_page(beatmapsets, stats, names, owners_by_diff=None):
         for bmap in bset.get('beatmaps', []):
             # ponytail: a loved set can hold non-loved diffs; those land in the ranked bucket. ~0.1% of diffs.
             status = bmap.get('status') or bset.get('status')
-            b = stats['loved' if status == 'loved' else 'ranked']
+            state = 'loved' if status == 'loved' else 'ranked'
             mode = 'catch' if bmap.get('mode') == 'fruits' else bmap.get('mode', 'osu')
             pc = bmap.get('playcount') or 0
             # A collab counts in full for every author, so each co-mapper shows its plays.
             for uid in diff_owners(bmap, owners_by_diff):
+                # Hosting the set makes it your own map; anyone else on it is a guest mapper.
+                b = stats[(state, 'own' if uid == bset.get('user_id') else 'guest')]
                 b['pc'][uid] += pc
                 b['maps'][uid] += 1
                 b['mode_pc'][uid][mode] += pc
@@ -215,7 +229,7 @@ def fetch_page(session, cursor, token):
     Returns (data, token). The token comes back None once the API has refused it, so the
     caller stops paying the auth round trip on every remaining page.
     """
-    params = {'sort': 'ranked_desc'}
+    params = {'sort': 'ranked_desc', 'nsfw': 'true'}
     if cursor:
         params['cursor_string'] = cursor
 
@@ -340,11 +354,15 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         progress(msg)
         return {'error': msg, 'total_sets_scanned': total_sets, 'reported_total': state['reported_total']}
 
-    ranked, loved = stats['ranked'], stats['loved']
-    all_ids = set(ranked['pc']) | set(loved['pc'])
+    all_ids = set()
+    for b in stats.values():
+        all_ids |= set(b['pc'])
     progress(f"Aggregated {total_sets} mapsets, {len(all_ids)} mappers. Ranking...")
 
-    top_ids = sorted(all_ids, key=lambda uid: -(ranked['pc'][uid] + loved['pc'][uid]))
+    def total_pc(uid):
+        return sum(stats[b]['pc'][uid] for b in BUCKETS)
+
+    top_ids = sorted(all_ids, key=lambda uid: -total_pc(uid))
     if TOP_N:
         top_ids = top_ids[:TOP_N]
 
@@ -353,17 +371,30 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
     if unknown and token:
         names.update(scan_logic.resolve_users_parallel(unknown, token, progress_callback))
 
-    mappers = [{
-        'osu_id': uid,
-        'username': names.get(uid, f'User_{uid}'),
-        'playcount': ranked['pc'][uid] + loved['pc'][uid],
-        'loved_playcount': loved['pc'][uid],
-        'maps': ranked['maps'][uid] + loved['maps'][uid],
-        'loved_maps': loved['maps'][uid],
-        'by_mode': merge_modes(ranked['mode_pc'][uid], loved['mode_pc'][uid]),
-        'loved_by_mode': dict(loved['mode_pc'][uid]),
-        'maps_by_mode': merge_modes(ranked['mode_maps'][uid], loved['mode_maps'][uid]),
-    } for uid in top_ids]
+    # Guest-difficulty figures are the totals minus the "own" ones, so they need no storage.
+    def row(uid):
+        own = [('ranked', 'own'), ('loved', 'own')]
+        loved_b = [('loved', 'own'), ('loved', 'guest')]
+        pick = lambda bs, key: sum(stats[b][key][uid] for b in bs)
+        modes = lambda bs, key: merge_modes(*(stats[b][key][uid] for b in bs))
+        return {
+            'osu_id': uid,
+            'username': names.get(uid, f'User_{uid}'),
+            'playcount': pick(BUCKETS, 'pc'),
+            'maps': pick(BUCKETS, 'maps'),
+            'by_mode': modes(BUCKETS, 'mode_pc'),
+            'maps_by_mode': modes(BUCKETS, 'mode_maps'),
+            'loved_playcount': pick(loved_b, 'pc'),
+            'loved_by_mode': modes(loved_b, 'mode_pc'),
+            'own_playcount': pick(own, 'pc'),
+            'own_maps': pick(own, 'maps'),
+            'own_by_mode': modes(own, 'mode_pc'),
+            'own_maps_by_mode': modes(own, 'mode_maps'),
+            'own_loved_playcount': stats[('loved', 'own')]['pc'][uid],
+            'own_loved_by_mode': dict(stats[('loved', 'own')]['mode_pc'][uid]),
+        }
+
+    mappers = [row(uid) for uid in top_ids]
 
     result = {
         'last_scan': datetime.utcnow().isoformat(),
@@ -402,15 +433,21 @@ if __name__ == '__main__':
              'owners': [{'id': 4}, {'id': 5}, {'id': 6}]},
         ]},
     ], stats, names)
-    # The collab's 50 plays land in full on all three authors, not split between them.
-    assert dict(stats['ranked']['pc']) == {1: 10, 2: 8, 3: 7, 4: 50, 5: 50, 6: 50}, stats['ranked']['pc']
-    assert stats['ranked']['maps'][5] == 1 and stats['ranked']['maps'][6] == 1
+    own, guest = stats[('ranked', 'own')], stats[('ranked', 'guest')]
+    # Host 1 mapped one diff on their own set; user 2 guest-mapped two diffs on it.
+    assert dict(own['pc']) == {1: 10, 3: 7, 4: 50}, dict(own['pc'])
+    assert dict(guest['pc']) == {2: 8, 5: 50, 6: 50}, dict(guest['pc'])
+    # The collab's 50 plays land in full on all three authors, not split between them,
+    # and only the host counts them as his own map.
+    assert own['maps'][4] == 1 and guest['maps'][5] == 1 and guest['maps'][6] == 1
     assert diff_owners({'id': 99, 'user_id': 4}, {99: [4, 5]}) == [4, 5]
     assert diff_owners({'id': 7, 'user_id': 4}) == [4], "no owners info falls back to the stored author"
-    assert dict(stats['loved']['pc']) == {2: 100}, stats['loved']['pc']
-    assert dict(stats['loved']['maps']) == {2: 1}
-    assert dict(stats['ranked']['mode_pc'][2]) == {'osu': 5, 'catch': 3}
-    assert merge_modes(stats['ranked']['mode_pc'][2], stats['loved']['mode_pc'][2]) == {'osu': 105, 'catch': 3}
+    assert dict(stats[('loved', 'guest')]['pc']) == {2: 100}
+    # A non-loved diff inside a loved set falls in the ranked bucket, credited to its host.
+    assert dict(stats[('loved', 'own')]['pc']) == {}
+    assert own['pc'][3] == 7
+    assert dict(guest['mode_pc'][2]) == {'osu': 5, 'catch': 3}
+    assert merge_modes(guest['mode_pc'][2], stats[('loved', 'guest')]['mode_pc'][2]) == {'osu': 105, 'catch': 3}
     assert names == {1: 'Host', 3: 'LovedHost', 4: 'CollabHost'}
 
     # A checkpoint must come back with its counters and totals intact.
@@ -418,7 +455,12 @@ if __name__ == '__main__':
     save_state({'pages': 7, 'seen': {1, 2, 3}, 'stats': stats, 'names': names}, probe)
     back = load_state(probe)
     assert back['pages'] == 7 and back['seen'] == {1, 2, 3}
-    assert back['stats']['ranked']['pc'][5] == 50, "stats did not survive the checkpoint"
+    assert back['stats'][('ranked', 'guest')]['pc'][5] == 50, "stats did not survive the checkpoint"
+    # A checkpoint from an older layout must be discarded rather than misread.
+    import pickle as _p
+    with open(probe, 'wb') as f:
+        _p.dump({'version': 0, 'pages': 1}, f)
+    assert load_state(probe) is None, "a stale checkpoint layout should be ignored"
     clear_state(probe)
     assert load_state(probe) is None
     print("self-check OK")

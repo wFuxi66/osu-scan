@@ -80,6 +80,11 @@
 
             <!-- Most Played Mappers -->
             <div id="section-mappers" class="leaderboard-section">
+                <div class="mode-tabs" id="scope-tabs">
+                    <button type="button" class="mode-tab active" data-scope="all">Maps + GDs</button>
+                    <button type="button" class="mode-tab" data-scope="own">Their own maps</button>
+                    <button type="button" class="mode-tab" data-scope="guest">Their GDs</button>
+                </div>
                 <div class="search-form">
                     <input type="text" class="search-input" id="search-mappers" placeholder="Search a mapper..."
                         autocomplete="off">
@@ -91,7 +96,7 @@
                             <tr>
                                 <th class="col-rank">#</th>
                                 <th>Mapper</th>
-                                <th class="col-count col-optional">Difficulties</th>
+                                <th class="col-count col-optional" id="mappers-diff-header">Difficulties</th>
                                 <th class="col-plays">Playcount</th>
                             </tr>
                         </thead>
@@ -127,6 +132,7 @@
         let searchBns = '';
         let searchDuos = '';
         let searchMappers = '';
+        let currentScope = 'all';
         let pageBns = 1;
         let pageDuos = 1;
         let pageMappers = 1;
@@ -136,6 +142,7 @@
             const p = new URLSearchParams(window.location.search);
             if (p.get('mode')) currentMode = p.get('mode');
             if (p.get('section')) currentSection = p.get('section');
+            if (p.get('scope')) currentScope = p.get('scope');
         })();
 
         // Fetch data once
@@ -221,6 +228,20 @@
                 if (e.key === 'Enter') { e.preventDefault(); searchDuosBtn.click(); }
             });
 
+            // Scope tabs (own maps vs guest difficulties)
+            document.querySelectorAll('#scope-tabs .mode-tab').forEach(tab => {
+                if (tab.dataset.scope === currentScope) tab.classList.add('active');
+                else tab.classList.remove('active');
+                tab.addEventListener('click', () => {
+                    currentScope = tab.dataset.scope;
+                    pageMappers = 1;
+                    document.querySelectorAll('#scope-tabs .mode-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    updateURL();
+                    renderMappers();
+                });
+            });
+
             // Search - Mappers
             const searchMappersInput = document.getElementById('search-mappers');
             const searchMappersBtn = document.getElementById('search-mappers-btn');
@@ -238,6 +259,7 @@
             const p = new URLSearchParams();
             if (currentMode !== 'all') p.set('mode', currentMode);
             if (currentSection !== 'bns') p.set('section', currentSection);
+            if (currentScope !== 'all') p.set('scope', currentScope);
             const qs = p.toString();
             history.replaceState(null, '', '/leaderboard' + (qs ? '?' + qs : ''));
         }
@@ -290,22 +312,26 @@
             // Filter/score by mode
             let mappers = [];
             for (const m of mapperData.mappers) {
+                // Totals cover maps + GDs; 'own' is stored, so GDs are what is left over.
+                const total = k => m[k] || 0;
+                const perMode = k => {
+                    const d = m[k] || {};
+                    if (currentMode === 'catch') return (d.catch || 0) + (d.fruits || 0);
+                    return d[currentMode] || 0;
+                };
+                const pick = currentMode === 'all' ? total : perMode;
+                const fields = currentMode === 'all'
+                    ? ['playcount', 'own_playcount', 'maps', 'own_maps', 'loved_playcount', 'own_loved_playcount']
+                    : ['by_mode', 'own_by_mode', 'maps_by_mode', 'own_maps_by_mode', 'loved_by_mode', 'own_loved_by_mode'];
+                const [allPc, ownPc, allMaps, ownMaps, allLoved, ownLoved] = fields.map(pick);
+
                 let pc, maps, loved;
-                if (currentMode === 'all') {
-                    pc = m.playcount || 0;
-                    maps = m.maps || 0;
-                    loved = m.loved_playcount || 0;
+                if (currentScope === 'own') {
+                    pc = ownPc; maps = ownMaps; loved = ownLoved;
+                } else if (currentScope === 'guest') {
+                    pc = allPc - ownPc; maps = allMaps - ownMaps; loved = allLoved - ownLoved;
                 } else {
-                    const byMode = m.by_mode || {}, mapsByMode = m.maps_by_mode || {}, lovedByMode = m.loved_by_mode || {};
-                    if (currentMode === 'catch') {
-                        pc = (byMode.catch || 0) + (byMode.fruits || 0);
-                        maps = (mapsByMode.catch || 0) + (mapsByMode.fruits || 0);
-                        loved = (lovedByMode.catch || 0) + (lovedByMode.fruits || 0);
-                    } else {
-                        pc = byMode[currentMode] || 0;
-                        maps = mapsByMode[currentMode] || 0;
-                        loved = lovedByMode[currentMode] || 0;
-                    }
+                    pc = allPc; maps = allMaps; loved = allLoved;
                 }
                 if (pc > 0) mappers.push({ ...m, display_pc: pc, display_maps: maps, display_loved: loved });
             }
@@ -331,6 +357,9 @@
                 }
                 tbody.innerHTML = html;
             }
+
+            const heading = { all: 'Difficulties', own: 'Own difficulties', guest: 'Guest difficulties' }[currentScope];
+            document.getElementById('mappers-diff-header').textContent = heading;
 
             renderPagination('mappers-pagination', pageMappers, totalPages, p => { pageMappers = p; renderMappers(); });
         }
