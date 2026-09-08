@@ -31,3 +31,6 @@ debug_api.py
 
 mapper_scan_state.pickle
 mapper_scan_state.pickle.tmp
+
+# Agent scratch, never committed
+.claude/
