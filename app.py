@@ -6,11 +6,15 @@ import threading
 import time
 import uuid
 import os
+
+# Before importing anything that reads credentials: scan_logic copies OSU_CLIENT_ID into a
+# module constant at import time, so loading .env afterwards leaves it empty and every scan
+# dies with "Authentication failed".
+load_dotenv()
+
 import scan_logic
 import global_scan
 from flask_limiter import Limiter
-
-load_dotenv()
 
 app = Flask(__name__)
 
