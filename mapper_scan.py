@@ -43,7 +43,7 @@ BEATMAP_IDS_PER_CALL = 50
 # An owners pass adds ~5 calls per page; pace them to stay a polite guest on the API.
 OWNERS_PACING = 0.15
 # Bumped whenever the checkpoint layout changes, so an old one is discarded, not misread.
-STATE_VERSION = 3
+STATE_VERSION = 4
 
 
 class AuthRejected(Exception):
@@ -243,11 +243,13 @@ def aggregate_page(beatmapsets, stats, names, owners_by_diff=None):
         if bset.get('creator'):
             names[bset['user_id']] = bset['creator']
         set_modes = defaultdict(set)  # (uid, role) -> modes the mapper worked in on this set
+        set_modes_all = set()         # every mode present on the set, whoever mapped it
         for bmap in bset.get('beatmaps', []):
             # ponytail: a loved set can hold non-loved diffs; those land in the ranked bucket. ~0.1% of diffs.
             status = bmap.get('status') or bset.get('status')
             state = 'loved' if status == 'loved' else 'ranked'
             mode = 'catch' if bmap.get('mode') == 'fruits' else bmap.get('mode', 'osu')
+            set_modes_all.add(mode)
             pc = bmap.get('playcount') or 0
             # A collab counts in full for every author, so each co-mapper shows its plays.
             for uid in diff_owners(bmap, owners_by_diff):
@@ -259,6 +261,13 @@ def aggregate_page(beatmapsets, stats, names, owners_by_diff=None):
                 b['mode_pc'][uid][mode] += pc
                 b['mode_maps'][uid][mode] += 1
                 set_modes[(uid, role)].add(mode)
+
+        # Getting a set ranked makes it yours even when every difficulty on it is a guest's:
+        # osu! counts it on your profile, so the mapset ladder counts it too. Playcount and
+        # difficulty totals stay untouched — this credits the set, not work nobody did.
+        host = bset.get('user_id')
+        if host and set_modes_all and not set_modes[(host, 'own')]:
+            set_modes[(host, 'own')] = set(set_modes_all)
 
         for (uid, role), modes in set_modes.items():
             stats['sets'][role]['count'][uid] += 1
@@ -507,11 +516,14 @@ if __name__ == '__main__':
             {'id': 99, 'user_id': 4, 'mode': 'osu', 'playcount': 50, 'status': 'ranked',
              'owners': [{'id': 4}, {'id': 5}, {'id': 6}]},
         ]},
+        {'user_id': 7, 'creator': 'GhostHost', 'status': 'ranked', 'beatmaps': [
+            {'id': 20, 'user_id': 8, 'mode': 'taiko', 'playcount': 9, 'status': 'ranked'},
+        ]},
     ], stats, names)
     own, guest = stats[('ranked', 'own')], stats[('ranked', 'guest')]
     # Host 1 mapped one diff on their own set; user 2 guest-mapped two diffs on it.
     assert dict(own['pc']) == {1: 10, 3: 7, 4: 50}, dict(own['pc'])
-    assert dict(guest['pc']) == {2: 8, 5: 50, 6: 50}, dict(guest['pc'])
+    assert dict(guest['pc']) == {2: 8, 5: 50, 6: 50, 8: 9}, dict(guest['pc'])
     # The collab's 50 plays land in full on all three authors, not split between them,
     # and only the host counts them as his own map.
     assert own['maps'][4] == 1 and guest['maps'][5] == 1 and guest['maps'][6] == 1
@@ -526,14 +538,17 @@ if __name__ == '__main__':
 
     # Mapset counts: user 2 guest-mapped two diffs on set 1, which is still one mapset.
     sets_own, sets_gd = stats['sets']['own']['count'], stats['sets']['guest']['count']
-    assert dict(sets_own) == {1: 1, 3: 1, 4: 1}, dict(sets_own)
-    assert dict(sets_gd) == {2: 2, 5: 1, 6: 1}, dict(sets_gd)
+    assert dict(sets_own) == {1: 1, 3: 1, 4: 1, 7: 1}, dict(sets_own)
+    assert dict(sets_gd) == {2: 2, 5: 1, 6: 1, 8: 1}, dict(sets_gd)
+    # Host 7 mapped nothing on their own set: the mapset counts, the difficulty does not.
+    assert own['maps'][7] == 0 and own['pc'][7] == 0
+    assert dict(stats['sets']['own']['modes'][7]) == {'taiko': 1}
     # The loved set holds one diff of user 2 and one of its host: one mapset each, not two.
     assert sets_gd[2] == 2 and sets_own[3] == 1
     assert dict(stats['sets']['guest']['modes'][2]) == {'osu': 2, 'catch': 1}, "modes counted per set" 
     assert dict(guest['mode_pc'][2]) == {'osu': 5, 'catch': 3}
     assert merge_modes(guest['mode_pc'][2], stats[('loved', 'guest')]['mode_pc'][2]) == {'osu': 105, 'catch': 3}
-    assert names == {1: 'Host', 3: 'LovedHost', 4: 'CollabHost'}
+    assert names == {1: 'Host', 3: 'LovedHost', 4: 'CollabHost', 7: 'GhostHost'}
 
     # Renames are why the ladder cannot trust the name stored on a mapset.
     assert prefer_name('Andrea', 'osuplayer111') == 'Andrea', "a current name must win"
