@@ -266,6 +266,21 @@ def save_user_cache():
 
 load_user_cache()
 
+def resolved_name(uid, status, payload=None):
+    """Turn one /users lookup into a cache decision.
+
+    200 gives the name. 404 is an answer too: the account is restricted or gone, so the
+    placeholder is worth keeping. Anything else (429, timeout) returns None -- caching a
+    transient failure would freeze a wrong name in place forever, and nothing ever retries
+    a name that is already cached.
+    """
+    if status == 200:
+        return (payload or {}).get('username') or f'User_{uid}'
+    if status == 404:
+        return f'User_{uid}'
+    return None
+
+
 def resolve_users_parallel(user_ids, token, progress_callback=None, refresh=False):
     """Resolves a list of user IDs to usernames using threading, with caching.
 
@@ -290,11 +305,10 @@ def resolve_users_parallel(user_ids, token, progress_callback=None, refresh=Fals
         def fetch_user(uid):
             try:
                 r = session.get(f'{API_BASE}/users/{uid}', headers=headers, timeout=10)
-                if r.status_code == 200:
-                    return (uid, r.json().get('username', f"User_{uid}"))
-            except:
-                pass
-            return (uid, f"User_{uid}")
+                payload = r.json() if r.status_code == 200 else None
+                return (uid, resolved_name(uid, r.status_code, payload))
+            except Exception:
+                return (uid, None)
 
         new_entries = False
         with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
@@ -308,6 +322,8 @@ def resolve_users_parallel(user_ids, token, progress_callback=None, refresh=Fals
                 
                 try:
                     uid, name = future.result()
+                    if name is None:
+                        continue  # rate-limited or timed out: leave it for the next scan
                     USER_CACHE[uid] = name
                     new_entries = True
                 except:
@@ -637,3 +653,12 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
         'username': username,
         'leaderboard': leaderboard
     }
+
+
+if __name__ == '__main__':
+    assert resolved_name(7, 200, {'username': 'Neethime'}) == 'Neethime'
+    assert resolved_name(7, 404) == 'User_7', 'a restricted account is a real answer'
+    assert resolved_name(7, 429) is None, 'a rate limit must never be cached as a name'
+    assert resolved_name(7, 500) is None
+    assert resolved_name(7, 200, {}) == 'User_7'
+    print('scan_logic self-check OK')
