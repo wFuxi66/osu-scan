@@ -6,12 +6,24 @@
 <section class="hero">
     <div class="hero-copy">
         <h1 class="wide">Find out who you really map with.</h1>
-        <p>Point osu!scan at a mapper and it reads every ranked set they touched, then ranks the
-            people behind them: guest mappers, hosts, nominators.</p>
+        <p>Point it at a mapper and it reads every ranked set they touched, then ranks the people
+            behind them: the guest mappers, the hosts, the nominators.</p>
+        <p class="lede-more">Nothing to install and no account needed. A scan takes a few
+            seconds to a couple of minutes, depending on how much they have mapped.</p>
+
+        <nav class="hero-links" aria-label="Global leaderboards">
+            <span>Or look at everyone at once</span>
+            <a href="/next/leaderboard?ladder=bns">Top nominators</a>
+            <a href="/next/leaderboard?ladder=duos">Nominator duos</a>
+            <a href="/next/leaderboard?ladder=mappers">Most played mappers</a>
+            <a href="/next/leaderboard?ladder=sets">Most ranked sets</a>
+        </nav>
     </div>
 
     <form class="scanbox" id="scanform" autocomplete="off">
-    <div class="namefield">
+        <img class="sigil" src="{{ url_for('static', filename='logo.png') }}" alt="osu!scan">
+
+        <div class="namefield">
         <input type="text" id="who" name="username" placeholder="Username or user ID" required
             aria-label="Username or user ID">
         <button class="btn" type="submit" id="go">Start scan</button>

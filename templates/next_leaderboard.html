@@ -111,6 +111,21 @@
     let ladder = 'bns', scope = 'all', mode = 'all', query = '';
     const pages = { bns: 1, duos: 1, mappers: 1, sets: 1 };
 
+    // A ladder is worth linking to and worth sharing, so it lives in the URL.
+    const params = new URLSearchParams(location.search);
+    if (LADDERS[params.get('ladder')]) ladder = params.get('ladder');
+    if (['all', 'own', 'guest'].includes(params.get('scope'))) scope = params.get('scope');
+    if (MODES.some(([k]) => k === params.get('mode'))) mode = params.get('mode');
+
+    function syncURL() {
+        const p = new URLSearchParams();
+        if (ladder !== 'bns') p.set('ladder', ladder);
+        if (scope !== 'all') p.set('scope', scope);
+        if (mode !== 'all') p.set('mode', mode);
+        const qs = p.toString();
+        history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+    }
+
     const $ = id => document.getElementById(id);
     const num = n => (n || 0).toLocaleString('en-US');
     const COMPACT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
@@ -328,21 +343,21 @@
         const b = e.target.closest('button');
         if (!b) return;
         ladder = b.dataset.k;
-        stamp(); render();
+        syncURL(); stamp(); render();
     };
     $('scope-seg').onclick = e => {
         const b = e.target.closest('button');
         if (!b) return;
         scope = b.dataset.k;
         pages.mappers = pages.sets = 1;
-        render();
+        syncURL(); render();
     };
     $('mode-seg').onclick = e => {
         const b = e.target.closest('button');
         if (!b) return;
         mode = b.dataset.k;
         Object.keys(pages).forEach(k => pages[k] = 1);
-        render();
+        syncURL(); render();
     };
     $('q').oninput = e => {
         query = e.target.value.trim().toLowerCase();
