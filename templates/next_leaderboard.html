@@ -103,9 +103,10 @@
                 + 'participation under "As guest". No counting of our own, so they match a profile.',
             'Loved sets join the hosted figure when loved is on. osu! does not split loved out of guest '
                 + 'participation, so those stay in it either way.',
-            'A profile publishes one number per category and not a breakdown by game mode, which is why '
-                + 'this board has no mode filter.'],
-            scope: true, loved: true, modes: false,
+            'A profile publishes one number per category and no split by mode, so picking a mode '
+                + 'falls back to our own crawl of the ranked pool: per-mode, but no longer the figure '
+                + 'printed on the profile.'],
+            scope: true, loved: true, modes: true,
         },
     };
 
@@ -245,10 +246,11 @@
             }
 
             // osu! publishes these on every profile and that is the number people check
-            // against; our own crawl never sees approved or qualified sets. Older scans
-            // have no profile figures, so the crawled count stays as the fallback.
+            // against; our own crawl never sees approved or qualified sets. A profile
+            // carries no breakdown by mode, so picking one drops back to the crawl — as
+            // do older scans, which have no profile figures at all.
             let allSets, ownSets;
-            if (m.profile_ranked_sets == null) {
+            if (emode !== 'all' || m.profile_ranked_sets == null) {
                 allSets = g('sets'); ownSets = g('ownSets');
             } else {
                 ownSets = m.profile_ranked_sets + (withLoved ? m.profile_loved_sets : 0);
