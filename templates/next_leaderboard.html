@@ -15,9 +15,13 @@
         <label for="scope-seg">Counting</label>
         <div class="seg" id="scope-seg"></div>
     </div>
-    <div class="control">
+    <div class="control" id="mode-control">
         <label for="mode-seg">Mode</label>
         <div class="seg on-mode" id="mode-seg"></div>
+    </div>
+    <div class="control" id="loved-control">
+        <label for="loved-seg">Loved maps</label>
+        <div class="seg" id="loved-seg"></div>
     </div>
     <div class="search">
         <input type="text" id="q" autocomplete="off" spellcheck="false" aria-label="Find someone">
@@ -40,10 +44,10 @@
 <div class="pager" id="pager"></div>
 
 <div class="legend" id="legend">
-    <span><i class="dot osu"></i>osu!</span>
-    <span><i class="dot taiko"></i>Taiko</span>
-    <span><i class="dot catch"></i>Catch</span>
-    <span><i class="dot mania"></i>Mania</span>
+    <span><i class="mode-icon osu"></i>osu!</span>
+    <span><i class="mode-icon taiko"></i>Taiko</span>
+    <span><i class="mode-icon catch"></i>Catch</span>
+    <span><i class="mode-icon mania"></i>Mania</span>
 </div>
 
 <details class="note">
@@ -67,7 +71,7 @@
             note: ['A mapset needs two nominators, and it counts once for each of them. Adding this '
                 + 'column up therefore gives you roughly twice the number of sets ever ranked, not the '
                 + 'size of the ranked pool.'],
-            scope: false,
+            scope: false, loved: false, modes: true,
         },
         duos: {
             tab: 'Nominator duos',
@@ -77,7 +81,7 @@
             note: ['A pair only scores when both of them nominated the same mapset, and that set counts '
                 + 'once for the pair. Someone who nominates a great deal but rarely with the same partner '
                 + 'can top the nominator leaderboard and be absent from this one.'],
-            scope: false,
+            scope: false, loved: false, modes: true,
         },
         mappers: {
             tab: 'Most played mappers',
@@ -87,28 +91,33 @@
             note: ['A difficulty made by several mappers counts its full playcount for every one of them. '
                 + 'That is why these totals run higher than sites crediting only the set host, and why '
                 + 'adding the column up gives more plays than the ranked pool actually holds.',
-            'Ranked and loved difficulties are both in here; the loved figure is called out under each total.'],
-            scope: true,
+            'Loved difficulties are in by default and called out under each total; switch them off to '
+                + 'compare ranked plays alone.'],
+            scope: true, loved: true, modes: true,
         },
         sets: {
             tab: 'Most ranked sets',
             title: 'Most ranked mapsets',
-            desc: 'How many mapsets each mapper hosted or appeared on.',
+            desc: 'Straight from the counts osu! prints on each mapper\u2019s profile.',
             who: 'Mapper', unit: 'Mapsets',
-            note: ['One mapset counts once, however many difficulties sit on it — five difficulties on a set '
-                + 'you host is one ranked set, the way osu! counts it on a profile.',
-            'A set counts for whoever hosted it, even when every difficulty on it was made by a guest.',
-            'Ranked and loved only. Approved and qualified sets are not in this scan, which is why a '
-                + 'profile can show a handful more than we do.'],
-            scope: true,
+            note: ['These are osu!\u2019s own figures: ranked mapsets hosted under "As host", guest '
+                + 'participation under "As guest". No counting of our own, so they match a profile.',
+            'Loved sets join the hosted figure when loved is on. osu! does not split loved out of guest '
+                + 'participation, so those stay in it either way.',
+            'A profile publishes one number per category and not a breakdown by game mode, which is why '
+                + 'this board has no mode filter.'],
+            scope: true, loved: true, modes: false,
         },
     };
 
     const SCOPES = [['all', 'Everything'], ['own', 'As host'], ['guest', 'As guest']];
     const MODES = [['all', 'All'], ['osu', 'osu!'], ['taiko', 'Taiko'], ['catch', 'Catch'], ['mania', 'Mania']];
+    const LOVED = [['1', 'Included'], ['0', 'Excluded']];
 
     let bnData = null, mapperData = null, scopeAvailable = false;
-    let board = 'bns', scope = 'all', mode = 'all', query = '';
+    let board = 'bns', scope = 'all', mode = 'all', query = '', withLoved = true;
+    // The mapset board has no per-mode figures to filter, so it ignores the mode segment.
+    let emode = 'all';
     const pages = { bns: 1, duos: 1, mappers: 1, sets: 1 };
 
     // A leaderboard is worth linking to and worth sharing, so it lives in the URL.
@@ -116,12 +125,14 @@
     if (BOARDS[params.get('board')]) board = params.get('board');
     if (['all', 'own', 'guest'].includes(params.get('scope'))) scope = params.get('scope');
     if (MODES.some(([k]) => k === params.get('mode'))) mode = params.get('mode');
+    if (params.get('loved') === '0') withLoved = false;
 
     function syncURL() {
         const p = new URLSearchParams();
         if (board !== 'bns') p.set('board', board);
         if (scope !== 'all') p.set('scope', scope);
         if (mode !== 'all') p.set('mode', mode);
+        if (!withLoved) p.set('loved', '0');
         const qs = p.toString();
         history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
     }
@@ -148,17 +159,25 @@
         + `<img src="https://a.ppy.sh/${id}" alt="" loading="lazy" decoding="async"`
         + ` onerror="this.remove()"></span>`;
 
-    function dots(byMode) {
+    const avatars = r => r.id2
+        ? `<span class="faces">${face(r.id, r.name1, 'face')}${face(r.id2, r.name2, 'face')}</span>`
+        : face(r.id, r.key, 'face');
+
+    // The mode logos read at a glance the way four coloured dots never did.
+    const MODE_NAMES = { osu: 'osu!', taiko: 'Taiko', catch: 'Catch', fruits: 'Catch', mania: 'Mania' };
+
+    function modeIcons(byMode) {
         const keys = Object.keys(byMode || {}).filter(k => (byMode[k] || 0) > 0);
-        if (mode !== 'all' || !keys.length) return '';
-        return '<span class="modes">' + keys.map(k => `<i class="dot ${k}" title="${k}"></i>`).join('') + '</span>';
+        if (emode !== 'all' || !keys.length) return '';
+        return '<span class="modes">' + keys.map(k =>
+            `<i class="mode-icon ${k}" title="${MODE_NAMES[k] || k}"></i>`).join('') + '</span>';
     }
 
     function pick(byMode, total) {
-        if (mode === 'all') return total || 0;
+        if (emode === 'all') return total || 0;
         const d = byMode || {};
-        if (mode === 'catch') return (d.catch || 0) + (d.fruits || 0);
-        return d[mode] || 0;
+        if (emode === 'catch') return (d.catch || 0) + (d.fruits || 0);
+        return d[emode] || 0;
     }
 
     /* ---------------- rows: every builder returns the whole ranked leaderboard ---------------- */
@@ -169,7 +188,7 @@
             const v = pick(bn.by_mode, bn.total);
             if (v > 0) out.push({
                 key: bn.username, id: bn.osu_id, value: v, main: num(v),
-                who: nameCell(bn.osu_id, bn.username) + dots(bn.by_mode),
+                who: nameCell(bn.osu_id, bn.username) + modeIcons(bn.by_mode),
             });
         }
         return out.sort((a, b) => b.value - a.value);
@@ -177,41 +196,71 @@
 
     function rowsDuos() {
         let duos = bnData?.duos || [];
-        if (mode !== 'all') {
-            duos = duos.filter(d => mode === 'catch'
-                ? (d.mode === 'catch' || d.mode === 'fruits') : d.mode === mode);
+        if (emode !== 'all') {
+            duos = duos.filter(d => emode === 'catch'
+                ? (d.mode === 'catch' || d.mode === 'fruits') : d.mode === emode);
         }
         return duos.slice().sort((a, b) => b.count - a.count).map(d => ({
             key: `${d.bn1_name} ${d.bn2_name}`, id: d.bn1_id, id2: d.bn2_id,
+            name1: d.bn1_name, name2: d.bn2_name,
             value: d.count, main: num(d.count),
             who: nameCell(d.bn1_id, d.bn1_name) + '<span class="pair">+</span>'
-                + nameCell(d.bn2_id, d.bn2_name) + dots({ [d.mode]: 1 }),
+                + nameCell(d.bn2_id, d.bn2_name) + modeIcons({ [d.mode]: 1 }),
         }));
     }
 
+    // Each figure is stored as a flat total and as a per-mode breakdown; the mode segment picks one.
+    const FIELDS = {
+        pc: ['playcount', 'by_mode'], ownPc: ['own_playcount', 'own_by_mode'],
+        lovedPc: ['loved_playcount', 'loved_by_mode'],
+        ownLovedPc: ['own_loved_playcount', 'own_loved_by_mode'],
+        maps: ['maps', 'maps_by_mode'], ownMaps: ['own_maps', 'own_maps_by_mode'],
+        lovedMaps: ['loved_maps', 'loved_maps_by_mode'],
+        ownLovedMaps: ['own_loved_maps', 'own_loved_maps_by_mode'],
+        sets: ['sets', 'sets_by_mode'], ownSets: ['own_sets', 'own_sets_by_mode'],
+    };
+
     // Only the "own" figures are stored, so a guest figure is the remainder.
+    const byScope = (all, own) => scope === 'own' ? own : scope === 'guest' ? all - own : all;
+
     function mapperRows(valueOf, subOf) {
         const out = [];
         for (const m of (mapperData?.mappers || [])) {
-            const f = mode === 'all'
-                ? ['playcount', 'own_playcount', 'maps', 'own_maps', 'loved_playcount', 'own_loved_playcount', 'sets', 'own_sets']
-                : ['by_mode', 'own_by_mode', 'maps_by_mode', 'own_maps_by_mode', 'loved_by_mode', 'own_loved_by_mode', 'sets_by_mode', 'own_sets_by_mode'];
-            const g = k => mode === 'all' ? (m[k] || 0) : pick(m[k], 0);
-            const [allPc, ownPc, allMaps, ownMaps, allLoved, ownLoved, allSets, ownSets] = f.map(g);
+            const g = k => {
+                const [flat, perMode] = FIELDS[k];
+                return emode === 'all' ? (m[flat] || 0) : pick(m[perMode], 0);
+            };
+            const allLoved = g('lovedPc'), ownLoved = g('ownLovedPc');
+            let allPc = g('pc'), ownPc = g('ownPc'), allMaps = g('maps'), ownMaps = g('ownMaps');
+            if (!withLoved) {
+                allPc -= allLoved; ownPc -= ownLoved;
+                allMaps -= g('lovedMaps'); ownMaps -= g('ownLovedMaps');
+            }
 
-            let pc, maps, loved, sets;
-            if (scope === 'own') { pc = ownPc; maps = ownMaps; loved = ownLoved; sets = ownSets; }
-            else if (scope === 'guest') { pc = allPc - ownPc; maps = allMaps - ownMaps; loved = allLoved - ownLoved; sets = allSets - ownSets; }
-            else { pc = allPc; maps = allMaps; loved = allLoved; sets = allSets; }
+            // osu! publishes these on every profile and that is the number people check
+            // against; our own crawl never sees approved or qualified sets. Older scans
+            // have no profile figures, so the crawled count stays as the fallback.
+            let allSets, ownSets;
+            if (m.profile_ranked_sets == null) {
+                allSets = g('sets'); ownSets = g('ownSets');
+            } else {
+                ownSets = m.profile_ranked_sets + (withLoved ? m.profile_loved_sets : 0);
+                allSets = ownSets + m.profile_guest_sets;
+            }
 
-            if (pc <= 0) continue;
-            out.push({ name: m.username, id: m.osu_id, by_mode: m.by_mode, pc, maps, loved, sets });
+            out.push({
+                name: m.username, id: m.osu_id, by_mode: m.by_mode,
+                pc: byScope(allPc, ownPc), maps: byScope(allMaps, ownMaps),
+                loved: withLoved ? byScope(allLoved, ownLoved) : 0,
+                sets: byScope(allSets, ownSets),
+            });
         }
-        out.sort((a, b) => valueOf(b) - valueOf(a) || b.pc - a.pc);
-        return out.map(m => ({
+        const ranked = out.filter(m => valueOf(m) > 0);
+        ranked.sort((a, b) => valueOf(b) - valueOf(a) || b.pc - a.pc);
+        return ranked.map(m => ({
             key: m.name, id: m.id, value: valueOf(m),
             main: num(valueOf(m)), sub: subOf(m),
-            who: nameCell(m.id, m.name) + dots(m.by_mode),
+            who: nameCell(m.id, m.name) + modeIcons(m.by_mode),
         }));
     }
 
@@ -225,12 +274,15 @@
 
     function render() {
         const cfg = BOARDS[board];
+        emode = cfg.modes ? mode : 'all';
         $('head-title').textContent = cfg.title;
         $('head-desc').textContent = cfg.desc;
         $('col-who').textContent = cfg.who;
         $('col-n').textContent = cfg.unit;
         $('scope-control').hidden = !(cfg.scope && scopeAvailable);
-        $('legend').hidden = mode !== 'all';
+        $('mode-control').hidden = !cfg.modes;
+        $('loved-control').hidden = !cfg.loved;
+        $('legend').hidden = emode !== 'all';
         $('note-body').innerHTML = cfg.note.map(p => `<p>${p}</p>`).join('');
         $('q').placeholder = board === 'duos' ? 'Find a nominator' : 'Find yourself, or anyone else';
         $('q-clear').hidden = query === '';
@@ -241,6 +293,8 @@
             b.setAttribute('aria-pressed', String(b.dataset.k === scope)));
         document.querySelectorAll('#mode-seg button').forEach(b =>
             b.setAttribute('aria-pressed', String(b.dataset.k === mode)));
+        document.querySelectorAll('#loved-seg button').forEach(b =>
+            b.setAttribute('aria-pressed', String(b.dataset.k === (withLoved ? '1' : '0'))));
 
         const sel = document.querySelector('#tabs button[aria-selected="true"]');
         if (sel) $('tabs').scrollLeft = Math.max(0, sel.offsetLeft - 16);
@@ -274,7 +328,7 @@
                 const cls = r.rank <= 3 ? ` top r${r.rank}` : '';
                 return `<div class="row${cls}">`
                     + `<span class="rank">${r.rank}</span>`
-                    + face(r.id, r.key, 'face')
+                    + avatars(r)
                     + `<span class="who">${r.who}</span>`
                     + `<span class="n">${r.main}${r.sub ? `<span class="sub">${r.sub}</span>` : ''}</span>`
                     + `</div>`;
@@ -287,7 +341,7 @@
         return '<div class="podium">' + three.map((r, i) => `
             <div class="plinth p${i + 1}">
                 <div class="place">${i + 1}</div>
-                ${face(r.id, r.key, 'face')}
+                ${avatars(r)}
                 <div class="body">
                     <span class="who">${r.who.replace(/<a /g, '<a class="who" ')}</span>
                     <div class="tally">${r.main}</div>
@@ -335,6 +389,8 @@
         `<button type="button" data-k="${k}" aria-pressed="false">${l}</button>`).join('');
     $('mode-seg').innerHTML = MODES.map(([k, l]) =>
         `<button type="button" data-k="${k}" aria-pressed="false">${l}</button>`).join('');
+    $('loved-seg').innerHTML = LOVED.map(([k, l]) =>
+        `<button type="button" data-k="${k}" aria-pressed="false">${l}</button>`).join('');
 
     $('tabs').onclick = e => {
         const b = e.target.closest('button');
@@ -354,6 +410,13 @@
         if (!b) return;
         mode = b.dataset.k;
         Object.keys(pages).forEach(k => pages[k] = 1);
+        syncURL(); render();
+    };
+    $('loved-seg').onclick = e => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        withLoved = b.dataset.k === '1';
+        pages.mappers = pages.sets = 1;
         syncURL(); render();
     };
     $('q').oninput = e => {

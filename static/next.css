@@ -578,6 +578,45 @@ a {
     overflow: hidden;
 }
 
+/* A duo is two people: both faces sit in the one avatar slot, offset so neither hides. */
+.faces {
+    position: relative;
+    width: 34px;
+    height: 34px;
+    flex: none;
+}
+
+.faces .face {
+    position: absolute;
+    width: 23px;
+    height: 23px;
+    border-radius: 7px;
+    font-size: 10px;
+    box-shadow: 0 0 0 1.5px var(--card);
+}
+
+.faces .face:first-child {
+    top: 0;
+    left: 0;
+}
+
+.faces .face:last-child {
+    bottom: 0;
+    right: 0;
+}
+
+.plinth .faces {
+    width: 48px;
+    height: 48px;
+}
+
+.plinth .faces .face {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    font-size: 13px;
+}
+
 .face img {
     position: absolute;
     inset: 0;
@@ -638,27 +677,35 @@ a {
     flex: none;
 }
 
-.dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
+/* The osu! mode glyphs are flat black PNGs, so they are masked rather than drawn: the
+   silhouette stays recognisable and takes the mode colour in either theme. */
+.mode-icon {
+    width: 15px;
+    height: 15px;
+    flex: none;
     background: var(--line-strong);
+    -webkit-mask: var(--glyph) center / contain no-repeat;
+    mask: var(--glyph) center / contain no-repeat;
 }
 
-.dot.osu {
+.mode-icon.osu {
+    --glyph: url("https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67");
     background: var(--osu);
 }
 
-.dot.taiko {
+.mode-icon.taiko {
+    --glyph: url("https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67");
     background: var(--taiko);
 }
 
-.dot.catch,
-.dot.fruits {
+.mode-icon.catch,
+.mode-icon.fruits {
+    --glyph: url("https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67");
     background: var(--catch);
 }
 
-.dot.mania {
+.mode-icon.mania {
+    --glyph: url("https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67");
     background: var(--mania);
 }
 
@@ -1256,6 +1303,27 @@ footer a:hover {
     .plinth .face {
         width: 42px;
         height: 42px;
+    }
+
+    .faces {
+        width: 30px;
+        height: 30px;
+    }
+
+    .faces .face {
+        width: 21px;
+        height: 21px;
+        border-radius: 6px;
+    }
+
+    .plinth .faces {
+        width: 42px;
+        height: 42px;
+    }
+
+    .plinth .faces .face {
+        width: 28px;
+        height: 28px;
     }
 
     .subject img {
