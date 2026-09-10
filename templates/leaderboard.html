@@ -122,7 +122,6 @@
                                 <th class="col-rank">#</th>
                                 <th>Mapper</th>
                                 <th class="col-count" id="sets-header">Mapsets</th>
-                                <th class="col-count col-optional" id="sets-diff-header">Difficulties</th>
                             </tr>
                         </thead>
                         <tbody id="sets-tbody"></tbody>
@@ -366,11 +365,11 @@
             const tbody = document.getElementById('sets-tbody');
             if (!tbody) return;
             if (!mapperData || !mapperData.mappers) {
-                tbody.innerHTML = '<tr><td colspan="4" style="color:#666;text-align:center;padding:20px;">Mapper data not available yet.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">Mapper data not available yet.</td></tr>';
                 return;
             }
             if (!('sets' in (mapperData.mappers[0] || {}))) {
-                tbody.innerHTML = '<tr><td colspan="4" style="color:#666;text-align:center;padding:20px;">This ladder needs a newer scan.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">This ladder needs a newer scan.</td></tr>';
                 return;
             }
 
@@ -382,7 +381,7 @@
             const page = rows.slice((pageSets - 1) * PER_PAGE, pageSets * PER_PAGE);
 
             if (page.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>';
             } else {
                 let html = '';
                 for (const m of page) {
@@ -390,7 +389,7 @@
                     if (currentMode === 'all') {
                         icons = Object.keys(m.by_mode || {}).filter(k => (m.by_mode[k] || 0) > 0).map(modeIcon).join('');
                     }
-                    html += `<tr class="${rankClass(m.rank)}"><td>${m.rank}</td><td><a href="https://osu.ppy.sh/users/${m.osu_id}" target="_blank" class="username-link">${escapeHTML(m.username)}</a>${icons ? '<span class="mode-icons">' + icons + '</span>' : ''}</td><td>${m.display_sets}</td><td class="col-optional">${m.display_maps}</td></tr>`;
+                    html += `<tr class="${rankClass(m.rank)}"><td>${m.rank}</td><td><a href="https://osu.ppy.sh/users/${m.osu_id}" target="_blank" class="username-link">${escapeHTML(m.username)}</a>${icons ? '<span class="mode-icons">' + icons + '</span>' : ''}</td><td>${m.display_sets}</td></tr>`;
                 }
                 tbody.innerHTML = html;
             }
