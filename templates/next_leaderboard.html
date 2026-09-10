@@ -254,7 +254,6 @@
 
         let all = BUILD[ladder]();
         all.forEach((r, i) => r.rank = i + 1);      // rank before filtering, so it stays global
-        const top = all.length ? all[0].value : 1;  // and the bar means the same on every page
 
         const rows = query ? all.filter(r => r.key.toLowerCase().includes(query)) : all;
         const totalPages = Math.max(1, Math.ceil(rows.length / PER_PAGE));
@@ -273,9 +272,7 @@
         } else {
             $('rows').innerHTML = shown.map(r => {
                 const cls = r.rank <= 3 ? ` top r${r.rank}` : '';
-                const share = Math.max(0.6, (r.value / (top || 1)) * 100).toFixed(1);
-                return `<div class="row${cls}" title="${Math.round(r.value / (top || 1) * 100)}% of the top spot">`
-                    + `<span class="lvl" style="width:${share}%"></span>`
+                return `<div class="row${cls}">`
                     + `<span class="rank">${r.rank}</span>`
                     + face(r.id, r.key, 'face')
                     + `<span class="who">${r.who}</span>`
@@ -294,7 +291,7 @@
                 <div class="body">
                     <span class="who">${r.who.replace(/<a /g, '<a class="who" ')}</span>
                     <div class="tally">${r.main}</div>
-                    <div class="unit">${unit.toLowerCase()}</div>
+                    <div class="unit">${r.sub || unit.toLowerCase()}</div>
                 </div>
             </div>`).join('') + '</div>';
     }
