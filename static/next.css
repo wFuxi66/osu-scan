@@ -738,36 +738,32 @@ a {
     flex: none;
 }
 
-/* The osu! mode glyphs are flat black PNGs, so they are masked rather than drawn: the
-   silhouette stays recognisable and takes the mode colour in either theme. */
+/* Drawn, not masked. These are cross-origin and i.ppy.sh sends no CORS header, so as a
+   mask-image the browser dropped them and every icon painted nothing at all. Their alpha
+   is a plain disc in any case: the mark is in the colour, which a mask throws away. 16px
+   is their native size, so they land on the pixel grid. */
 .mode-icon {
-    width: 15px;
-    height: 15px;
+    width: 16px;
+    height: 16px;
     flex: none;
-    background: var(--line-strong);
-    -webkit-mask: var(--glyph) center / contain no-repeat;
-    mask: var(--glyph) center / contain no-repeat;
+    background: var(--glyph) center / contain no-repeat;
 }
 
 .mode-icon.osu {
     --glyph: url("https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67");
-    background: var(--osu);
 }
 
 .mode-icon.taiko {
     --glyph: url("https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67");
-    background: var(--taiko);
 }
 
 .mode-icon.catch,
 .mode-icon.fruits {
     --glyph: url("https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67");
-    background: var(--catch);
 }
 
 .mode-icon.mania {
     --glyph: url("https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67");
-    background: var(--mania);
 }
 
 .legend {
