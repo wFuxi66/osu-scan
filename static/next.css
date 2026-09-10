@@ -6,99 +6,100 @@
 :root {
     color-scheme: light;
 
-    /* paper */
-    --paper: #f7f6fb;
-    --card: #ffffff;
-    --sunk: #efedf7;
-    --line: #e2dfee;
-    --line-strong: #cfcae1;
+    /* One warm surface, no white. Structure comes from hairlines, not from stacking a
+       brighter card on a duller page. */
+    --paper: #e7e0d5;
+    --card: #e7e0d5;
+    --sunk: #dbd2c4;
+    --line: #c5b9a4;
+    --line-strong: #aa9b84;
 
     /* ink */
-    --ink: #171326;
-    --mute: #574f6e;
-    --faint: #6b6486;
+    --ink: #221d16;
+    --mute: #554b3d;
+    --faint: #5f5545;
 
     /* brand */
-    --pink: #d81b63;
-    --pink-hot: #b8004e;
+    --pink: #b81f52;
+    --pink-hot: #971140;
     --pink-tint: #fde7f0;
     --on-pink: #ffffff;
-    --pink-bar: rgba(216, 27, 99, .085);
-    --pink-edge: rgba(216, 27, 99, .5);
+    --pink-bar: rgba(184, 31, 82, .10);
+    --pink-edge: rgba(184, 31, 82, .55);
 
     /* the instrument: dark in either theme */
-    --scope: #16121f;
-    --scope-2: #221c30;
-    --scope-line: #33293f;
-    --scope-ink: #f6f3fb;
-    --scope-mute: #bcb1cd;
+    --scope: #211c16;
+    --scope-2: #2d2721;
+    --scope-line: #3f372c;
+    --scope-ink: #f7f2e9;
+    --scope-mute: #c2b6a3;
 
     /* one colour per game mode */
-    --osu: #d81b63;
-    --taiko: #c9501a;
-    --catch: #0e8a4f;
-    --mania: #2159cc;
+    --osu: #b81f52;
+    --taiko: #a35415;
+    --catch: #2a6b3d;
+    --mania: #35548f;
 
     /* podium */
-    --gold-bg: #f2c14e;
-    --gold-ink: #3d2c00;
-    --silver-bg: #c2c8d6;
-    --silver-ink: #22252e;
-    --bronze-bg: #cb814a;
-    --bronze-ink: #2e1600;
+    --gold-bg: #d9a520;
+    --gold-ink: #2b1f00;
+    --silver-bg: #b6a993;
+    --silver-ink: #231d14;
+    --bronze-bg: #a9622d;
+    --bronze-ink: #ffffff;
 
     --r-sm: 8px;
     --r-md: 12px;
     --r-lg: 18px;
-    --shadow: 0 1px 2px rgba(23, 19, 38, .05), 0 6px 20px rgba(23, 19, 38, .05);
+    --shadow: 0 1px 2px rgba(56, 44, 30, .07), 0 6px 20px rgba(56, 44, 30, .07);
     --shell: 1120px;
 }
 
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
         color-scheme: dark;
-        --paper: #17141f;
-        --card: #201c2b;
-        --sunk: #282234;
-        --line: #322b41;
-        --line-strong: #453b58;
-        --ink: #f4f1fa;
-        --mute: #b6afc9;
-        --faint: #9d95b5;
-        --pink: #ff5c96;
-        --pink-hot: #ff85b0;
+        --paper: #1b1712;
+        --card: #241f18;
+        --sunk: #2d271f;
+        --line: #3b332a;
+        --line-strong: #564b3c;
+        --ink: #f5f0e7;
+        --mute: #c0b4a2;
+        --faint: #a39682;
+        --pink: #ff6386;
+        --pink-hot: #ff8ea6;
         --pink-tint: #3a1a2b;
         --on-pink: #2b0713;
-        --pink-bar: rgba(255, 92, 150, .13);
-        --pink-edge: rgba(255, 92, 150, .55);
-        --osu: #ff5c96;
-        --taiko: #ff8a4c;
-        --catch: #3fd489;
-        --mania: #62a6ff;
+        --pink-bar: rgba(255, 99, 134, .13);
+        --pink-edge: rgba(255, 99, 134, .55);
+        --osu: #ff6386;
+        --taiko: #ff9d5c;
+        --catch: #56cf8a;
+        --mania: #7fb0f5;
         --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .28);
     }
 }
 
 :root[data-theme="dark"] {
     color-scheme: dark;
-    --paper: #17141f;
-    --card: #201c2b;
-    --sunk: #282234;
-    --line: #322b41;
-    --line-strong: #453b58;
-    --ink: #f4f1fa;
-    --mute: #b6afc9;
-    --faint: #9d95b5;
-    --pink: #ff5c96;
-    --pink-hot: #ff85b0;
+    --paper: #1b1712;
+    --card: #241f18;
+    --sunk: #2d271f;
+    --line: #3b332a;
+    --line-strong: #564b3c;
+    --ink: #f5f0e7;
+    --mute: #c0b4a2;
+    --faint: #a39682;
+    --pink: #ff6386;
+    --pink-hot: #ff8ea6;
     --pink-tint: #3a1a2b;
     --on-pink: #2b0713;
-    --pink-bar: rgba(255, 92, 150, .13);
-    --pink-edge: rgba(255, 92, 150, .55);
-    --osu: #ff5c96;
-    --taiko: #ff8a4c;
-    --catch: #3fd489;
-    --mania: #62a6ff;
+    --pink-bar: rgba(255, 99, 134, .13);
+    --pink-edge: rgba(255, 99, 134, .55);
+    --osu: #ff6386;
+    --taiko: #ff9d5c;
+    --catch: #56cf8a;
+    --mania: #7fb0f5;
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .28);
 }
 
@@ -323,7 +324,7 @@ a {
     background: var(--card);
     color: var(--ink);
     font-weight: 600;
-    box-shadow: 0 1px 2px rgba(23, 19, 38, .12);
+    box-shadow: 0 1px 2px rgba(56, 44, 30, .16);
 }
 
 .seg.on-mode button[aria-pressed="true"] {
@@ -848,13 +849,13 @@ a {
    mark's wordmark is white and has nowhere else to live. */
 .scanbox {
     background:
-        radial-gradient(120% 90% at 50% -30%, rgba(216, 27, 99, .30), transparent 62%),
+        radial-gradient(125% 95% at 50% -28%, rgba(184, 31, 82, .34), transparent 64%),
         var(--scope);
     border: 1px solid var(--scope-line);
     border-radius: 22px;
     padding: 26px 24px 24px;
     color: var(--scope-ink);
-    box-shadow: 0 18px 44px rgba(23, 19, 38, .18);
+    box-shadow: 0 18px 44px rgba(40, 31, 21, .26);
 }
 
 .scanbox .sigil {
