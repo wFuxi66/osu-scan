@@ -411,17 +411,17 @@ def resolve_and_aggregate_nominators(noms, token, progress_callback=None):
     stats = defaultdict(lambda: {'count': 0, 'last_date': ''})
     
     for n in noms:
-        name = user_cache.get(n['nominator_id'], f"ID:{n['nominator_id']}")
         date = n['date']
         
-        stats[name]['count'] += 1
-        if date and date > stats[name]['last_date']:
-            stats[name]['last_date'] = date
+        stats[n['nominator_id']]['count'] += 1
+        if date and date > stats[n['nominator_id']]['last_date']:
+            stats[n['nominator_id']]['last_date'] = date
             
     leaderboard = []
-    for name, data in stats.items():
+    for uid, data in stats.items():
         leaderboard.append({
-            'mapper_name': name, 
+            'mapper_id': uid,
+            'mapper_name': user_cache.get(uid, f"ID:{uid}"),
             'total_gds': data['count'], 
             'last_gd_date': data['last_date']
         })
@@ -508,6 +508,7 @@ def generate_bn_leaderboard_for_user(username_input, progress_callback=None, can
     for mid, data in stats.items():
         name = user_cache.get(mid, f"ID:{mid}")
         leaderboard.append({
+            'mapper_id': mid,
             'mapper_name': name,
             'total_gds': data['count'],
             'last_gd_date': data['last_date']
@@ -607,6 +608,7 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
     for host_id, data in stats.items():
         name = user_cache.get(host_id, f"ID:{host_id}")
         leaderboard.append({
+            'mapper_id': host_id,
             'mapper_name': name,
             'total_gds': data['count'],
             'last_gd_date': data['last_date']
@@ -630,26 +632,24 @@ def resolve_and_aggregate(gds, token, progress_callback=None):
     user_cache = resolve_users_parallel(unique_ids_to_resolve, token, progress_callback)
             
     # Aggregate
-    stats = defaultdict(lambda: {'count': 0, 'last_date': ''})
+    stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'name': None})
     
     for gd in gds:
-        # Use provided name, or lookup in cache, or fallback to ID
-        if gd['mapper_name']:
-            mapper_name = gd['mapper_name']
-        else:
-            mapper_name = user_cache.get(gd['mapper_id'], f"ID:{gd['mapper_id']}")
-            
+        row = stats[gd['mapper_id']]
+        # The mapset carries a name for most of them; the cache covers the rest.
+        row['name'] = row['name'] or gd['mapper_name']
         date = gd['last_updated']
         
-        stats[mapper_name]['count'] += 1
-        if date > stats[mapper_name]['last_date']:
-            stats[mapper_name]['last_date'] = date
+        row['count'] += 1
+        if date > row['last_date']:
+            row['last_date'] = date
 
     # Sort
     leaderboard = []
-    for mapper, data in stats.items():
+    for uid, data in stats.items():
         leaderboard.append({
-            'mapper_name': mapper,
+            'mapper_id': uid,
+            'mapper_name': data['name'] or user_cache.get(uid, f"ID:{uid}"),
             'total_gds': data['count'],
             'last_gd_date': data['last_date']
         })
