@@ -130,7 +130,8 @@
         const p = new URLSearchParams();
         if (board !== 'bns') p.set('board', board);
         if (scope !== 'all') p.set('scope', scope);
-        if (mode !== 'all') p.set('mode', mode);
+        // A board that ignores the mode segment should not advertise a filter in its link.
+        if (mode !== 'all' && BOARDS[board].modes) p.set('mode', mode);
         if (!withLoved) p.set('loved', '0');
         const qs = p.toString();
         history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
