@@ -12,17 +12,32 @@ import scan_logic
 # Firebase config
 FIREBASE_URL = os.environ.get('FIREBASE_URL', '')
 FIREBASE_SECRET = os.environ.get('FIREBASE_SECRET', '')
+# Set this and a scan writes under its own prefix instead of over the live data, so a
+# rehearsal run can be inspected before anything replaces what the site is serving.
+FIREBASE_NS = os.environ.get('FIREBASE_NS', '').strip('/')
 
 # ---- Firebase helpers ----
+
+def remote_path(path):
+    """Where this data lives in Firebase, namespace included."""
+    return f'{FIREBASE_NS}/{path}' if FIREBASE_NS else path
+
+
+def local_path(path):
+    """The offline stand-in. Only the last segment names the file, so a namespaced path
+    lands beside its unprefixed twin rather than in a directory that does not exist."""
+    return f'{path.rsplit("/", 1)[-1]}_cache.json'
+
 
 def save_to_firebase(data, path='leaderboard'):
     """Saves data to Firebase Realtime Database."""
     if not FIREBASE_URL or not FIREBASE_SECRET:
         print("Firebase not configured, saving to local file instead")
-        with open(f'{path}_cache.json', 'w') as f:
+        with open(local_path(path), 'w') as f:
             json.dump(data, f)
         return True
-    
+
+    path = remote_path(path)
     url = f'{FIREBASE_URL}/{path}.json?auth={FIREBASE_SECRET}'
     try:
         r = requests.put(url, json=data, timeout=30)
@@ -32,7 +47,7 @@ def save_to_firebase(data, path='leaderboard'):
     except Exception as e:
         print(f"Error saving to Firebase: {e}")
         # Fallback to local file
-        with open(f'{path}_cache.json', 'w') as f:
+        with open(local_path(path), 'w') as f:
             json.dump(data, f)
         return False
 
@@ -40,14 +55,14 @@ def load_from_firebase(path='leaderboard'):
     """Loads data from Firebase Realtime Database."""
     if not FIREBASE_URL:
         try:
-            with open(f'{path}_cache.json', 'r') as f:
+            with open(local_path(path), 'r') as f:
                 return json.load(f)
         except FileNotFoundError:
             return None
 
     # Use secret for reading too if available
     auth_suffix = f'?auth={FIREBASE_SECRET}' if FIREBASE_SECRET else ''
-    url = f'{FIREBASE_URL}/{path}.json{auth_suffix}'
+    url = f'{FIREBASE_URL}/{remote_path(path)}.json{auth_suffix}'
     try:
         r = requests.get(url, timeout=15)
         r.raise_for_status()

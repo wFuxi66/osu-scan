@@ -37,3 +37,6 @@ mapper_scan_state.pickle.tmp
 
 # Cached OAuth token, never committed
 token_cache.json
+
+preprod_scan_state.pickle
+preprod_scan_state.pickle.tmp
