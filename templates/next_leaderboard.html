@@ -6,6 +6,7 @@
 <section class="page-head">
     <h1 class="wide" id="head-title">Leaderboards</h1>
     <p id="head-desc"></p>
+    <div class="stats" id="stats"></div>
 </section>
 
 <div class="tabs" role="tablist" id="tabs"></div>
@@ -31,7 +32,7 @@
 
 <div id="podium-slot"></div>
 
-<div class="list">
+<div class="list" id="list">
     <div class="list-head">
         <span id="col-rank">#</span>
         <span></span>
@@ -54,8 +55,6 @@
     <summary id="note-summary">How this leaderboard counts</summary>
     <div id="note-body"></div>
 </details>
-
-<p class="note stamp" id="stamp"></p>
 {% endblock %}
 
 {% block scripts %}
@@ -159,18 +158,20 @@
         + `<img src="https://a.ppy.sh/${id}" alt="" loading="lazy" decoding="async"`
         + ` onerror="this.remove()"></span>`;
 
-    const avatars = r => r.id2
-        ? `<span class="faces">${face(r.id, r.name1, 'face')}${face(r.id2, r.name2, 'face')}</span>`
+    // A pair is one entry, so it gets one avatar: the two faces overlapped, the way a
+    // pair of people is drawn everywhere else.
+    const avatar = r => r.id2
+        ? `<span class="duo-face">${face(r.id, r.name1, 'face')}${face(r.id2, r.name2, 'face')}</span>`
         : face(r.id, r.key, 'face');
 
     // The mode logos read at a glance the way four coloured dots never did.
     const MODE_NAMES = { osu: 'osu!', taiko: 'Taiko', catch: 'Catch', fruits: 'Catch', mania: 'Mania' };
+    const glyph = m => `<i class="mode-icon ${m}" title="${MODE_NAMES[m] || m}"></i>`;
 
     function modeIcons(byMode) {
         const keys = Object.keys(byMode || {}).filter(k => (byMode[k] || 0) > 0);
         if (emode !== 'all' || !keys.length) return '';
-        return '<span class="modes">' + keys.map(k =>
-            `<i class="mode-icon ${k}" title="${MODE_NAMES[k] || k}"></i>`).join('') + '</span>';
+        return '<span class="modes">' + keys.map(glyph).join('') + '</span>';
     }
 
     function pick(byMode, total) {
@@ -200,12 +201,17 @@
             duos = duos.filter(d => emode === 'catch'
                 ? (d.mode === 'catch' || d.mode === 'fruits') : d.mode === emode);
         }
-        return duos.slice().sort((a, b) => b.count - a.count).map(d => ({
+        duos = duos.slice().sort((a, b) => b.count - a.count);
+        // The gauge reads against the best pair on the board, so it says how far off the
+        // top a pair is rather than how it compares to whoever shares its page.
+        const best = duos[0]?.count || 1;
+        return duos.map(d => ({
             key: `${d.bn1_name} ${d.bn2_name}`, id: d.bn1_id, id2: d.bn2_id,
             name1: d.bn1_name, name2: d.bn2_name,
             value: d.count, main: num(d.count),
-            who: nameCell(d.bn1_id, d.bn1_name) + '<span class="pair">+</span>'
-                + nameCell(d.bn2_id, d.bn2_name) + modeIcons({ [d.mode]: 1 }),
+            who: nameCell(d.bn1_id, d.bn1_name) + '<span class="pair">\u00d7</span>'
+                + nameCell(d.bn2_id, d.bn2_name) + modeIcons({ [d.mode]: 1 })
+                + `<span class="gauge" style="--p:${(d.count / best * 100).toFixed(1)}%"></span>`,
         }));
     }
 
@@ -283,6 +289,7 @@
         $('mode-control').hidden = !cfg.modes;
         $('loved-control').hidden = !cfg.loved;
         $('legend').hidden = emode !== 'all';
+        $('list').classList.toggle('duos', board === 'duos');
         $('note-body').innerHTML = cfg.note.map(p => `<p>${p}</p>`).join('');
         $('q').placeholder = board === 'duos' ? 'Find a nominator' : 'Find yourself, or anyone else';
         $('q-clear').hidden = query === '';
@@ -328,7 +335,7 @@
                 const cls = r.rank <= 3 ? ` top r${r.rank}` : '';
                 return `<div class="row${cls}">`
                     + `<span class="rank">${r.rank}</span>`
-                    + avatars(r)
+                    + avatar(r)
                     + `<span class="who">${r.who}</span>`
                     + `<span class="n">${r.main}${r.sub ? `<span class="sub">${r.sub}</span>` : ''}</span>`
                     + `</div>`;
@@ -341,12 +348,13 @@
         return '<div class="podium">' + three.map((r, i) => `
             <div class="plinth p${i + 1}">
                 <div class="place">${i + 1}</div>
-                ${avatars(r)}
+                ${avatar(r)}
                 <div class="body">
-                    <span class="who">${r.who.replace(/<a /g, '<a class="who" ')}</span>
+                    <span class="who">${r.who}</span>
                     <div class="tally">${r.main}</div>
-                    <div class="unit">${r.sub || unit.toLowerCase()}</div>
+                    <div class="unit">${unit.toLowerCase()}</div>
                 </div>
+                ${r.sub ? `<div class="extra">${r.sub}</div>` : ''}
             </div>`).join('') + '</div>';
     }
 
@@ -370,15 +378,21 @@
         document.querySelector('.list').scrollIntoView({ block: 'start' });
     }
 
-    function stamp() {
+    function stats() {
         const bn = board === 'bns' || board === 'duos';
-        const when = bn ? bnData?.last_scan : mapperData?.last_scan;
-        if (!when) { $('stamp').textContent = ''; return; }
-        const d = new Date(when).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-        $('stamp').textContent = bn
-            ? `Rebuilt ${d} over ${num(bnData?.total_bns_scanned)} nominators.`
-            : `Rebuilt ${d} over ${num(mapperData?.total_sets_scanned)} mapsets `
-            + `and ${num(mapperData?.total_mappers)} mappers.`;
+        const d = bn ? bnData : mapperData;
+        if (!d?.last_scan) { $('stats').innerHTML = ''; return; }
+
+        // The scanner writes datetime.utcnow(), which carries no offset: read as local it
+        // would drift by the reader's own timezone, so it is pinned to UTC and labelled.
+        const t = new Date(d.last_scan + (/[Z+]|-\d\d:\d\d$/.test(d.last_scan) ? '' : 'Z'));
+        const on = t.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+        const at = t.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+        const chip = (n, label) => `<span><b>${num(n)}</b>${label}</span>`;
+
+        $('stats').innerHTML = chip(d.total_sets_scanned, 'mapsets scanned')
+            + chip(bn ? d.total_bns_scanned : d.total_mappers, bn ? 'nominators' : 'mappers')
+            + `<span>${on} \u00b7 ${at} UTC</span>`;
     }
 
     /* ---------------- wiring ---------------- */
@@ -396,7 +410,7 @@
         const b = e.target.closest('button');
         if (!b) return;
         board = b.dataset.k;
-        syncURL(); stamp(); render();
+        syncURL(); stats(); render();
     };
     $('scope-seg').onclick = e => {
         const b = e.target.closest('button');
@@ -433,13 +447,13 @@
     render();
 
     fetch('/api/next/leaderboard_data').then(r => r.json()).then(d => {
-        bnData = d; stamp(); render();
+        bnData = d; stats(); render();
     }).catch(() => { });
 
     fetch('/api/next/mappers_data').then(r => r.json()).then(d => {
         mapperData = d;
         scopeAvailable = 'own_playcount' in ((d.mappers || [])[0] || {});
-        stamp(); render();
+        stats(); render();
     }).catch(() => { });
 </script>
 {% endblock %}

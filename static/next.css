@@ -107,7 +107,7 @@ body {
     background: var(--paper);
     color: var(--ink);
     font-family: Archivo, system-ui, -apple-system, 'Segoe UI', sans-serif;
-    font-size: 15px;
+    font-size: 15.5px;
     line-height: 1.55;
     font-variant-numeric: tabular-nums;
     -webkit-font-smoothing: antialiased;
@@ -405,24 +405,30 @@ a {
     margin: 24px 0 6px;
 }
 
+/* Each place is a column: badge, faces, names, tally. First keeps the wider avatar and
+   the bigger number, so the ranking still reads without three different card widths. */
 .plinth {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 14px;
+    justify-content: center;
+    text-align: center;
+    gap: 10px;
     background: var(--card);
     border: 1px solid var(--line);
+    border-top: 3px solid var(--tint-bg);
     border-radius: var(--r-lg);
-    padding: 14px 16px;
+    padding: 18px 16px 20px;
     box-shadow: var(--shadow);
 }
 
 .plinth .place {
     font-stretch: 125%;
     font-weight: 700;
-    font-size: 17px;
+    font-size: 15px;
     line-height: 1;
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
     border-radius: 8px;
     display: grid;
     place-items: center;
@@ -447,40 +453,69 @@ a {
 }
 
 .plinth .face {
-    width: 48px;
-    height: 48px;
-    border-radius: 12px;
-    font-size: 17px;
+    width: 52px;
+    height: 52px;
+    border-radius: 13px;
+    font-size: 18px;
+}
+
+.plinth.p1 .face {
+    width: 64px;
+    height: 64px;
+    border-radius: 16px;
+    font-size: 22px;
 }
 
 .plinth .body {
+    width: 100%;
     min-width: 0;
-    flex: 1;
 }
 
+/* Centred and free to wrap: a pair of long names gets a second line rather than two
+   ellipses, which is the one thing that made the podium unreadable on a narrow card. */
 .plinth .who {
     font-weight: 600;
-    font-size: 15px;
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 2px 8px;
+    overflow-wrap: anywhere;
 }
 
-.plinth .who:hover {
+.plinth.p1 .who {
+    font-size: 18px;
+}
+
+.plinth .who a:hover {
     color: var(--pink);
 }
 
 .plinth .tally {
     font-stretch: 125%;
     font-weight: 700;
-    font-size: 22px;
+    font-size: clamp(19px, 2.2vw, 27px);
     line-height: 1.25;
+    margin-top: 6px;
+}
+
+.plinth.p1 .tally {
+    font-size: clamp(22px, 2.8vw, 34px);
 }
 
 .plinth .unit {
-    font-size: 12.5px;
+    font-size: 13px;
     color: var(--faint);
+}
+
+.plinth .extra {
+    margin-top: 2px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--sunk);
+    color: var(--mute);
+    font-size: 12px;
 }
 
 /* ---------------------------------------------------------------- list */
@@ -497,14 +532,14 @@ a {
 .list-head,
 .row {
     display: grid;
-    grid-template-columns: 44px 34px minmax(0, 1fr) auto;
+    grid-template-columns: 44px 36px minmax(0, 1fr) auto;
     align-items: center;
     gap: 0 14px;
 }
 
 .list-head {
-    padding: 9px 16px;
-    font-size: 12px;
+    padding: 10px 16px;
+    font-size: 12.5px;
     font-weight: 500;
     color: var(--faint);
     background: var(--sunk);
@@ -516,7 +551,7 @@ a {
 }
 
 .row {
-    padding: 10px 16px;
+    padding: 12.5px 16px;
     border-bottom: 1px solid var(--line);
 }
 
@@ -531,7 +566,7 @@ a {
 .row .rank {
     font-stretch: 125%;
     font-weight: 600;
-    font-size: 14px;
+    font-size: 15px;
     color: var(--faint);
     text-align: right;
 }
@@ -540,8 +575,8 @@ a {
     display: inline-grid;
     place-items: center;
     justify-self: end;
-    width: 24px;
-    height: 22px;
+    width: 26px;
+    height: 24px;
     border-radius: 6px;
     background: var(--tint-bg);
     color: var(--tint-ink);
@@ -565,9 +600,9 @@ a {
 
 .face {
     position: relative;
-    width: 34px;
-    height: 34px;
-    border-radius: 9px;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
     flex: none;
     display: grid;
     place-items: center;
@@ -578,43 +613,61 @@ a {
     overflow: hidden;
 }
 
-/* A duo is two people: both faces sit in the one avatar slot, offset so neither hides. */
-.faces {
-    position: relative;
-    width: 34px;
-    height: 34px;
+/* A pair is one entry, so it gets one avatar slot: the two faces overlapped, each ringed
+   in the page colour so they read as two people and not one torn picture. Cutting them
+   into a single tile along a diagonal was clever and unreadable at 36px. */
+.duo-face {
+    display: flex;
     flex: none;
 }
 
-.faces .face {
-    position: absolute;
-    width: 23px;
-    height: 23px;
-    border-radius: 7px;
-    font-size: 10px;
-    box-shadow: 0 0 0 1.5px var(--card);
+.duo-face .face {
+    box-shadow: 0 0 0 2px var(--paper);
 }
 
-.faces .face:first-child {
-    top: 0;
-    left: 0;
+.duo-face .face + .face {
+    margin-left: -12px;
 }
 
-.faces .face:last-child {
-    bottom: 0;
-    right: 0;
+/* A pair takes two faces' worth of room, so the avatar column widens for that board, and
+   the count column is pinned: sized to its own row it dragged every gauge out of line. */
+.list.duos .list-head,
+.list.duos .row {
+    grid-template-columns: 44px 60px minmax(0, 1fr) 96px;
 }
 
-.plinth .faces {
-    width: 48px;
-    height: 48px;
+/* Two names and a count of 118 left most of the row empty. The gauge takes that space
+   and puts the shape of the falloff in it: full at the top, a sliver deep in the tail.
+   Fixed width and pushed right, so every gauge starts on the same line and the lengths
+   are comparable down the column; sized off the names, it would be a ragged mess. */
+.gauge {
+    flex: none;
+    width: 230px;
+    margin-left: auto;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--line);
+    overflow: hidden;
 }
 
-.plinth .faces .face {
-    width: 32px;
-    height: 32px;
-    border-radius: 9px;
-    font-size: 13px;
+.gauge::before {
+    content: "";
+    display: block;
+    width: var(--p);
+    height: 100%;
+    border-radius: 3px;
+    background: var(--line-strong);
+}
+
+/* The podium already gives each pair a card of its own; a gauge there measures nothing. */
+.plinth .gauge {
+    display: none;
+}
+
+.who .pair {
+    color: var(--faint);
+    font-size: .82em;
+    flex: none;
 }
 
 .face img {
@@ -649,16 +702,10 @@ a {
     font-weight: 400;
 }
 
-.row .pair {
-    color: var(--faint);
-    font-size: 12px;
-    flex: none;
-}
-
 .row .n {
     font-stretch: 125%;
     font-weight: 600;
-    font-size: 15.5px;
+    font-size: 17.5px;
     text-align: right;
     white-space: nowrap;
 }
@@ -667,7 +714,7 @@ a {
     display: block;
     font-stretch: 100%;
     font-weight: 400;
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--faint);
 }
 
@@ -760,9 +807,30 @@ a {
     margin: 8px 0 0 15px;
 }
 
-.stamp {
-    font-size: 13px;
+.stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 16px 0 0;
+}
+
+.stats span {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    font-size: 12.5px;
     color: var(--faint);
+}
+
+.stats b {
+    font-stretch: 125%;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--ink);
 }
 
 .blank {
@@ -1252,7 +1320,6 @@ footer a:hover {
     }
 
     .podium {
-        grid-template-columns: 1fr;
         gap: 8px;
     }
 }
@@ -1287,43 +1354,49 @@ footer a:hover {
 
     .list-head,
     .row {
-        grid-template-columns: 30px 30px minmax(0, 1fr) auto;
+        grid-template-columns: 30px 32px minmax(0, 1fr) auto;
         gap: 0 10px;
         padding-left: 10px;
         padding-right: 10px;
     }
 
     .face {
-        width: 30px;
-        height: 30px;
-        border-radius: 8px;
-        font-size: 12px;
+        width: 32px;
+        height: 32px;
+        border-radius: 9px;
+        font-size: 12.5px;
+    }
+
+    .podium {
+        grid-template-columns: 1fr;
     }
 
     .plinth .face {
-        width: 42px;
-        height: 42px;
+        width: 46px;
+        height: 46px;
     }
 
-    .faces {
-        width: 30px;
-        height: 30px;
+    .plinth.p1 .face {
+        width: 56px;
+        height: 56px;
     }
 
-    .faces .face {
-        width: 21px;
-        height: 21px;
-        border-radius: 6px;
+    .plinth.p1 .who {
+        font-size: 17px;
     }
 
-    .plinth .faces {
-        width: 42px;
-        height: 42px;
+    .list.duos .list-head,
+    .list.duos .row {
+        grid-template-columns: 30px 52px minmax(0, 1fr) auto;
     }
 
-    .plinth .faces .face {
-        width: 28px;
-        height: 28px;
+
+    .gauge {
+        display: none;
+    }
+
+    .row .n {
+        font-size: 16px;
     }
 
     .subject img {
