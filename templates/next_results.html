@@ -1,0 +1,129 @@
+{#- Standalone by design: this page is also served as a download, so its styles are
+    inlined and every link out is absolute. -#}
+{% set HOME = 'https://osu-scan.onrender.com' %}
+{% set WORDING = {
+'Guest Difficulties for': ('Who guest-mapped for', 'difficulties'),
+'Guest Difficulties by': ('Whose sets were guest-mapped by', 'difficulties'),
+'Nominated for': ('Who nominated', 'nominations'),
+'Nominated by': ('Most nominated by', 'sets'),
+} %}
+{% set headline, unit = WORDING.get(title_prefix, (title_prefix, 'entries')) %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if expired %}Results expired{% else %}{{ headline }} {{ username }} — osu!scan{% endif %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&display=swap"
+        rel="stylesheet">
+    <style>{{ next_css() }}</style>
+</head>
+
+<body>
+    {% if cache_id %}
+    <header class="topbar">
+        <div class="shell">
+            <a class="brand" href="/next">
+                <img src="/static/favicon.png" alt="">
+                <span>osu<em>!</em>scan</span>
+            </a>
+            <nav class="nav">
+                <a href="/next">Scan</a>
+                <a href="/next/leaderboard">Leaderboards</a>
+            </nav>
+        </div>
+    </header>
+    {% endif %}
+
+    <main class="shell">
+        {% if expired %}
+        <section class="page-head">
+            <h1 class="wide">These results have expired.</h1>
+            <p>Scan results are kept for a short while, then dropped. Running the scan again takes
+                about as long as it did the first time.</p>
+        </section>
+        <div class="actions">
+            <a class="btn" href="{{ HOME }}/next" style="display:inline-flex;align-items:center;height:44px;">
+                Run a new scan</a>
+        </div>
+
+        {% else %}
+        <section class="subject">
+            {% if user_id %}
+            <img src="https://a.ppy.sh/{{ user_id }}" alt="" width="66" height="66" onerror="this.remove()">
+            {% endif %}
+            <div>
+                <div class="label">{{ headline }}</div>
+                <h1 class="wide">{{ username }}</h1>
+            </div>
+        </section>
+
+        <div class="actions">
+            {% if cache_id %}
+            <a class="btn-ghost" href="/next">Scan someone else</a>
+            <a class="btn-ghost" href="/next/download/{{ cache_id }}">Download this page</a>
+            {% else %}
+            <a class="btn-ghost" href="{{ HOME }}/next">Scan someone else on osu!scan</a>
+            {% endif %}
+        </div>
+
+        {% if not leaderboard %}
+        <div class="blank">
+            <p>Nothing to rank yet — no {{ unit }} came back for <strong>{{ username }}</strong>.</p>
+        </div>
+        {% else %}
+        {% set top = leaderboard[0].total_gds or 1 %}
+        <p class="note" style="margin-top:26px">
+            {{ leaderboard|length }} {{ 'person' if leaderboard|length == 1 else 'people' }},
+            {{ leaderboard|sum(attribute='total_gds') }} {{ unit }} in total.
+        </p>
+
+        <div class="list">
+            <div class="list-head">
+                <span>#</span>
+                <span></span>
+                <span>Mapper</span>
+                <span class="n">{{ unit|capitalize }}</span>
+            </div>
+            {% for entry in leaderboard %}
+            <div class="row {% if loop.index <= 3 %}top r{{ loop.index }}{% endif %}">
+                <span class="lvl" style="width:{{ (entry.total_gds / top * 100)|round(1) }}%"></span>
+                <span class="rank">{{ loop.index }}</span>
+                <span class="face">{{ '?' if entry.mapper_name.startswith(('User_', 'ID:')) else entry.mapper_name[:1]|upper }}{% if entry.mapper_id %}<img
+                        src="https://a.ppy.sh/{{ entry.mapper_id }}" alt="" loading="lazy"
+                        onerror="this.remove()">{% endif %}</span>
+                <span class="who">
+                    {% if entry.mapper_name.startswith('User_') or entry.mapper_name.startswith('ID:') %}
+                    <a class="gone">Restricted account</a>
+                    {% elif entry.mapper_id %}
+                    <a href="https://osu.ppy.sh/users/{{ entry.mapper_id }}" target="_blank"
+                        rel="noopener">{{ entry.mapper_name }}</a>
+                    {% else %}
+                    <a>{{ entry.mapper_name }}</a>
+                    {% endif %}
+                </span>
+                <span class="n">
+                    {{ entry.total_gds }}
+                    {% if entry.last_gd_date %}<span class="sub">last {{ entry.last_gd_date }}</span>{% endif %}
+                </span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endif %}
+    </main>
+
+    <div class="shell">
+        <footer>
+            <span>Made by <a href="https://osu.ppy.sh/users/24230576" target="_blank"
+                    rel="noopener">Fuxi66</a></span>
+            <span>Data from <a href="https://osu.ppy.sh" target="_blank" rel="noopener">osu!</a></span>
+            <a class="kofi" href="https://ko-fi.com/fuxi66" target="_blank" rel="noopener">Support</a>
+        </footer>
+    </div>
+</body>
+
+</html>
