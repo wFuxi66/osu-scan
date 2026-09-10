@@ -11,19 +11,32 @@
     <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='next.css') }}">
+    <script>
+        // Applied before first paint, so the chosen theme never flashes the other one.
+        try {
+            if (localStorage.getItem('osuscan-theme') === 'light')
+                document.documentElement.dataset.theme = 'light';
+        } catch (e) { }
+    </script>
 </head>
 
 <body>
     <header class="topbar">
         <div class="shell">
             <a class="brand" href="/next">
-                <span class="mark"><img src="{{ url_for('static', filename='favicon.png') }}" alt=""></span>
+                <img class="mark mark-dark" src="{{ url_for('static', filename='favicon.png') }}" alt="" width="28"
+                    height="28">
+                <img class="mark mark-light" src="{{ url_for('static', filename='mark-ink.png') }}" alt="" width="28"
+                    height="28">
                 <span class="word">osu<em>!</em>scan</span>
             </a>
             <nav class="nav">
                 <a href="/next" {% if page=='scan' %}aria-current="page" {% endif %}>Scan</a>
                 <a href="/next/leaderboard" {% if page=='ladders' %}aria-current="page" {% endif %}>Leaderboards</a>
             </nav>
+            <button class="theme-toggle" type="button" id="theme" aria-label="Switch the colour theme">
+                <span id="theme-icon">☀</span>
+            </button>
         </div>
     </header>
 
@@ -38,6 +51,20 @@
             <a class="kofi" href="https://ko-fi.com/fuxi66" target="_blank" rel="noopener">Support</a>
         </footer>
     </div>
+
+    <script>
+        (function () {
+            var root = document.documentElement, btn = document.getElementById('theme');
+            var light = function () { return root.dataset.theme === 'light'; };
+            var paint = function () { document.getElementById('theme-icon').textContent = light() ? '☾' : '☀'; };
+            btn.addEventListener('click', function () {
+                if (light()) delete root.dataset.theme; else root.dataset.theme = 'light';
+                try { localStorage.setItem('osuscan-theme', light() ? 'light' : 'dark'); } catch (e) { }
+                paint();
+            });
+            paint();
+        })();
+    </script>
 
     {% block scripts %}{% endblock %}
 </body>

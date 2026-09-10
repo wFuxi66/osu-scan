@@ -4,10 +4,13 @@
 
 {% block content %}
 <section class="hero">
-    <div class="hero-copy">
+    <div class="hero-lead">
         <h1 class="wide">Find out who you really map with.</h1>
         <p>Point it at a mapper and it reads every ranked set they touched, then ranks the people
             behind them: the guest mappers, the hosts, the nominators.</p>
+    </div>
+
+    <div class="hero-extra">
         <p class="lede-more">Nothing to install and no account needed. A scan takes a few
             seconds to a couple of minutes, depending on how much they have mapped.</p>
 
@@ -21,7 +24,13 @@
     </div>
 
     <form class="scanbox" id="scanform" autocomplete="off">
-        <img class="sigil" src="{{ url_for('static', filename='logo.png') }}" alt="osu!scan">
+        <div class="sigil">
+            <img class="mark-dark" src="{{ url_for('static', filename='favicon.png') }}" alt="" width="74"
+                height="74">
+            <img class="mark-light" src="{{ url_for('static', filename='mark-ink.png') }}" alt="" width="74"
+                height="74">
+            <b>osu<em>!</em>scan</b>
+        </div>
 
         <div class="namefield">
         <input type="text" id="who" name="username" placeholder="Username or user ID" required

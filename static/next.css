@@ -1,52 +1,72 @@
 :root {
+    color-scheme: dark;
+
+    /* Default: deep indigo, a blue that has gone violet. Surfaces climb in steps you can
+       actually see, so the page has structure without a single flat black. */
+    --paper: #15132e;
+    --card: #1e1b40;
+    --sunk: #272252;
+    --line: #363068;
+    --line-strong: #4d4694;
+
+    --ink: #f0eefc;
+    --mute: #bab4e6;
+    --faint: #948ec9;
+
+    --pink: #ff5f9e;
+    --pink-hot: #ff89b8;
+    --on-pink: #2b0718;
+
+    --osu: #ff5f9e;
+    --taiko: #ff9457;
+    --catch: #4ed99a;
+    --mania: #74b4ff;
+
+    --gold-bg: #e9b53a;
+    --gold-ink: #2a1e00;
+    --silver-bg: #b9c0e8;
+    --silver-ink: #1b1c33;
+    --bronze-bg: #cf7f45;
+    --bronze-ink: #2a1200;
+
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 18px;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .32), 0 8px 24px rgba(0, 0, 0, .26);
+    --shell: 1120px;
+}
+
+/* The alternate: the cookie ramp, anchored on #a8846a. Surfaces differ by how much light
+   is in them rather than by hue, so there is depth without a single grey. */
+:root[data-theme="light"] {
     color-scheme: light;
 
-    /* A cookie ramp, anchored on #a8846a. Every surface is a brown; they differ by how much
-       light is in them, which is what gives the page depth without a single grey. */
     --oat: #f0e6d7;
     --dough: #e7d9c4;
     --biscuit: #dcc9ae;
     --sand: #cdb494;
     --caramel: #a8846a;
-    --cocoa: #8a6a52;
-    --coffee: #6a5140;
-    --bark: #4a382b;
     --grounds: #2d2119;
 
-    /* surfaces */
     --paper: var(--dough);
     --card: var(--oat);
     --sunk: var(--biscuit);
     --line: var(--sand);
     --line-strong: var(--caramel);
 
-    /* ink */
     --ink: var(--grounds);
     --mute: #5a4536;
     --faint: #614b3a;
 
-    /* brand */
     --pink: #a8244e;
     --pink-hot: #85183a;
     --on-pink: #ffffff;
-    /* the measure bar stays in the brown family; pink is kept for what you can click */
-    --pink-bar: rgba(168, 132, 106, .38);
-    --pink-edge: rgba(138, 106, 82, .8);
 
-    /* the instrument: the one dark object, and the only ground the white wordmark can use */
-    --scope: #2a1f17;
-    --scope-2: #3a2c21;
-    --scope-line: #4e3c2d;
-    --scope-ink: #f7f0e5;
-    --scope-mute: #c3b099;
-
-    /* one colour per game mode, all pulled toward the warm end so none of them shout */
     --osu: #a8244e;
     --taiko: #9a4f17;
     --catch: #35663c;
     --mania: #3a527e;
 
-    /* podium */
     --gold-bg: #c8941d;
     --gold-ink: #2b1f00;
     --silver-bg: #9d8d76;
@@ -54,11 +74,18 @@
     --bronze-bg: #a05f2c;
     --bronze-ink: #ffffff;
 
-    --r-sm: 8px;
-    --r-md: 12px;
-    --r-lg: 18px;
     --shadow: 0 1px 2px rgba(45, 33, 25, .08), 0 6px 18px rgba(45, 33, 25, .07);
-    --shell: 1120px;
+}
+
+/* The mark is inked dark so it reads on the light ramp; on indigo the original, whose
+   highlights are white, is the one that reads. */
+:root .brand .mark-light,
+:root[data-theme="light"] .brand .mark-dark {
+    display: none;
+}
+
+:root[data-theme="light"] .brand .mark-light {
+    display: block;
 }
 
 *,
@@ -143,18 +170,10 @@ a {
 }
 
 .brand .mark {
-    width: 30px;
-    height: 30px;
-    border-radius: 9px;
-    background: var(--scope);
-    display: grid;
-    place-items: center;
+    width: 28px;
+    height: 28px;
     flex: none;
-}
-
-.brand .mark img {
-    width: 21px;
-    height: 21px;
+    display: block;
 }
 
 .brand em {
@@ -184,6 +203,29 @@ a {
     color: var(--ink);
     background: var(--sunk);
     font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- theme */
+
+.theme-toggle {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--mute);
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    flex: none;
+}
+
+.theme-toggle:hover {
+    color: var(--ink);
+    border-color: var(--line-strong);
 }
 
 /* ---------------------------------------------------------------- headings */
@@ -474,29 +516,12 @@ a {
 }
 
 .row {
-    position: relative;
     padding: 10px 16px;
     border-bottom: 1px solid var(--line);
 }
 
 .row:last-child {
     border-bottom: 0;
-}
-
-.row > *:not(.lvl) {
-    position: relative;
-    z-index: 1;
-}
-
-/* the share of the top spot, read as a bar behind the row */
-.row .lvl {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    z-index: 0;
-    background: var(--pink-bar);
-    box-shadow: inset -2px 0 0 var(--pink-edge);
 }
 
 .row:hover {
@@ -755,13 +780,29 @@ a {
 .hero {
     display: grid;
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
-    gap: 56px;
+    grid-template-areas:
+        "lead scan"
+        "extra scan";
+    gap: 0 56px;
     /* start, not center: the panel grows while a scan runs and must not shove the copy */
-    align-items: start;
+    align-content: start;
     padding: 60px 0 44px;
 }
 
-.hero-copy h1 {
+.hero-lead {
+    grid-area: lead;
+}
+
+.hero-extra {
+    grid-area: extra;
+    margin-top: 26px;
+}
+
+.scanbox {
+    grid-area: scan;
+}
+
+.hero-lead h1 {
     font-stretch: 125%;
     font-weight: 700;
     font-size: clamp(32px, 3.7vw, 46px);
@@ -770,36 +811,63 @@ a {
     margin: 0 0 16px;
 }
 
-.hero-copy p {
+.hero-lead p {
     margin: 0;
     color: var(--mute);
     font-size: 16.5px;
 }
 
-.hero-copy .lede-more {
-    margin-top: 20px;
+.lede-more {
+    margin: 0;
     font-size: 14.5px;
     color: var(--faint);
 }
 
-/* The instrument. Dark in both themes, because a scope is a dark screen — and because the
-   mark's wordmark is white and has nowhere else to live. */
 .scanbox {
     background:
-        radial-gradient(125% 95% at 50% -28%, rgba(184, 31, 82, .34), transparent 64%),
-        var(--scope);
-    border: 1px solid var(--scope-line);
+        radial-gradient(130% 100% at 50% -30%, color-mix(in srgb, var(--pink) 26%, transparent), transparent 66%),
+        var(--card);
+    border: 1px solid var(--line);
     border-radius: 22px;
     padding: 26px 24px 24px;
-    color: var(--scope-ink);
-    box-shadow: 0 18px 44px rgba(40, 31, 21, .26);
+    box-shadow: 0 14px 34px rgba(45, 33, 25, .10);
 }
 
-.scanbox .sigil {
+.sigil {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    margin: 2px 0 20px;
+}
+
+.sigil img {
+    width: 74px;
+    height: 74px;
+}
+
+.sigil .mark-light,
+:root[data-theme="light"] .sigil .mark-dark {
+    display: none;
+}
+
+:root[data-theme="light"] .sigil .mark-light {
     display: block;
-    width: 132px;
-    height: auto;
-    margin: 2px auto 20px;
+}
+
+/* Live type, not the wordmark baked into the logo: it stays crisp at any size and no
+   longer needs a dark plate to be legible. */
+.sigil b {
+    font-stretch: 125%;
+    font-weight: 700;
+    font-size: 27px;
+    letter-spacing: -.03em;
+    line-height: 1;
+}
+
+.sigil b em {
+    font-style: normal;
+    color: var(--pink);
 }
 
 .namefield {
@@ -811,17 +879,17 @@ a {
 .namefield input {
     flex: 1;
     min-width: 0;
-    background: var(--scope-2);
-    border: 1px solid var(--scope-line);
+    background: var(--paper);
+    border: 1px solid var(--line);
     border-radius: var(--r-md);
-    color: var(--scope-ink);
+    color: var(--ink);
     font: inherit;
     font-size: 16px;
     padding: 13px 16px;
 }
 
 .namefield input::placeholder {
-    color: var(--scope-mute);
+    color: var(--faint);
 }
 
 .namefield input:focus {
@@ -863,7 +931,7 @@ a {
 .pick {
     position: relative;
     display: block;
-    background: var(--scope-2);
+    background: var(--paper);
     border: 1px solid transparent;
     border-radius: var(--r-md);
     padding: 11px 14px;
@@ -872,7 +940,7 @@ a {
 }
 
 .pick:hover {
-    border-color: var(--scope-line);
+    border-color: var(--line-strong);
 }
 
 .pick input {
@@ -892,17 +960,13 @@ a {
 .pick span {
     display: block;
     font-size: 13px;
-    color: var(--scope-mute);
+    color: var(--mute);
     line-height: 1.4;
 }
 
 .pick:has(input:checked) {
     border-color: var(--pink);
-    background: rgba(216, 27, 99, .22);
-}
-
-.pick:has(input:checked) span {
-    color: #f0dbe4;
+    background: var(--sunk);
 }
 
 .pick:has(input:focus-visible) {
@@ -919,7 +983,7 @@ a {
 .bar {
     height: 3px;
     border-radius: 2px;
-    background: var(--scope-line);
+    background: var(--sunk);
     overflow: hidden;
 }
 
@@ -943,7 +1007,7 @@ a {
 
 .progress p {
     margin: 10px 0 0;
-    color: var(--scope-mute);
+    color: var(--mute);
     font-size: 14px;
 }
 
@@ -951,24 +1015,13 @@ a {
     padding-top: 10px;
 }
 
-.progress .btn-ghost {
-    background: var(--scope-2);
-    border-color: var(--scope-line);
-    color: var(--scope-ink);
-}
-
-.progress .btn-ghost:hover {
-    background: var(--scope-line);
-    border-color: var(--scope-line);
-}
-
 .alert {
     margin: 14px 0 0;
     padding: 12px 15px;
     border-radius: var(--r-md);
     border: 1px solid var(--pink);
-    background: rgba(216, 27, 99, .18);
-    color: var(--scope-ink);
+    background: var(--sunk);
+    color: var(--ink);
     font-size: 14px;
 }
 
@@ -1055,8 +1108,100 @@ footer a:hover {
 @media (max-width: 860px) {
     .hero {
         grid-template-columns: 1fr;
-        gap: 30px;
-        padding: 36px 0 26px;
+        /* Title, then the instrument, then the small print: the natural reading order, and
+           every scan option still lands above the fold. */
+        grid-template-areas:
+            "lead"
+            "scan"
+            "extra";
+        gap: 12px 0;
+        padding: 8px 0 24px;
+    }
+
+    .hero-extra {
+        margin-top: 6px;
+    }
+
+    /* The bar above already shows the mark and the name; repeating them inside the panel
+       costs the room the scan options need. */
+    .sigil {
+        display: none;
+    }
+
+    .hero-lead h1 {
+        font-size: 26px;
+        margin-bottom: 10px;
+    }
+
+    .hero-lead p {
+        font-size: 14.5px;
+        line-height: 1.45;
+    }
+
+    .scanbox {
+        padding: 16px 14px 14px;
+    }
+
+    .modes-grid {
+        gap: 6px;
+        margin-top: 10px;
+    }
+
+    .pick {
+        padding: 7px 12px;
+    }
+
+    .pick span {
+        line-height: 1.35;
+        font-size: 12.5px;
+    }
+
+    /* The mode row is wider than a small phone; let it scroll inside itself rather than
+       push the whole page sideways. */
+    .control {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .seg {
+        max-width: 100%;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .seg::-webkit-scrollbar {
+        display: none;
+    }
+
+    .scanbox {
+        padding: 18px 16px 16px;
+    }
+
+    .sigil {
+        margin-bottom: 14px;
+        gap: 6px;
+    }
+
+    .sigil img {
+        width: 52px;
+        height: 52px;
+    }
+
+    .sigil b {
+        font-size: 22px;
+    }
+
+    .namefield {
+        gap: 8px;
+    }
+
+    .namefield input {
+        padding: 11px 14px;
+        font-size: 15px;
+    }
+
+    .pick {
+        padding: 9px 12px;
     }
 
     .podium {
@@ -1070,17 +1215,19 @@ footer a:hover {
         padding: 0 14px;
     }
 
-    /* the mark alone carries the brand once the bar runs out of room */
-    .brand .word {
-        display: none;
+    /* The name stays: the panel no longer repeats it, so the bar is where it lives. */
+    .topbar .shell {
+        gap: 6px;
     }
 
-    .topbar .shell {
-        gap: 8px;
+    .brand {
+        font-size: 15px;
+        gap: 7px;
     }
 
     .nav a {
-        padding: 7px 10px;
+        padding: 7px 9px;
+        font-size: 13.5px;
     }
 
     .namefield {
@@ -1088,7 +1235,7 @@ footer a:hover {
     }
 
     .btn {
-        padding: 14px 24px;
+        padding: 12px 24px;
     }
 
     .list-head,
@@ -1154,4 +1301,11 @@ footer a:hover {
 .hero-links a:hover {
     color: var(--pink);
     border-bottom-color: var(--pink);
+}
+
+/* Below 360px the bar cannot hold the name as well as the nav. */
+@media (max-width: 359px) {
+    .brand .word {
+        display: none;
+    }
 }
