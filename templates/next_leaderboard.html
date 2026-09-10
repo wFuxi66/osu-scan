@@ -1,5 +1,5 @@
 {% extends "next_base.html" %}
-{% set page = 'ladders' %}
+{% set page = 'boards' %}
 {% block title %}Leaderboards — osu!scan{% endblock %}
 
 {% block content %}
@@ -47,7 +47,7 @@
 </div>
 
 <details class="note">
-    <summary id="note-summary">How this ladder counts</summary>
+    <summary id="note-summary">How this leaderboard counts</summary>
     <div id="note-body"></div>
 </details>
 
@@ -58,7 +58,7 @@
 <script>
     const PER_PAGE = 50;
 
-    const LADDERS = {
+    const BOARDS = {
         bns: {
             tab: 'Top nominators',
             title: 'Top nominators',
@@ -76,7 +76,7 @@
             who: 'Duo', unit: 'Sets together',
             note: ['A pair only scores when both of them nominated the same mapset, and that set counts '
                 + 'once for the pair. Someone who nominates a great deal but rarely with the same partner '
-                + 'can top the nominator ladder and be absent from this one.'],
+                + 'can top the nominator leaderboard and be absent from this one.'],
             scope: false,
         },
         mappers: {
@@ -108,18 +108,18 @@
     const MODES = [['all', 'All'], ['osu', 'osu!'], ['taiko', 'Taiko'], ['catch', 'Catch'], ['mania', 'Mania']];
 
     let bnData = null, mapperData = null, scopeAvailable = false;
-    let ladder = 'bns', scope = 'all', mode = 'all', query = '';
+    let board = 'bns', scope = 'all', mode = 'all', query = '';
     const pages = { bns: 1, duos: 1, mappers: 1, sets: 1 };
 
-    // A ladder is worth linking to and worth sharing, so it lives in the URL.
+    // A leaderboard is worth linking to and worth sharing, so it lives in the URL.
     const params = new URLSearchParams(location.search);
-    if (LADDERS[params.get('ladder')]) ladder = params.get('ladder');
+    if (BOARDS[params.get('board')]) board = params.get('board');
     if (['all', 'own', 'guest'].includes(params.get('scope'))) scope = params.get('scope');
     if (MODES.some(([k]) => k === params.get('mode'))) mode = params.get('mode');
 
     function syncURL() {
         const p = new URLSearchParams();
-        if (ladder !== 'bns') p.set('ladder', ladder);
+        if (board !== 'bns') p.set('board', board);
         if (scope !== 'all') p.set('scope', scope);
         if (mode !== 'all') p.set('mode', mode);
         const qs = p.toString();
@@ -161,7 +161,7 @@
         return d[mode] || 0;
     }
 
-    /* ---------------- rows: every builder returns the full ranked ladder ---------------- */
+    /* ---------------- rows: every builder returns the whole ranked leaderboard ---------------- */
 
     function rowsBns() {
         const out = [];
@@ -224,7 +224,7 @@
     /* ---------------- render ---------------- */
 
     function render() {
-        const cfg = LADDERS[ladder];
+        const cfg = BOARDS[board];
         $('head-title').textContent = cfg.title;
         $('head-desc').textContent = cfg.desc;
         $('col-who').textContent = cfg.who;
@@ -232,11 +232,11 @@
         $('scope-control').hidden = !(cfg.scope && scopeAvailable);
         $('legend').hidden = mode !== 'all';
         $('note-body').innerHTML = cfg.note.map(p => `<p>${p}</p>`).join('');
-        $('q').placeholder = ladder === 'duos' ? 'Find a nominator' : 'Find yourself, or anyone else';
+        $('q').placeholder = board === 'duos' ? 'Find a nominator' : 'Find yourself, or anyone else';
         $('q-clear').hidden = query === '';
 
         document.querySelectorAll('#tabs button').forEach(b =>
-            b.setAttribute('aria-selected', String(b.dataset.k === ladder)));
+            b.setAttribute('aria-selected', String(b.dataset.k === board)));
         document.querySelectorAll('#scope-seg button').forEach(b =>
             b.setAttribute('aria-pressed', String(b.dataset.k === scope)));
         document.querySelectorAll('#mode-seg button').forEach(b =>
@@ -246,29 +246,29 @@
         if (sel) $('tabs').scrollLeft = Math.max(0, sel.offsetLeft - 16);
 
         if (!bnData && !mapperData) {
-            $('rows').innerHTML = '<div class="blank">Loading the ladder…</div>';
+            $('rows').innerHTML = '<div class="blank">Loading the board…</div>';
             $('pager').innerHTML = '';
             $('podium-slot').innerHTML = '';
             return;
         }
 
-        let all = BUILD[ladder]();
+        let all = BUILD[board]();
         all.forEach((r, i) => r.rank = i + 1);      // rank before filtering, so it stays global
 
         const rows = query ? all.filter(r => r.key.toLowerCase().includes(query)) : all;
         const totalPages = Math.max(1, Math.ceil(rows.length / PER_PAGE));
-        const p = pages[ladder] = Math.min(pages[ladder], totalPages);
+        const p = pages[board] = Math.min(pages[board], totalPages);
         const slice = rows.slice((p - 1) * PER_PAGE, p * PER_PAGE);
 
         // The podium is a way in, not a summary: it goes when you start looking for someone,
         // and the list picks up at four so the same three never appear twice on one screen.
         const showPodium = !query && p === 1 && all.length > 3;
-        $('podium-slot').innerHTML = showPodium ? podium(all.slice(0, 3), LADDERS[ladder].unit) : '';
+        $('podium-slot').innerHTML = showPodium ? podium(all.slice(0, 3), BOARDS[board].unit) : '';
         const shown = showPodium ? slice.slice(3) : slice;
 
         if (!shown.length) {
             $('rows').innerHTML = `<div class="blank">Nobody here matches <strong>${esc(query)}</strong>. `
-                + `Check the spelling, or clear the search to see the whole ladder.</div>`;
+                + `Check the spelling, or clear the search to see the whole board.</div>`;
         } else {
             $('rows').innerHTML = shown.map(r => {
                 const cls = r.rank <= 3 ? ` top r${r.rank}` : '';
@@ -311,13 +311,13 @@
     }
 
     function turn(to) {
-        pages[ladder] = to;
+        pages[board] = to;
         render();
         document.querySelector('.list').scrollIntoView({ block: 'start' });
     }
 
     function stamp() {
-        const bn = ladder === 'bns' || ladder === 'duos';
+        const bn = board === 'bns' || board === 'duos';
         const when = bn ? bnData?.last_scan : mapperData?.last_scan;
         if (!when) { $('stamp').textContent = ''; return; }
         const d = new Date(when).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -329,7 +329,7 @@
 
     /* ---------------- wiring ---------------- */
 
-    $('tabs').innerHTML = Object.entries(LADDERS).map(([k, v]) =>
+    $('tabs').innerHTML = Object.entries(BOARDS).map(([k, v]) =>
         `<button type="button" role="tab" data-k="${k}" aria-selected="false">${v.tab}</button>`).join('');
     $('scope-seg').innerHTML = SCOPES.map(([k, l]) =>
         `<button type="button" data-k="${k}" aria-pressed="false">${l}</button>`).join('');
@@ -339,7 +339,7 @@
     $('tabs').onclick = e => {
         const b = e.target.closest('button');
         if (!b) return;
-        ladder = b.dataset.k;
+        board = b.dataset.k;
         syncURL(); stamp(); render();
     };
     $('scope-seg').onclick = e => {
