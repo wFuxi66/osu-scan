@@ -110,6 +110,7 @@ def run_scan_job(job_id, username, mode, cancel_event):
             # Done - save to results cache
             RESULTS_CACHE[job_id] = {
                 'username': result['username'], 
+                'user_id': result.get('user_id'),
                 'leaderboard': result['leaderboard'],
                 'title_prefix': title_prefix,
                 'created_at': time.time()
@@ -122,6 +123,7 @@ def run_scan_job(job_id, username, mode, cancel_event):
             SCAN_CACHE[cache_key] = {
                 'result': {
                     'username': result['username'],
+                    'user_id': result.get('user_id'),
                     'leaderboard': result['leaderboard'],
                     'title_prefix': title_prefix
                 },
@@ -153,6 +155,7 @@ def start_scan():
         job_id = str(uuid.uuid4())
         RESULTS_CACHE[job_id] = {
             'username': cached['result']['username'],
+            'user_id': cached['result'].get('user_id'),
             'leaderboard': cached['result']['leaderboard'],
             'title_prefix': cached['result']['title_prefix'],
             'created_at': time.time()
@@ -257,6 +260,64 @@ def get_leaderboard_data(path='leaderboard'):
 @app.route('/leaderboard')
 def leaderboard():
     return render_template('leaderboard.html')
+
+# ---- Redesign, served alongside the current site until it replaces it ----
+
+_NEXT_CSS = None
+
+
+@app.context_processor
+def inject_next_css():
+    """The results page is downloadable as a standalone file, so its CSS has to travel
+    inside it rather than sit behind a URL the saved copy cannot reach."""
+    def next_css():
+        global _NEXT_CSS
+        if _NEXT_CSS is None:
+            with open(os.path.join(app.static_folder, 'next.css'), encoding='utf-8') as f:
+                _NEXT_CSS = f.read()
+        return _NEXT_CSS
+    return {'next_css': next_css}
+
+
+@app.route('/next')
+def next_index():
+    return render_template('next_index.html')
+
+
+@app.route('/next/leaderboard')
+def next_leaderboard():
+    return render_template('next_leaderboard.html')
+
+
+@app.route('/next/results_view/<cache_id>')
+def next_results_view(cache_id):
+    data = RESULTS_CACHE.get(cache_id)
+    if not data:
+        return render_template('next_results.html', expired=True), 404
+    return render_template('next_results.html',
+                           username=data['username'],
+                           user_id=data.get('user_id'),
+                           leaderboard=data['leaderboard'],
+                           title_prefix=data['title_prefix'],
+                           cache_id=cache_id)
+
+
+@app.route('/next/download/<cache_id>')
+def next_download(cache_id):
+    data = RESULTS_CACHE.get(cache_id)
+    if not data:
+        return "Results expired."
+
+    html = render_template('next_results.html',
+                           username=data['username'],
+                           user_id=data.get('user_id'),
+                           leaderboard=data['leaderboard'],
+                           title_prefix=data['title_prefix'],
+                           cache_id=None)
+
+    filename = f"{data.get('title_prefix', 'Results')} {data['username']}.html"
+    return Response(html, mimetype="text/html",
+                    headers={"Content-Disposition": f"attachment;filename={filename}"})
 
 @app.route('/api/leaderboard_data')
 @limiter.exempt

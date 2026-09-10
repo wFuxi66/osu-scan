@@ -450,12 +450,13 @@ def generate_nominator_leaderboard_for_user(username_input, progress_callback=No
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     if not noms:
-         return {'username': username, 'leaderboard': []}
+         return {'username': username, 'user_id': user_id, 'leaderboard': []}
          
     leaderboard = resolve_and_aggregate_nominators(noms, token, progress_callback)
     
     return {
         'username': username,
+        'user_id': user_id,
         'leaderboard': leaderboard,
         'type': 'Nominators'
     }
@@ -477,7 +478,7 @@ def generate_bn_leaderboard_for_user(username_input, progress_callback=None, can
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     if not sets:
-         return {'username': username, 'leaderboard': []}
+         return {'username': username, 'user_id': user_id, 'leaderboard': []}
 
     # 2. Count mappers (user_id field in beatmapset)
     if progress_callback: progress_callback(f"Analyzing {len(sets)} nominations...")
@@ -518,6 +519,7 @@ def generate_bn_leaderboard_for_user(username_input, progress_callback=None, can
     
     return {
         'username': username,
+        'user_id': user_id,
         'leaderboard': leaderboard,
         'type': 'Nominations'
     }
@@ -578,7 +580,7 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     if not sets:
-         return {'username': username, 'leaderboard': []}
+         return {'username': username, 'user_id': user_id, 'leaderboard': []}
 
     # 2. Count hosts (user_id field in each beatmapset = the host)
     if progress_callback: progress_callback(f"Analyzing {len(sets)} GD sets...")
@@ -618,6 +620,7 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
     
     return {
         'username': username,
+        'user_id': user_id,
         'leaderboard': leaderboard,
         'type': 'GD Hosts'
     }
@@ -678,12 +681,13 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     if not gds:
-        return {'username': username, 'leaderboard': []}
+        return {'username': username, 'user_id': user_id, 'leaderboard': []}
         
     leaderboard = resolve_and_aggregate(gds, token, progress_callback)
     
     return {
         'username': username,
+        'user_id': user_id,
         'leaderboard': leaderboard
     }
 
