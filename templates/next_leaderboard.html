@@ -369,11 +369,11 @@
 
     render();
 
-    fetch('/api/leaderboard_data').then(r => r.json()).then(d => {
+    fetch('/api/next/leaderboard_data').then(r => r.json()).then(d => {
         bnData = d; stamp(); render();
     }).catch(() => { });
 
-    fetch('/api/mappers_data').then(r => r.json()).then(d => {
+    fetch('/api/next/mappers_data').then(r => r.json()).then(d => {
         mapperData = d;
         scopeAvailable = 'own_playcount' in ((d.mappers || [])[0] || {});
         stamp(); render();

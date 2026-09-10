@@ -263,6 +263,28 @@ def leaderboard():
 
 # ---- Redesign, served alongside the current site until it replaces it ----
 
+# The redesign reads its own Firebase prefix, so a rehearsal scan can fill it without
+# touching what the live pages serve. Offline it falls back to the same local caches.
+NEXT_NS = os.environ.get('NEXT_FIREBASE_NS', 'preprod').strip('/')
+
+
+def next_path(name):
+    return f'{NEXT_NS}/{name}' if NEXT_NS else name
+
+
+@app.route('/api/next/leaderboard_data')
+@limiter.exempt
+def next_leaderboard_data():
+    data = get_leaderboard_data(next_path('leaderboard'))
+    return jsonify(data) if data else jsonify(None)
+
+
+@app.route('/api/next/mappers_data')
+@limiter.exempt
+def next_mappers_data():
+    return gzipped_json(get_leaderboard_data(next_path('mappers')), 'mappers')
+
+
 @app.route('/next')
 def next_index():
     return render_template('next_index.html')
