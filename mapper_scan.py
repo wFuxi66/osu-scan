@@ -7,6 +7,7 @@ The scan is built to survive a bad night: it checkpoints as it goes, so a crash,
 rate-limit wall or a dead runner costs only the pages since the last checkpoint, and it
 refuses to publish a leaderboard it could not finish.
 """
+import concurrent.futures
 import os
 import pickle
 import time
@@ -24,6 +25,7 @@ from global_scan import save_to_firebase
 API_SEARCH_URL = 'https://osu.ppy.sh/api/v2/beatmapsets/search'
 API_BEATMAPS_URL = 'https://osu.ppy.sh/api/v2/beatmaps'
 API_BEATMAPSET_URL = 'https://osu.ppy.sh/api/v2/beatmapsets'
+API_USER_URL = 'https://osu.ppy.sh/api/v2/users'
 SEARCH_URL = 'https://osu.ppy.sh/beatmapsets/search'
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -42,6 +44,10 @@ STATE_PATH = os.environ.get('MAPPER_SCAN_STATE', 'mapper_scan_state.pickle')
 BEATMAP_IDS_PER_CALL = 50
 # An owners pass adds ~5 calls per page; pace them to stay a polite guest on the API.
 OWNERS_PACING = 0.15
+# One profile read per mapper, so it is worth some concurrency. Paced to sit around
+# 900 requests a minute, comfortably under the burst the API will start refusing.
+PROFILE_WORKERS = 8
+PROFILE_PACING = 0.5
 # Bumped whenever the checkpoint layout changes, so an old one is discarded, not misread.
 STATE_VERSION = 5
 
@@ -229,6 +235,48 @@ def diff_owners(bmap, owners_by_diff=None):
     owners = owners or ([bmap['user_id']] if bmap.get('user_id') else [])
     # An id repeated in owners would credit the same mapper twice for one difficulty.
     return list(dict.fromkeys(owners))
+
+
+# ---- Official profile counts ----
+
+# What osu! prints on a profile, and what a mapper will compare our ladder against.
+PROFILE_FIELDS = {
+    'profile_ranked_sets': 'ranked_beatmapset_count',
+    'profile_loved_sets': 'loved_beatmapset_count',
+    'profile_guest_sets': 'guest_beatmapset_count',
+}
+
+
+def fetch_profile_counts(session, uids, token, progress=None):
+    """Read each mapper's own mapset counts off their profile.
+
+    Our crawl sees ranked and loved sets only, so it lands a few short of the figure on a
+    profile, which also counts approved and qualified sets. Those numbers live on the
+    single-user endpoint alone, hence one call per mapper. A mapper whose call fails is
+    simply absent from the result, and the ladder keeps the crawled figure for them.
+    """
+    if not token:
+        return {}
+    headers = {**HEADERS, 'Authorization': f'Bearer {token}'}
+    counts = {}
+
+    def one(uid):
+        r = get(session, f'{API_USER_URL}/{uid}', headers, {'key': 'id'})
+        time.sleep(PROFILE_PACING)
+        return uid, (r.json() if r is not None else None)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=PROFILE_WORKERS) as pool:
+        futures = [pool.submit(one, uid) for uid in uids]
+        for done, fut in enumerate(concurrent.futures.as_completed(futures), 1):
+            try:
+                uid, data = fut.result()
+            except (AuthRejected, requests.exceptions.RequestException):
+                continue
+            if data:
+                counts[uid] = {k: data.get(src) or 0 for k, src in PROFILE_FIELDS.items()}
+            if progress and done % 500 == 0:
+                progress(f"Read {done}/{len(uids)} profiles...")
+    return counts
 
 
 # ---- Aggregation ----
@@ -455,6 +503,16 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
     else:
         progress("No API token: usernames stay as they were stored on each mapset.")
 
+    profiles = {}
+    if token:
+        progress(f"Reading {len(top_ids)} profiles for the official mapset counts...")
+        session = requests.Session()
+        profiles = fetch_profile_counts(session, top_ids, token, progress)
+        session.close()
+        progress(f"Official counts read for {len(profiles)}/{len(top_ids)} mappers.")
+    else:
+        progress("No API token: mapset counts stay as crawled, not as osu! shows them.")
+
     # Guest-difficulty figures are the totals minus the "own" ones, so they need no storage.
     def row(uid):
         own = [('ranked', 'own'), ('loved', 'own')]
@@ -470,16 +528,21 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
             'maps_by_mode': modes(BUCKETS, 'mode_maps'),
             'loved_playcount': pick(loved_b, 'pc'),
             'loved_by_mode': modes(loved_b, 'mode_pc'),
+            'loved_maps': pick(loved_b, 'maps'),
+            'loved_maps_by_mode': modes(loved_b, 'mode_maps'),
             'own_playcount': pick(own, 'pc'),
             'own_maps': pick(own, 'maps'),
             'own_by_mode': modes(own, 'mode_pc'),
             'own_maps_by_mode': modes(own, 'mode_maps'),
             'own_loved_playcount': stats[('loved', 'own')]['pc'][uid],
             'own_loved_by_mode': dict(stats[('loved', 'own')]['mode_pc'][uid]),
+            'own_loved_maps': stats[('loved', 'own')]['maps'][uid],
+            'own_loved_maps_by_mode': dict(stats[('loved', 'own')]['mode_maps'][uid]),
             'sets': sum(stats['sets'][r]['count'][uid] for r in ROLES),
             'own_sets': stats['sets']['own']['count'][uid],
             'sets_by_mode': merge_modes(*(stats['sets'][r]['modes'][uid] for r in ROLES)),
             'own_sets_by_mode': dict(stats['sets']['own']['modes'][uid]),
+            **profiles.get(uid, {}),
         }
 
     mappers = [row(uid) for uid in top_ids]
@@ -596,6 +659,24 @@ if __name__ == '__main__':
     assert data is None, "a page that cannot be fetched must come back empty, not raise"
     assert resolve_owners(refusing, [{'id': 1, 'beatmaps': [{'id': 2}]}], 'bad', 'bulk') is None
     print("auth handling OK: refused token fails fast and stops collab credit")
+
+    # The official counts are the whole point of the profile pass; a 404 must not zero them.
+    class Profiles:
+        status_code = 200
+        def get(self, url, **k):
+            self.uid = int(url.rsplit('/', 1)[1])
+            if self.uid == 404:
+                self.status_code = 404
+                return self
+            return self
+        def json(self):
+            return {'ranked_beatmapset_count': 423, 'loved_beatmapset_count': 2,
+                    'guest_beatmapset_count': 220}
+    got = fetch_profile_counts(Profiles(), [33599], 'token')
+    assert got == {33599: {'profile_ranked_sets': 423, 'profile_loved_sets': 2,
+                           'profile_guest_sets': 220}}, got
+    assert fetch_profile_counts(Profiles(), [33599], None) == {}, "no token means no counts"
+    print("profile pass OK")
 
     # Configured credentials must never degrade to the public search in silence.
     _real_token = scan_logic.get_token
