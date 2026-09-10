@@ -1,0 +1,101 @@
+name: Preprod Scan
+
+# Fills the `preprod/` Firebase prefix that /next reads, leaving the live `leaderboard`
+# and `mappers` data exactly as it is. Manual only: this is a rehearsal, not a schedule.
+on:
+  workflow_dispatch:
+    inputs:
+      scans:
+        description: 'Which scans to run'
+        type: choice
+        default: 'both'
+        options: [both, mappers, bn]
+
+jobs:
+  run-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    # Never let two preprod runs write the same prefix at once.
+    concurrency:
+      group: preprod-scan
+      cancel-in-progress: false
+
+    env:
+      PYTHONUNBUFFERED: "1"
+      OSU_CLIENT_ID: ${{ secrets.OSU_CLIENT_ID }}
+      OSU_CLIENT_SECRET: ${{ secrets.OSU_CLIENT_SECRET }}
+      FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
+      FIREBASE_SECRET: ${{ secrets.FIREBASE_SECRET }}
+      FIREBASE_NS: preprod
+      # Its own checkpoint, so a preprod run never resumes from the monthly one.
+      MAPPER_SCAN_STATE: preprod_scan_state.pickle
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Refuse to run without Firebase
+        run: |
+          if [ -z "$FIREBASE_URL" ] || [ -z "$FIREBASE_SECRET" ]; then
+            echo "::error::FIREBASE_URL / FIREBASE_SECRET are not set. Without them the scan"
+            echo "::error::writes local files the runner throws away, so it would look green"
+            echo "::error::and change nothing. Add the secrets, then re-run."
+            exit 1
+          fi
+
+      # The mapper scan checkpoints as it goes; carrying that file between runs means a
+      # killed runner or a rate-limit wall resumes instead of starting ~60k mapsets over.
+      - name: Restore mapper scan checkpoint
+        if: inputs.scans != 'bn'
+        uses: actions/cache/restore@v4
+        with:
+          path: preprod_scan_state.pickle
+          key: preprod-mapper-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: preprod-mapper-
+
+      - name: Run mapper scan
+        id: mapper_scan
+        if: inputs.scans != 'bn'
+        continue-on-error: true
+        run: |
+          for attempt in 1 2 3 4; do
+            echo "::group::Mapper scan attempt $attempt"
+            python run_scan.py mappers && exit 0
+            echo "::endgroup::"
+            echo "Attempt $attempt stopped short; resuming from the checkpoint in 2 minutes."
+            sleep 120
+          done
+          exit 1
+
+      - name: Save mapper scan checkpoint
+        if: always() && inputs.scans != 'bn'
+        uses: actions/cache/save@v4
+        with:
+          path: preprod_scan_state.pickle
+          key: preprod-mapper-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # A failed mapper scan must not cancel the BN scan, but a silent green run would
+      # hide it, so it is reported here and the job fails at the end.
+      - name: Report mapper scan failure
+        if: always() && steps.mapper_scan.outcome == 'failure'
+        run: echo "::error::Mapper scan failed after 4 attempts. Its checkpoint is cached; re-run to continue."
+
+      - name: Run BN scan
+        if: inputs.scans != 'mappers'
+        run: python run_scan.py bn
+
+      - name: Fail the run if the mapper scan never finished
+        if: always() && steps.mapper_scan.outcome == 'failure'
+        run: exit 1
