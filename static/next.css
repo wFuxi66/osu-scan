@@ -1,106 +1,64 @@
-/* osu!scan — design system
-   The page is paper; the scanner is an instrument. The one dark object on the page is the
-   thing you operate, which is also the only ground the pink-and-white mark can live on.
-   One variable family (Archivo), its width axis carrying the display voice. */
-
 :root {
     color-scheme: light;
 
-    /* One warm surface, no white. Structure comes from hairlines, not from stacking a
-       brighter card on a duller page. */
-    --paper: #e7e0d5;
-    --card: #e7e0d5;
-    --sunk: #dbd2c4;
-    --line: #c5b9a4;
-    --line-strong: #aa9b84;
+    /* A cookie ramp, anchored on #a8846a. Every surface is a brown; they differ by how much
+       light is in them, which is what gives the page depth without a single grey. */
+    --oat: #f0e6d7;
+    --dough: #e7d9c4;
+    --biscuit: #dcc9ae;
+    --sand: #cdb494;
+    --caramel: #a8846a;
+    --cocoa: #8a6a52;
+    --coffee: #6a5140;
+    --bark: #4a382b;
+    --grounds: #2d2119;
+
+    /* surfaces */
+    --paper: var(--dough);
+    --card: var(--oat);
+    --sunk: var(--biscuit);
+    --line: var(--sand);
+    --line-strong: var(--caramel);
 
     /* ink */
-    --ink: #221d16;
-    --mute: #554b3d;
-    --faint: #5f5545;
+    --ink: var(--grounds);
+    --mute: #5a4536;
+    --faint: #614b3a;
 
     /* brand */
-    --pink: #b81f52;
-    --pink-hot: #971140;
-    --pink-tint: #fde7f0;
+    --pink: #a8244e;
+    --pink-hot: #85183a;
     --on-pink: #ffffff;
-    --pink-bar: rgba(184, 31, 82, .10);
-    --pink-edge: rgba(184, 31, 82, .55);
+    /* the measure bar stays in the brown family; pink is kept for what you can click */
+    --pink-bar: rgba(168, 132, 106, .38);
+    --pink-edge: rgba(138, 106, 82, .8);
 
-    /* the instrument: dark in either theme */
-    --scope: #211c16;
-    --scope-2: #2d2721;
-    --scope-line: #3f372c;
-    --scope-ink: #f7f2e9;
-    --scope-mute: #c2b6a3;
+    /* the instrument: the one dark object, and the only ground the white wordmark can use */
+    --scope: #2a1f17;
+    --scope-2: #3a2c21;
+    --scope-line: #4e3c2d;
+    --scope-ink: #f7f0e5;
+    --scope-mute: #c3b099;
 
-    /* one colour per game mode */
-    --osu: #b81f52;
-    --taiko: #a35415;
-    --catch: #2a6b3d;
-    --mania: #35548f;
+    /* one colour per game mode, all pulled toward the warm end so none of them shout */
+    --osu: #a8244e;
+    --taiko: #9a4f17;
+    --catch: #35663c;
+    --mania: #3a527e;
 
     /* podium */
-    --gold-bg: #d9a520;
+    --gold-bg: #c8941d;
     --gold-ink: #2b1f00;
-    --silver-bg: #b6a993;
-    --silver-ink: #231d14;
-    --bronze-bg: #a9622d;
+    --silver-bg: #9d8d76;
+    --silver-ink: #241a12;
+    --bronze-bg: #a05f2c;
     --bronze-ink: #ffffff;
 
     --r-sm: 8px;
     --r-md: 12px;
     --r-lg: 18px;
-    --shadow: 0 1px 2px rgba(56, 44, 30, .07), 0 6px 20px rgba(56, 44, 30, .07);
+    --shadow: 0 1px 2px rgba(45, 33, 25, .08), 0 6px 18px rgba(45, 33, 25, .07);
     --shell: 1120px;
-}
-
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-        color-scheme: dark;
-        --paper: #1b1712;
-        --card: #241f18;
-        --sunk: #2d271f;
-        --line: #3b332a;
-        --line-strong: #564b3c;
-        --ink: #f5f0e7;
-        --mute: #c0b4a2;
-        --faint: #a39682;
-        --pink: #ff6386;
-        --pink-hot: #ff8ea6;
-        --pink-tint: #3a1a2b;
-        --on-pink: #2b0713;
-        --pink-bar: rgba(255, 99, 134, .13);
-        --pink-edge: rgba(255, 99, 134, .55);
-        --osu: #ff6386;
-        --taiko: #ff9d5c;
-        --catch: #56cf8a;
-        --mania: #7fb0f5;
-        --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .28);
-    }
-}
-
-:root[data-theme="dark"] {
-    color-scheme: dark;
-    --paper: #1b1712;
-    --card: #241f18;
-    --sunk: #2d271f;
-    --line: #3b332a;
-    --line-strong: #564b3c;
-    --ink: #f5f0e7;
-    --mute: #c0b4a2;
-    --faint: #a39682;
-    --pink: #ff6386;
-    --pink-hot: #ff8ea6;
-    --pink-tint: #3a1a2b;
-    --on-pink: #2b0713;
-    --pink-bar: rgba(255, 99, 134, .13);
-    --pink-edge: rgba(255, 99, 134, .55);
-    --osu: #ff6386;
-    --taiko: #ff9d5c;
-    --catch: #56cf8a;
-    --mania: #7fb0f5;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .28);
 }
 
 *,
@@ -226,27 +184,6 @@ a {
     color: var(--ink);
     background: var(--sunk);
     font-weight: 600;
-}
-
-.theme-toggle {
-    appearance: none;
-    border: 1px solid var(--line);
-    background: var(--card);
-    color: var(--mute);
-    width: 34px;
-    height: 34px;
-    border-radius: 999px;
-    display: grid;
-    place-items: center;
-    cursor: pointer;
-    font-size: 15px;
-    line-height: 1;
-    flex: none;
-}
-
-.theme-toggle:hover {
-    color: var(--ink);
-    border-color: var(--line-strong);
 }
 
 /* ---------------------------------------------------------------- headings */
