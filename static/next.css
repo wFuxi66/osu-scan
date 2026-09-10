@@ -418,7 +418,9 @@ a {
     grid-row: 1 / -1;
     grid-template-rows: subgrid;
     row-gap: 10px;
-    justify-items: center;
+    /* A shared row is as tall as the tallest card's content, so second and third place
+       need centring inside it: left to the top they hang off the first-place avatar. */
+    place-items: center;
     text-align: center;
     background: var(--card);
     border: 1px solid var(--line);
