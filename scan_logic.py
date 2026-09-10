@@ -266,75 +266,83 @@ def save_user_cache():
 
 load_user_cache()
 
-def resolved_name(uid, status, payload=None):
-    """Turn one /users lookup into a cache decision.
+# The bulk endpoint takes 50 ids per request, turning 8000 lookups into 160.
+USER_BATCH = 50
+# ponytail: a flat pause is enough to stay under the API's sustained rate; swap in a proper
+# token bucket only if a scan ever has to share the budget with something else.
+BATCH_PAUSE = 0.5
 
-    200 gives the name. 404 is an answer too: the account is restricted or gone, so the
-    placeholder is worth keeping. Anything else (429, timeout) returns None -- caching a
-    transient failure would freeze a wrong name in place forever, and nothing ever retries
-    a name that is already cached.
+
+def fetch_users_batch(session, uids, headers, max_retries=6):
+    """Read up to USER_BATCH usernames in one request.
+
+    Returns {uid: username} for the users that exist, or None when the request could not be
+    completed -- the caller must then leave those ids alone rather than cache a guess.
     """
-    if status == 200:
-        return (payload or {}).get('username') or f'User_{uid}'
-    if status == 404:
-        return f'User_{uid}'
+    params = [('ids[]', uid) for uid in uids]
+    for attempt in range(max_retries):
+        try:
+            r = session.get(f'{API_BASE}/users', headers=headers, params=params, timeout=20)
+        except Exception:
+            time.sleep(1 + attempt)
+            continue
+        if r.status_code == 429:
+            time.sleep(min(int(r.headers.get('Retry-After', 2 ** attempt)), 30))
+            continue
+        if r.status_code != 200:
+            return None
+        return {u['id']: u.get('username') for u in r.json().get('users', [])}
     return None
 
 
 def resolve_users_parallel(user_ids, token, progress_callback=None, refresh=False):
-    """Resolves a list of user IDs to usernames using threading, with caching.
+    """Resolves a list of user IDs to usernames, with caching.
 
     Pass refresh=True to re-fetch names that are already cached. Players rename, and a
     cached name is never otherwise revisited.
+
+    Names are read 50 at a time from the bulk endpoint. One request per user earns a 429
+    storm on any real scan, and a 429 leaves the previous placeholder in the cache forever
+    because nothing ever revisits a name that is already there.
     """
     headers = {'Authorization': f'Bearer {token}'}
-    
+
     # Identify which IDs are missing from cache
     missing_ids = [uid for uid in user_ids if (refresh or uid not in USER_CACHE) and uid != 0]
     total_missing = len(missing_ids)
-    
+
     if total_missing > 0:
         msg = f"Resolving {total_missing} usernames..."
         if progress_callback: progress_callback(msg)
 
         session = requests.Session()
-        adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
-        session.mount('https://', adapter)
-        session.mount('http://', adapter)
-
-        def fetch_user(uid):
-            try:
-                r = session.get(f'{API_BASE}/users/{uid}', headers=headers, timeout=10)
-                payload = r.json() if r.status_code == 200 else None
-                return (uid, resolved_name(uid, r.status_code, payload))
-            except Exception:
-                return (uid, None)
-
         new_entries = False
-        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
-            future_to_uid = {executor.submit(fetch_user, uid): uid for uid in missing_ids}
-            
-            completed = 0
-            for future in concurrent.futures.as_completed(future_to_uid):
-                completed += 1
-                if completed % 10 == 0:
-                     if progress_callback: progress_callback(f"Resolving names {completed}/{total_missing}...")
-                
-                try:
-                    uid, name = future.result()
-                    if name is None:
-                        continue  # rate-limited or timed out: leave it for the next scan
-                    USER_CACHE[uid] = name
-                    new_entries = True
-                except:
-                    pass
+        done = 0
+
+        for i in range(0, total_missing, USER_BATCH):
+            if i:
+                time.sleep(BATCH_PAUSE)  # fired back to back, the batches earn a 429 of their own
+            batch = missing_ids[i:i + USER_BATCH]
+            found = fetch_users_batch(session, batch, headers)
+            done += len(batch)
+            if progress_callback:
+                progress_callback(f"Resolving names {done}/{total_missing}...")
+            if found is None:
+                continue  # rate-limited or timed out: leave the batch for the next scan
+            for uid in batch:
+                # A user the endpoint does not return is restricted or deleted, which is an
+                # answer worth caching, exactly as a 404 is on the single-user endpoint.
+                USER_CACHE[uid] = found.get(uid) or f'User_{uid}'
+            new_entries = True
+
         session.close()
 
         if new_entries:
             save_user_cache()
-    
+
     # Build result from cache
     return {uid: USER_CACHE.get(uid, f"User_{uid}") for uid in user_ids if uid != 0}
+
 
 def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=None):
     """Fetches nominators for the provided beatmap sets using threading."""
@@ -656,9 +664,42 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
 
 
 if __name__ == '__main__':
-    assert resolved_name(7, 200, {'username': 'Neethime'}) == 'Neethime'
-    assert resolved_name(7, 404) == 'User_7', 'a restricted account is a real answer'
-    assert resolved_name(7, 429) is None, 'a rate limit must never be cached as a name'
-    assert resolved_name(7, 500) is None
-    assert resolved_name(7, 200, {}) == 'User_7'
+    class FakeResp:
+        def __init__(self, status, payload=None, retry_after='0'):
+            self.status_code, self._payload, self.headers = status, payload, {'Retry-After': retry_after}
+        def json(self):
+            return self._payload
+
+    class FakeSession:
+        def __init__(self, *responses):
+            self.responses, self.calls = list(responses), []
+        def get(self, url, headers=None, params=None, timeout=None):
+            self.calls.append(params)
+            return self.responses.pop(0)
+
+    ok = FakeSession(FakeResp(200, {'users': [{'id': 1, 'username': 'Kecco'}]}))
+    assert fetch_users_batch(ok, [1, 2], {}) == {1: 'Kecco'}
+    assert ok.calls == [[('ids[]', 1), ('ids[]', 2)]], 'ids must go out as a repeated param'
+
+    # A 429 is retried, not cached: the batch that finally lands is the answer.
+    retried = FakeSession(FakeResp(429), FakeResp(200, {'users': [{'id': 1, 'username': 'Kecco'}]}))
+    assert fetch_users_batch(retried, [1], {}) == {1: 'Kecco'}
+    assert fetch_users_batch(FakeSession(*[FakeResp(429)] * 4), [1], {}) is None, \
+        'a batch that never lands must stay unresolved'
+
+    USER_CACHE.clear()
+    USER_CACHE[9] = 'stale'
+    import unittest.mock
+    with unittest.mock.patch(__name__ + '.fetch_users_batch', return_value=None), \
+         unittest.mock.patch(__name__ + '.save_user_cache'):
+        resolve_users_parallel([9], 'tok', refresh=True)
+    assert USER_CACHE[9] == 'stale', 'a failed batch must not overwrite a known name'
+
+    USER_CACHE.clear()
+    with unittest.mock.patch(__name__ + '.fetch_users_batch', return_value={1: 'Kecco'}), \
+         unittest.mock.patch(__name__ + '.save_user_cache'):
+        out = resolve_users_parallel([1, 2], 'tok')
+    assert out == {1: 'Kecco', 2: 'User_2'}, 'a user the endpoint omits is restricted'
+    assert USER_CACHE[2] == 'User_2'
+
     print('scan_logic self-check OK')
