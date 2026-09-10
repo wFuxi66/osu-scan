@@ -34,3 +34,6 @@ mapper_scan_state.pickle.tmp
 
 # Agent scratch, never committed
 .claude/
+
+# Cached OAuth token, never committed
+token_cache.json

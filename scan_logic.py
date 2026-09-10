@@ -19,8 +19,24 @@ if not CLIENT_ID or not CLIENT_SECRET:
     print("WARNING: OSU_CLIENT_ID and OSU_CLIENT_SECRET environment variables not set!")
     print("The app will not work without valid osu! API credentials.")
 
+TOKEN_CACHE_FILE = 'token_cache.json'
+
+
 def get_token():
-    """Obtains a client credentials token from osu! API."""
+    """Obtains a client credentials token, reusing the cached one until it nears expiry.
+
+    A token lasts a day, but the token endpoint throttles hard: a handful of requests earns
+    a 429 with a ~28 minute Retry-After that reads exactly like bad credentials. Caching it
+    to disk means every process and every re-run shares the one token.
+    """
+    try:
+        with open(TOKEN_CACHE_FILE) as f:
+            cached = json.load(f)
+        if cached['expires_at'] > time.time() + 300:
+            return cached['token']
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+
     data = {
         'client_id': CLIENT_ID,
         'client_secret': CLIENT_SECRET,
@@ -30,10 +46,19 @@ def get_token():
     try:
         response = requests.post(TOKEN_URL, data=data, timeout=10)
         response.raise_for_status()
-        return response.json()['access_token']
+        payload = response.json()
+        token = payload['access_token']
     except Exception as e:
         print(f"Error authenticating: {e}")
         return None
+
+    try:
+        with open(TOKEN_CACHE_FILE, 'w') as f:
+            json.dump({'token': token, 'expires_at': time.time() + payload.get('expires_in', 86400)}, f)
+        os.chmod(TOKEN_CACHE_FILE, 0o600)
+    except OSError:
+        pass  # a read-only disk costs us the reuse, not the token
+    return token
 
 def get_user_id(username_or_id, token):
     """Resolves a username to an ID."""
