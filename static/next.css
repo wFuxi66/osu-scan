@@ -401,19 +401,25 @@ a {
 .podium {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
+    /* badge · avatar · name · tally · unit. The three cards share these rows, so first
+       place can carry a wider avatar and a bigger number without dragging the other two
+       out of line. Centring each card's contents on its own was what staggered them.
+       Six rows, the last for the optional footnote chip: a subgrid gets no implicit
+       tracks, so a row short and the chip lands on top of the unit label. */
+    grid-template-rows: repeat(6, auto);
+    gap: 0 12px;
     margin: 24px 0 6px;
 }
 
 /* Each place is a column: badge, faces, names, tally. First keeps the wider avatar and
    the bigger number, so the ranking still reads without three different card widths. */
 .plinth {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+    display: grid;
+    grid-row: 1 / -1;
+    grid-template-rows: subgrid;
+    row-gap: 10px;
+    justify-items: center;
     text-align: center;
-    gap: 10px;
     background: var(--card);
     border: 1px solid var(--line);
     border-top: 3px solid var(--tint-bg);
@@ -467,6 +473,10 @@ a {
 }
 
 .plinth .body {
+    display: grid;
+    grid-row: span 3;
+    grid-template-rows: subgrid;
+    row-gap: 0;
     width: 100%;
     min-width: 0;
 }
@@ -546,6 +556,8 @@ a {
     border-bottom: 1px solid var(--line);
 }
 
+/* The ranks below are flush right in their column; the # sat flush left, a good 30px off. */
+.list-head > span:first-child,
 .list-head .n {
     text-align: right;
 }
@@ -898,6 +910,10 @@ a {
     grid-template-areas:
         "lead scan"
         "extra scan";
+    /* The panel is taller than the copy beside it. Left to auto rows, that surplus was
+       split between them and opened a hole under the lede; the second row takes it all
+       and the small print stays put under the paragraph it belongs to. */
+    grid-template-rows: auto 1fr;
     gap: 0 56px;
     /* start, not center: the panel grows while a scan runs and must not shove the copy */
     align-content: start;
@@ -1229,6 +1245,7 @@ footer a:hover {
             "lead"
             "scan"
             "extra";
+        grid-template-rows: none;
         gap: 12px 0;
         padding: 8px 0 24px;
     }
@@ -1320,7 +1337,7 @@ footer a:hover {
     }
 
     .podium {
-        gap: 8px;
+        gap: 0 8px;
     }
 }
 
@@ -1367,8 +1384,18 @@ footer a:hover {
         font-size: 12.5px;
     }
 
+    /* One card per row now, so there are no neighbours to keep in line: the cards go back
+       to sizing their own rows, otherwise all three land on top of each other. */
     .podium {
         grid-template-columns: 1fr;
+        grid-template-rows: none;
+        gap: 8px;
+    }
+
+    .plinth,
+    .plinth .body {
+        grid-row: auto;
+        grid-template-rows: none;
     }
 
     .plinth .face {
