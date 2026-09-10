@@ -43,7 +43,7 @@ BEATMAP_IDS_PER_CALL = 50
 # An owners pass adds ~5 calls per page; pace them to stay a polite guest on the API.
 OWNERS_PACING = 0.15
 # Bumped whenever the checkpoint layout changes, so an old one is discarded, not misread.
-STATE_VERSION = 4
+STATE_VERSION = 5
 
 
 class AuthRejected(Exception):
@@ -301,7 +301,12 @@ def fetch_page(session, cursor, token):
     Returns (data, token). The token comes back None once the API has refused it, so the
     caller stops paying the auth round trip on every remaining page.
     """
-    params = {'sort': 'ranked_desc', 'nsfw': 'true'}
+    # Oldest first, deliberately. Newest-first puts every freshly ranked set at the head of
+    # the ordering, so a set that ranks mid-scan shifts everything below it down by one and
+    # the cursor steps straight over a set it has not read yet. A scan that checkpoints and
+    # resumes over days loses a handful of sets that way. Ascending appends new sets at the
+    # end, where the cursor has not been, so nothing is ever skipped.
+    params = {'sort': 'ranked_asc', 'nsfw': 'true'}
     if cursor:
         params['cursor_string'] = cursor
 
