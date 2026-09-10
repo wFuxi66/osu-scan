@@ -3,6 +3,11 @@ import sys
 
 from dotenv import load_dotenv
 
+# Before importing anything that reads them: global_scan copies FIREBASE_URL and
+# FIREBASE_NS into module constants at import time, so loading .env afterwards leaves a
+# local run writing nothing and a namespaced run writing over the live data.
+load_dotenv()
+
 import global_scan
 import mapper_scan
 
@@ -14,7 +19,6 @@ SCANS = {
 
 
 def main(names):
-    load_dotenv()
     failed = False
     for name in names:
         label, fn = SCANS[name]
