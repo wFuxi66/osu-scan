@@ -413,6 +413,10 @@
         const b = e.target.closest('button');
         if (!b) return;
         board = b.dataset.k;
+        // The mapset board's headline is the figure off the profile, and that one has no
+        // split by mode. A mode carried over from another board would silently swap it for
+        // our crawl, so arriving here clears it; picking a mode from here still works.
+        if (board === 'sets') mode = 'all';
         syncURL(); stats(); render();
     };
     $('scope-seg').onclick = e => {
