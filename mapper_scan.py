@@ -46,7 +46,11 @@ CHECKPOINT_EVERY = 20  # pages
 STATE_PATH = os.environ.get('MAPPER_SCAN_STATE', 'mapper_scan_state.pickle')
 # Verified cap: asking for 51 ids returns 50 with no error, so never chunk larger.
 BEATMAP_IDS_PER_CALL = 50
-PROFILE_WORKERS = 8
+# Workers cannot outrun the shared limiter - it hands out one slot at a time - so they only
+# buy latency overlap. What extra ones do buy is waste: every thread already in flight when
+# a 429 lands burns a retry on it and reports the same hold. The 2026-09-11 run logged the
+# throttle eight times in a row, once per worker, for one throttle.
+PROFILE_WORKERS = int(os.environ.get('PROFILE_WORKERS', 3))
 # Every request in this module goes through one shared throttle, so the rate is a property
 # of the scan rather than of whichever phase happens to be running.
 #
@@ -126,13 +130,22 @@ class RateLimiter:
         self._lock = threading.Lock()
         self._next_at = 0.0
 
-    def wait(self):
+    def wait(self, deadline=None):
+        """Take the next slot. Returns False if that slot falls past `deadline`.
+
+        A 429 can park the queue for half an hour. Without this check the workers sit out
+        the whole hold and only then notice their budget expired, so a 90 minute profile
+        pass could run 120 - the deadline is not a deadline if the sleep ignores it.
+        """
         with self._lock:
             now = time.monotonic()
             due = max(now, self._next_at)
+            if deadline is not None and due > deadline:
+                return False        # slot not consumed: it belongs to whoever still has time
             self._next_at = due + self.gap
         if due > now:
             time.sleep(due - now)
+        return True
 
     def pause(self, seconds):
         """Hold every thread back for `seconds`, starting now."""
@@ -154,10 +167,7 @@ def get(session, url, headers, params=None, deadline=None):
             return None
         if wait:
             time.sleep(wait)
-        RATE.wait()
-        # The throttle can hold a thread for a whole Retry-After window, so the deadline is
-        # worth re-reading on the way out: no point spending a request on expired work.
-        if deadline and time.monotonic() > deadline:
+        if not RATE.wait(deadline):
             return None
         try:
             r = session.get(url, headers=headers, params=params, timeout=30)
