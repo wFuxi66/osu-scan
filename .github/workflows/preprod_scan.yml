@@ -28,8 +28,10 @@ jobs:
       FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
       FIREBASE_SECRET: ${{ secrets.FIREBASE_SECRET }}
       FIREBASE_NS: preprod
-      # Its own checkpoint, so a preprod run never resumes from the monthly one.
+      # Its own checkpoint and cache, so a preprod run never resumes from the monthly one
+      # or inherits its cached owners.
       MAPPER_SCAN_STATE: preprod_scan_state.pickle
+      MAPPER_SCAN_CACHE: preprod_scan_cache.pickle
 
     steps:
       - name: Checkout repository
@@ -61,7 +63,9 @@ jobs:
         if: inputs.scans != 'bn'
         uses: actions/cache/restore@v4
         with:
-          path: preprod_scan_state.pickle
+          path: |
+            preprod_scan_state.pickle
+            preprod_scan_cache.pickle
           key: preprod-mapper-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: preprod-mapper-
 
@@ -83,7 +87,9 @@ jobs:
         if: always() && inputs.scans != 'bn'
         uses: actions/cache/save@v4
         with:
-          path: preprod_scan_state.pickle
+          path: |
+            preprod_scan_state.pickle
+            preprod_scan_cache.pickle
           key: preprod-mapper-${{ github.run_id }}-${{ github.run_attempt }}
 
       # A failed mapper scan must not cancel the BN scan, but a silent green run would

@@ -222,6 +222,76 @@ def clear_state(path=None):
         pass
 
 
+# ---- Cross-run cache ----
+
+# The run checkpoint above is deleted on success; this file is not. It holds only the parts
+# of a scan that do not change between runs, so a daily scan can re-read every playcount -
+# the number the ladder is actually built on, and the cheap half of the scan - while
+# skipping the lookups that cost 25x more and return the same answer.
+#
+# Nothing volatile belongs in here. Playcounts are never cached at any depth: they come free
+# with the search pages the crawl reads in full every single run.
+CACHE_PATH = os.environ.get('MAPPER_SCAN_CACHE', 'mapper_scan_cache.pickle')
+CACHE_VERSION = 1
+# A difficulty's author list is fixed when it ranks - but not absolutely: mappers do get
+# added to or removed from one afterwards. So the cache is never trusted indefinitely. Every
+# run re-reads the slice whose id falls due, which turns the whole cache over this many runs
+# and puts a hard ceiling on how stale any entry can be. ~140 requests a day at 30.
+# Set to 0 to distrust the cache entirely and re-read every difficulty.
+OWNERS_ROTATION = int(os.environ.get('OWNERS_ROTATION', 30))
+# Same idea for profile counts. The crawl predicts most of their movement, but not all: a set
+# leaving qualified, or a graveyard set revived, moves a profile count without touching
+# anything the crawl can see. The rotation is what catches those.
+PROFILE_ROTATION = int(os.environ.get('PROFILE_ROTATION', 30))
+
+
+def new_cache():
+    return {'version': CACHE_VERSION, 'runs': 0,
+            'owners': {}, 'profiles': {}, 'profile_basis': {}}
+
+
+def load_cache(path=None):
+    """Read the cross-run cache, or a fresh empty one.
+
+    Every doubt about it - missing, truncated, half-written, left by an older layout -
+    resolves to an empty cache. That costs a full scan, which is slow; the alternative is a
+    wrong ladder, which is worse and silent.
+    """
+    try:
+        with open(path or CACHE_PATH, 'rb') as f:
+            cache = pickle.load(f)
+    except (FileNotFoundError, EOFError, pickle.UnpicklingError, AttributeError, ImportError):
+        return new_cache()
+    if cache.get('version') != CACHE_VERSION:
+        print("Cache was written by an older scan layout; rebuilding it.", flush=True)
+        return new_cache()
+    # A cache missing a key it should have is a cache we do not understand.
+    if not all(k in cache for k in ('runs', 'owners', 'profiles', 'profile_basis')):
+        return new_cache()
+    return cache
+
+
+def save_cache(cache, path=None):
+    """Write the cache atomically, so a killed runner cannot leave a torn one behind."""
+    cache['version'] = CACHE_VERSION
+    path = path or CACHE_PATH
+    tmp = f'{path}.tmp'
+    with open(tmp, 'wb') as f:
+        pickle.dump(cache, f, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(tmp, path)
+
+
+def due_for_recheck(key, run, rotation):
+    """Whether this id is in the slice being re-read from the API this run.
+
+    Spreading by id rather than by a stored timestamp means uniform coverage, no per-entry
+    bookkeeping, and a guarantee that every entry comes up exactly once per `rotation` runs.
+    """
+    if rotation <= 0:
+        return True
+    return key % rotation == run % rotation
+
+
 # ---- Owners ----
 
 def detect_owners_mode(session, token, sample_diff_id, sample_set_id):
@@ -251,13 +321,19 @@ def detect_owners_mode(session, token, sample_diff_id, sample_set_id):
     return 'none'
 
 
-def resolve_owners(session, beatmapsets, token, mode):
+def resolve_owners(session, beatmapsets, token, mode, need=None):
     """Map every difficulty on these mapsets to the user ids credited with it.
+
+    `need`, when given, limits the lookup to the difficulties actually worth a request; the
+    caller supplies the rest from its cross-run cache. An empty `need` means every
+    difficulty on the page was already known, and the page costs nothing.
 
     Returns None if a lookup could not be completed, so the caller checkpoints rather than
     aggregating a page with half of its collabs missing.
     """
     if mode == 'none' or not beatmapsets:
+        return {}
+    if need is not None and not need:
         return {}
     if not token:
         return None
@@ -267,6 +343,8 @@ def resolve_owners(session, beatmapsets, token, mode):
     try:
         if mode == 'bulk':
             ids = [bmap['id'] for bset in beatmapsets for bmap in bset.get('beatmaps', [])]
+            if need is not None:
+                ids = [i for i in ids if i in need]
             for i in range(0, len(ids), BEATMAP_IDS_PER_CALL):
                 r = get(session, API_BEATMAPS_URL, headers, {'ids[]': ids[i:i + BEATMAP_IDS_PER_CALL]})
                 if r is None:
@@ -276,6 +354,11 @@ def resolve_owners(session, beatmapsets, token, mode):
             return owners
 
         for bset in beatmapsets:
+            # One call returns the whole mapset, so it is only worth making when at least one
+            # difficulty on it is actually wanted.
+            if need is not None and not any(b.get('id') in need
+                                            for b in bset.get('beatmaps') or []):
+                continue
             r = get(session, f'{API_BEATMAPSET_URL}/{bset["id"]}', headers)
             if r is None:
                 return None
@@ -537,6 +620,14 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
     stats, names = state['stats'], state['names']
     truncated = None
 
+    cache = load_cache() if resume else new_cache()
+    run_no = cache['runs']
+    # Every difficulty this crawl actually saw. Used only to prune the cache at the end, and
+    # only on a complete pass - pruning against a partial one would throw away good entries
+    # for every set the crawl never reached.
+    seen_diffs = set()
+    owners_from_cache = owners_read = 0
+
     if state['owners_mode'] not in (None, 'none') and not token:
         msg = ("Checkpoint was built with collab credit but no API token is available now; "
                "fix the credentials and re-run so the pass stays consistent.")
@@ -586,10 +677,35 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
 
         # Cursor pages can overlap; counting a set twice would double its mappers' playcount.
         fresh = [b for b in page_sets if b['id'] not in state['seen']]
-        owners = resolve_owners(session, fresh, token, state['owners_mode'])
-        if owners is None:
+
+        # Owners are the expensive half of the crawl and the half that does not change, so
+        # they come from the cache wherever possible. Playcounts, which do change, were read
+        # fresh in the search page above and are never cached at all.
+        use_owners_cache = state['owners_mode'] in ('bulk', 'set')
+        known = cache['owners'] if use_owners_cache else {}
+        page_diffs = [b['id'] for bset in fresh for b in bset.get('beatmaps') or []
+                      if b.get('id') is not None]
+        seen_diffs.update(page_diffs)
+        # The rotation re-checks a whole page at a time, not scattered difficulty ids.
+        # Scattering costs one lookup call on every page - a handful of ids never fills a
+        # 50-id batch - so it would spend ~1200 calls a run to re-check ~1/30 of the cache.
+        # By page, 29 runs in 30 cost nothing at all and the due page fills its batches.
+        # Search order is ranked_asc, so page boundaries are stable between runs and every
+        # page comes up exactly once per rotation.
+        page_due = due_for_recheck(state['pages'], run_no, OWNERS_ROTATION)
+        need = {d for d in page_diffs if page_due or d not in known}
+
+        looked_up = resolve_owners(session, fresh, token, state['owners_mode'], need=need)
+        if looked_up is None:
             truncated = f"owners lookup stopped responding after {state['pages']} pages"
             break
+
+        owners = {d: known[d] for d in page_diffs if d in known and d not in need}
+        owners_from_cache += len(owners)
+        owners.update(looked_up)
+        owners_read += len(looked_up)
+        if use_owners_cache:
+            cache['owners'].update(looked_up)
 
         aggregate_page(fresh, stats, names, owners)
         state['seen'].update(b['id'] for b in page_sets)
@@ -598,6 +714,8 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
 
         if state['pages'] % CHECKPOINT_EVERY == 0:
             save_state(state)
+            # Alongside the checkpoint, so owners paid for before a crash are not paid twice.
+            save_cache(cache)
         if state['pages'] % 50 == 0:
             progress(f"Scanned {len(state['seen'])}/{state['reported_total'] or '?'} mapsets...")
 
@@ -612,10 +730,17 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         truncated = f"only reached {total_sets} of {state['reported_total']} mapsets"
     if truncated:
         save_state(state)
+        # Kept, not pruned: the owners read before the run died are still correct, and the
+        # next run resuming from the checkpoint should not pay for them a second time.
+        save_cache(cache)
         msg = (f"Incomplete scan ({truncated}). Previous leaderboard kept; "
                f"{total_sets} mapsets checkpointed, re-run to continue.")
         progress(msg)
         return {'error': msg, 'total_sets_scanned': total_sets, 'reported_total': state['reported_total']}
+
+    if owners_from_cache or owners_read:
+        progress(f"Owners: {owners_read} read from the API, {owners_from_cache} from cache "
+                 f"(re-checking 1/{OWNERS_ROTATION or 1} of the cache each run).")
 
     all_ids = set()
     for bucket in BUCKETS:
@@ -643,15 +768,42 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
 
     profiles = {}
     if token:
-        progress(f"Reading {len(top_ids)} profiles for the official mapset counts "
-                 f"(up to {PROFILE_BUDGET / 60:.0f} min)...")
+        # A mapper's official counts only move when their set count moves - which the crawl
+        # has just measured for every mapper - so most of them need no request at all. The
+        # crawled count is kept beside the cached row as the basis it was read against; when
+        # the two disagree the row is stale by definition. The rotation slice is re-read
+        # regardless, to catch the movements the crawl cannot see.
+        crawled_sets = {uid: sum(stats['sets'][r]['count'][uid] for r in ROLES)
+                        for uid in top_ids}
+        cached_rows = cache['profiles']
+        basis = cache['profile_basis']
+        stale = [uid for uid in top_ids
+                 if uid not in cached_rows
+                 or basis.get(uid) != crawled_sets.get(uid)
+                 or due_for_recheck(uid, run_no, PROFILE_ROTATION)]
+
+        progress(f"Profiles: {len(top_ids) - len(stale)} unchanged since the last scan, "
+                 f"reading {len(stale)} (up to {PROFILE_BUDGET / 60:.0f} min)...")
         session = requests.Session()
-        profiles = fetch_profile_counts(session, top_ids, token, progress)
+        readings = fetch_profile_counts(session, stale, token, progress)
         session.close()
-        progress(f"Official counts read for {len(profiles)}/{len(top_ids)} mappers.")
-        if len(profiles) < len(top_ids):
+
+        for uid, row_data in readings.items():
+            cached_rows[uid] = row_data
+            basis[uid] = crawled_sets.get(uid)
+        # A mapper whose read failed keeps its cached basis untouched, so the next run sees
+        # the mismatch again and retries instead of treating the stale row as confirmed.
+        for uid in stale:
+            if uid not in readings:
+                basis.pop(uid, None)
+
+        profiles = {uid: cached_rows[uid] for uid in top_ids if uid in cached_rows}
+        progress(f"Official counts now known for {len(profiles)}/{len(top_ids)} mappers "
+                 f"({len(readings)} read this run).")
+        if len(readings) < len(stale):
             progress("The profile pass ran out of budget or hit throttling. Publishing the "
-                     "ladder anyway: playcounts come from the crawl, which is complete.")
+                     "ladder anyway: playcounts come from the crawl, which is complete, and "
+                     "the mappers it missed are retried next run.")
     else:
         progress("No API token: mapset counts stay as crawled, not as osu! shows them.")
 
@@ -699,11 +851,28 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         # Firebase stores an empty object as nothing, so a mapper with an empty category
         # loses its split. One flag for the scan says the split was read, per row or not.
         'profile_modes': bool(profiles),
+        # What this pass actually re-read. Playcounts are always 100% fresh - they ride in
+        # on the search pages - so these say how much of the *static* half was trusted from
+        # cache, which is the only thing that can go stale.
+        'owners_read': owners_read,
+        'owners_cached': owners_from_cache,
+        'owners_rotation': OWNERS_ROTATION,
         'mappers': mappers,
     }
 
     progress("Saving mapper leaderboard to Firebase...")
     save_to_firebase(result, path='mappers')
+
+    # Only a complete pass may prune. Dropping entries the crawl simply never reached would
+    # quietly bill the next run for work already paid for, and on a run that died early it
+    # would throw away most of the cache.
+    cache['owners'] = {d: o for d, o in cache['owners'].items() if d in seen_diffs}
+    live = set(top_ids)
+    cache['profiles'] = {u: r for u, r in cache['profiles'].items() if u in live}
+    cache['profile_basis'] = {u: b for u, b in cache['profile_basis'].items() if u in live}
+    cache['runs'] = run_no + 1
+    save_cache(cache)
+
     clear_state()
     progress(f"Mapper scan complete! Top mapper: {mappers[0]['username']} ({mappers[0]['playcount']:,} plays)"
              if mappers else "No mappers found.")

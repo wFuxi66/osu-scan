@@ -40,3 +40,8 @@ token_cache.json
 
 preprod_scan_state.pickle
 preprod_scan_state.pickle.tmp
+
+mapper_scan_cache.pickle
+mapper_scan_cache.pickle.tmp
+preprod_scan_cache.pickle
+preprod_scan_cache.pickle.tmp
