@@ -252,7 +252,7 @@
             const p = (flat, perMode) => emode === 'all' ? (m[flat] || 0) : pick(m[perMode], 0);
             let allSets, ownSets;
             if (m.profile_ranked_sets == null
-                || (emode !== 'all' && m.profile_ranked_by_mode == null)) {
+                || (emode !== 'all' && !mapperData.profile_modes)) {
                 allSets = g('sets'); ownSets = g('ownSets');
             } else {
                 ownSets = p('profile_ranked_sets', 'profile_ranked_by_mode')

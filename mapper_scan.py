@@ -587,6 +587,9 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         'total_mappers': len(all_ids),
         'collab_credit': state['owners_mode'] != 'none',
         'names_current': names_current,
+        # Firebase drops an empty object, so a mapper with nothing in a category loses its
+        # mode split. One flag for the whole scan says the split was read, per row or not.
+        'profile_modes': bool(profiles),
         'mappers': mappers,
     }
 
