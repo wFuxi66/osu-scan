@@ -39,6 +39,9 @@ TOP_N = None  # keep every mapper: the whole ladder is ~8k entries
 RETRY_WAITS = (0, 5, 15, 45, 120, 300, 600)
 # The token endpoint throttles too, and it hands back None rather than raising.
 TOKEN_WAITS = (0, 30, 90, 300, 600)
+# Longest throttle worth sitting through, in case a stray Retry-After says something absurd.
+# The observed wait is ~28 minutes; the scan has hours, so the cap is slack, not a budget.
+TOKEN_THROTTLE_CAP = 40 * 60
 CHECKPOINT_EVERY = 20  # pages
 STATE_PATH = os.environ.get('MAPPER_SCAN_STATE', 'mapper_scan_state.pickle')
 # Verified cap: asking for 51 ids returns 50 with no error, so never chunk larger.
@@ -73,6 +76,7 @@ def authenticate():
     silent one for someone who did, whose token endpoint is merely throttled.
     """
     configured = bool(scan_logic.CLIENT_ID and scan_logic.CLIENT_SECRET)
+    throttled = False
     for wait in TOKEN_WAITS:
         if wait:
             print(f"Could not get an API token, retrying in {wait}s...", flush=True)
@@ -80,12 +84,32 @@ def authenticate():
         token = scan_logic.get_token()
         if token:
             return token
+
+        held = scan_logic.token_retry_after
+        if held:
+            # TOKEN_WAITS adds up to ~17 minutes, but a throttled token endpoint asks for
+            # ~28. Escalating politely through the rest of the attempts just spends them all
+            # on a door that is not open yet, and then blames the credentials. Wait the time
+            # it actually asked for instead.
+            throttled = True
+            held = min(held, TOKEN_THROTTLE_CAP)
+            print(f"Waiting out the {held / 60:.0f} min throttle rather than spending the "
+                  f"remaining attempts on a closed door.", flush=True)
+            time.sleep(held)
+            token = scan_logic.get_token()
+            if token:
+                return token
+
         if not configured:
             return None
     raise RuntimeError(
-        "osu! credentials are configured but no token could be obtained. Refusing to fall "
-        "back to the public search, which would publish a ladder without collab credit or "
-        "explicit mapsets.")
+        "osu! credentials are configured but no token could be obtained"
+        + (", and the token endpoint was throttling rather than refusing - so this is a rate"
+           " limit to wait out, not a credentials problem." if throttled else
+           ". The endpoint refused them rather than throttling, so check OSU_CLIENT_ID and"
+           " OSU_CLIENT_SECRET.")
+        + " Refusing to fall back to the public search, which would publish a ladder "
+          "without collab credit or explicit mapsets.")
 
 
 class RateLimiter:

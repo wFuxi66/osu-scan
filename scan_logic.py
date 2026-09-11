@@ -21,6 +21,13 @@ if not CLIENT_ID or not CLIENT_SECRET:
 
 TOKEN_CACHE_FILE = 'token_cache.json'
 
+# Set by get_token() when the token endpoint throttled us: the seconds it asked us to wait.
+# Cleared to None on every other outcome. Callers that retry read this to tell "wait, then
+# ask again" apart from "these credentials are wrong" - from a bare None the two are
+# indistinguishable, and a scan that guesses wrong either gives up on a door that was about
+# to open, or hammers one that is never going to.
+token_retry_after = None
+
 
 def get_token():
     """Obtains a client credentials token, reusing the cached one until it nears expiry.
@@ -28,7 +35,12 @@ def get_token():
     A token lasts a day, but the token endpoint throttles hard: a handful of requests earns
     a 429 with a ~28 minute Retry-After that reads exactly like bad credentials. Caching it
     to disk means every process and every re-run shares the one token.
+
+    Returns None on any failure, and sets `token_retry_after` when that failure was a
+    throttle rather than a refusal.
     """
+    global token_retry_after
+    token_retry_after = None
     try:
         with open(TOKEN_CACHE_FILE) as f:
             cached = json.load(f)
@@ -45,6 +57,19 @@ def get_token():
     }
     try:
         response = requests.post(TOKEN_URL, data=data, timeout=10)
+        if response.status_code == 429:
+            try:
+                token_retry_after = max(1.0, float(response.headers.get('Retry-After') or 1800))
+            except ValueError:
+                token_retry_after = 1800.0
+            print(f"Token endpoint is throttling us, not refusing us: it wants "
+                  f"{token_retry_after / 60:.0f} more minutes. Credentials are fine.")
+            return None
+        if response.status_code in (401, 403):
+            # Worth saying plainly: this is the one token failure waiting cannot fix.
+            print(f"Token endpoint refused the credentials ({response.status_code}). "
+                  f"Check OSU_CLIENT_ID and OSU_CLIENT_SECRET.")
+            return None
         response.raise_for_status()
         payload = response.json()
         token = payload['access_token']
