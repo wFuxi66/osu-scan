@@ -103,10 +103,9 @@
                 + 'participation under "As guest". No counting of our own, so they match a profile.',
             'Loved sets join the hosted figure when loved is on. osu! does not split loved out of guest '
                 + 'participation, so those stay in it either way.',
-            'A profile prints one number per category and no split by mode, so we read the categories '
-                + 'themselves for that. A mapset carrying two modes counts once in each, which is why '
-                + 'the modes can add up to more than the figure on "All".'],
-            scope: true, loved: true, modes: true,
+            'A profile publishes one number per category and not a breakdown by game mode, which is why '
+                + 'this board has no mode filter.'],
+            scope: true, loved: true, modes: false,
         },
     };
 
@@ -246,18 +245,14 @@
             }
 
             // osu! publishes these on every profile and that is the number people check
-            // against; our own crawl reaches the search index, which runs a few sets short
-            // of it. The scan pages each category for the mode split, so a mode gets the
-            // official figure too — only a scan from before that pass falls back.
-            const p = (flat, perMode) => emode === 'all' ? (m[flat] || 0) : pick(m[perMode], 0);
+            // against; our own crawl never sees approved or qualified sets. Older scans
+            // have no profile figures, so the crawled count stays as the fallback.
             let allSets, ownSets;
-            if (m.profile_ranked_sets == null
-                || (emode !== 'all' && !mapperData.profile_modes)) {
+            if (m.profile_ranked_sets == null) {
                 allSets = g('sets'); ownSets = g('ownSets');
             } else {
-                ownSets = p('profile_ranked_sets', 'profile_ranked_by_mode')
-                    + (withLoved ? p('profile_loved_sets', 'profile_loved_by_mode') : 0);
-                allSets = ownSets + p('profile_guest_sets', 'profile_guest_by_mode');
+                ownSets = m.profile_ranked_sets + (withLoved ? m.profile_loved_sets : 0);
+                allSets = ownSets + m.profile_guest_sets;
             }
 
             out.push({
