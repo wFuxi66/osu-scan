@@ -1,533 +1,1477 @@
-/* Shared styles for the app pages (index, leaderboard).
-   results.html keeps its own inline CSS on purpose: it is served as a
-   standalone downloadable report and must render without this file. */
-
 :root {
-    --bg: #1a1a2e;
-    --surface: #16213e;
-    --line: #0f3460;
-    --line-soft: rgba(15, 52, 96, 0.5);
-    --accent: #e94560;
-    --accent-hot: #ff2e63;
-    --accent-soft: #ff66aa;
-    --info: #4facfe;
-    --text: #fff;
-    --text-dim: #aeb2b8;
-    --text-faint: #666;
-    --radius: 8px;
+    color-scheme: dark;
+
+    /* Default: deep indigo, a blue that has gone violet. Surfaces climb in steps you can
+       actually see, so the page has structure without a single flat black. */
+    --paper: #15132e;
+    --card: #1e1b40;
+    --sunk: #272252;
+    --line: #363068;
+    --line-strong: #4d4694;
+
+    --ink: #f0eefc;
+    --mute: #bab4e6;
+    --faint: #948ec9;
+
+    --pink: #ff5f9e;
+    --pink-hot: #ff89b8;
+    --on-pink: #2b0718;
+
+    --osu: #ff5f9e;
+    --taiko: #ff9457;
+    --catch: #4ed99a;
+    --mania: #74b4ff;
+
+    --gold-bg: #e9b53a;
+    --gold-ink: #2a1e00;
+    --silver-bg: #b9c0e8;
+    --silver-ink: #1b1c33;
+    --bronze-bg: #cf7f45;
+    --bronze-ink: #2a1200;
+
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 18px;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .32), 0 8px 24px rgba(0, 0, 0, .26);
+    --shell: 1120px;
 }
 
-* {
+/* The alternate: the cookie ramp, anchored on #a8846a. Surfaces differ by how much light
+   is in them rather than by hue, so there is depth without a single grey. */
+:root[data-theme="light"] {
+    color-scheme: light;
+
+    --oat: #f0e6d7;
+    --dough: #e7d9c4;
+    --biscuit: #dcc9ae;
+    --sand: #cdb494;
+    --caramel: #a8846a;
+    --grounds: #2d2119;
+
+    --paper: var(--dough);
+    --card: var(--oat);
+    --sunk: var(--biscuit);
+    --line: var(--sand);
+    --line-strong: var(--caramel);
+
+    --ink: var(--grounds);
+    --mute: #5a4536;
+    --faint: #614b3a;
+
+    --pink: #a8244e;
+    --pink-hot: #85183a;
+    --on-pink: #ffffff;
+
+    --osu: #a8244e;
+    --taiko: #9a4f17;
+    --catch: #35663c;
+    --mania: #3a527e;
+
+    --gold-bg: #c8941d;
+    --gold-ink: #2b1f00;
+    --silver-bg: #9d8d76;
+    --silver-ink: #241a12;
+    --bronze-bg: #a05f2c;
+    --bronze-ink: #ffffff;
+
+    --shadow: 0 1px 2px rgba(45, 33, 25, .08), 0 6px 18px rgba(45, 33, 25, .07);
+}
+
+/* The mark is inked dark so it reads on the light ramp; on indigo the original, whose
+   highlights are white, is the one that reads. */
+:root .brand .mark-light,
+:root[data-theme="light"] .brand .mark-dark {
+    display: none;
+}
+
+:root[data-theme="light"] .brand .mark-light {
+    display: block;
+}
+
+*,
+*::before,
+*::after {
     box-sizing: border-box;
 }
 
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: var(--bg);
-    color: var(--text);
-    margin: 0;
-    padding: 32px 16px;
-    line-height: 1.5;
-}
-
-.container {
-    background: var(--surface);
-    border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
-    padding: 32px;
-    margin: 0 auto;
-    max-width: 860px;
-}
-
-h1 {
-    color: var(--text);
-    font-size: 26px;
-    margin: 0 0 20px;
-    padding-bottom: 12px;
-    border-bottom: 2px solid var(--accent);
-}
-
-a {
-    color: var(--accent-soft);
-}
-
-.back-link {
-    display: inline-block;
-    margin-bottom: 18px;
-    color: var(--accent);
-    text-decoration: none;
-    font-weight: bold;
-}
-
-.back-link:hover {
-    color: var(--accent-soft);
-}
-
-.hidden {
-    display: none !important;
-}
-
-/* Layout rules like `display: flex` otherwise beat the hidden attribute. */
 [hidden] {
     display: none !important;
 }
 
-/* --- Buttons & inputs --- */
-
-button {
-    font-family: inherit;
-    font-size: 16px;
-    padding: 12px 24px;
-    background-color: var(--accent);
-    color: var(--text);
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: background 0.2s;
+html {
+    -webkit-text-size-adjust: 100%;
 }
 
-button:hover {
-    background-color: var(--accent-hot);
+body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: Archivo, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: 15.5px;
+    line-height: 1.55;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
 }
 
-input[type="text"],
-input[type="number"] {
-    font-family: inherit;
-    padding: 12px;
-    border-radius: 6px;
-    border: 1px solid var(--line);
-    background: var(--line);
-    color: var(--text);
-    font-size: 16px;
-    outline: none;
-    transition: border-color 0.2s;
-}
-
-input[type="text"]:focus {
-    border-color: var(--accent);
+a {
+    color: inherit;
+    text-decoration: none;
 }
 
 :focus-visible {
-    outline: 2px solid var(--accent-soft);
-    outline-offset: 2px;
+    outline: 2px solid var(--pink);
+    outline-offset: 3px;
+    border-radius: 4px;
 }
 
-/* --- Tabs --- */
+::selection {
+    background: var(--pink);
+    color: var(--on-pink);
+}
 
-.mode-tabs,
-.scope-tabs,
-.section-tabs {
+.wide {
+    font-stretch: 125%;
+    letter-spacing: -.005em;
+}
+
+/* ---------------------------------------------------------------- shell */
+
+.shell {
+    max-width: var(--shell);
+    margin: 0 auto;
+    padding: 0 24px;
+}
+
+.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: color-mix(in srgb, var(--paper) 86%, transparent);
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--line);
+}
+
+.topbar .shell {
     display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
-    /* Tabs stay on one scrollable row rather than reflowing the page on narrow screens. */
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
+    align-items: center;
+    gap: 18px;
+    height: 60px;
 }
 
-.mode-tabs::-webkit-scrollbar,
-.scope-tabs::-webkit-scrollbar,
-.section-tabs::-webkit-scrollbar {
-    display: none;
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-stretch: 125%;
+    font-weight: 700;
+    font-size: 17px;
+    letter-spacing: -.02em;
+    margin-right: auto;
 }
 
-.mode-tab,
-.scope-tab,
-.section-tab {
-    flex: 0 0 auto;
-    background: transparent;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    color: var(--text-dim);
-    cursor: pointer;
-    transition: all 0.2s;
-    white-space: nowrap;
-}
-
-.mode-tab,
-.scope-tab {
-    padding: 6px 14px;
-    font-size: 13px;
-    background: var(--line-soft);
-    font-family: inherit;
-}
-
-.section-tab {
-    padding: 9px 18px;
-    font-size: 14px;
-    font-family: inherit;
-}
-
-.mode-tab:hover,
-.scope-tab:hover,
-.section-tab:hover {
-    border-color: var(--accent);
-    color: var(--text);
-}
-
-.mode-tab.active,
-.scope-tab.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--text);
-}
-
-.section-tab.active {
-    background: rgba(233, 69, 96, 0.15);
-    border-color: var(--accent);
-    color: var(--text);
-}
-
-/* --- Sections --- */
-
-.leaderboard-section {
-    display: none;
-}
-
-.leaderboard-section.active {
+.brand .mark {
+    width: 28px;
+    height: 28px;
+    flex: none;
     display: block;
 }
 
-/* --- Tables --- */
-
-.table-wrapper {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+.brand em {
+    font-style: normal;
+    color: var(--pink);
 }
 
-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 10px;
-    table-layout: fixed;
+.nav {
+    display: flex;
+    gap: 4px;
 }
 
-th {
-    background-color: var(--line);
-    color: var(--text);
-    padding: 12px;
-    text-align: left;
+.nav a {
+    padding: 7px 13px;
+    border-radius: 999px;
+    color: var(--mute);
     font-size: 14px;
+    font-weight: 500;
 }
 
-td {
-    padding: 12px;
+.nav a:hover {
+    color: var(--ink);
+    background: var(--sunk);
+}
+
+.nav a[aria-current="page"] {
+    color: var(--ink);
+    background: var(--sunk);
+    font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- theme */
+
+.theme-toggle {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--mute);
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    flex: none;
+}
+
+.theme-toggle:hover {
+    color: var(--ink);
+    border-color: var(--line-strong);
+}
+
+/* ---------------------------------------------------------------- headings */
+
+.page-head {
+    padding: 46px 0 24px;
+}
+
+.page-head h1 {
+    font-stretch: 125%;
+    font-weight: 700;
+    font-size: clamp(30px, 5vw, 46px);
+    line-height: 1.04;
+    letter-spacing: -.03em;
+    margin: 0 0 10px;
+}
+
+.page-head p {
+    margin: 0;
+    color: var(--mute);
+    max-width: 60ch;
+    font-size: 15.5px;
+}
+
+/* ---------------------------------------------------------------- controls */
+
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 20px;
+    padding-bottom: 18px;
+}
+
+.control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.control > label {
+    font-size: 12.5px;
+    color: var(--faint);
+    white-space: nowrap;
+}
+
+.seg {
+    display: flex;
+    gap: 2px;
+    background: var(--sunk);
+    border-radius: 999px;
+    padding: 3px;
+}
+
+.seg button {
+    appearance: none;
+    border: 0;
+    background: none;
+    border-radius: 999px;
+    color: var(--mute);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 500;
+    padding: 5px 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color .12s, background .12s;
+}
+
+.seg button:hover {
+    color: var(--ink);
+}
+
+.seg button[aria-pressed="true"] {
+    background: var(--card);
+    color: var(--ink);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(56, 44, 30, .16);
+}
+
+.seg.on-mode button[aria-pressed="true"] {
+    background: var(--pink);
+    color: var(--on-pink);
+}
+
+.search {
+    position: relative;
+    flex: 1 1 240px;
+    min-width: 190px;
+}
+
+.search input {
+    width: 100%;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--ink);
+    font: inherit;
+    font-size: 14px;
+    padding: 9px 36px 9px 16px;
+}
+
+.search input::placeholder {
+    color: var(--faint);
+}
+
+.search input:focus {
+    border-color: var(--pink);
+}
+
+.search .clear {
+    position: absolute;
+    right: 5px;
+    top: 5px;
+    width: 27px;
+    height: 27px;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    color: var(--faint);
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.search .clear:hover {
+    color: var(--ink);
+    background: var(--sunk);
+}
+
+/* ---------------------------------------------------------------- tabs */
+
+.tabs {
+    display: flex;
+    gap: 26px;
     border-bottom: 1px solid var(--line);
-    color: inherit;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.tabs button {
+    appearance: none;
+    background: none;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: var(--faint);
+    font: inherit;
+    font-size: 15px;
+    font-weight: 500;
+    padding: 11px 0 12px;
+    margin-bottom: -1px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color .12s;
+}
+
+.tabs button:hover {
+    color: var(--ink);
+}
+
+.tabs button[aria-selected="true"] {
+    color: var(--ink);
+    font-weight: 600;
+    border-bottom-color: var(--pink);
+}
+
+/* ---------------------------------------------------------------- podium */
+
+.podium {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    /* badge · avatar · name · tally · unit. The three cards share these rows, so first
+       place can carry a wider avatar and a bigger number without dragging the other two
+       out of line. Centring each card's contents on its own was what staggered them.
+       Six rows, the last for the optional footnote chip: a subgrid gets no implicit
+       tracks, so a row short and the chip lands on top of the unit label. */
+    grid-template-rows: repeat(6, auto);
+    gap: 0 12px;
+    margin: 24px 0 6px;
+}
+
+/* Each place is a column: badge, faces, names, tally. First keeps the wider avatar and
+   the bigger number, so the ranking still reads without three different card widths. */
+.plinth {
+    display: grid;
+    grid-row: 1 / -1;
+    grid-template-rows: subgrid;
+    row-gap: 10px;
+    /* A shared row is as tall as the tallest card's content, so second and third place
+       need centring inside it: left to the top they hang off the first-place avatar. */
+    place-items: center;
+    text-align: center;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--tint-bg);
+    border-radius: var(--r-lg);
+    padding: 18px 16px 20px;
+    box-shadow: var(--shadow);
+}
+
+.plinth .place {
+    font-stretch: 125%;
+    font-weight: 700;
+    font-size: 15px;
+    line-height: 1;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    background: var(--tint-bg);
+    color: var(--tint-ink);
+}
+
+.plinth.p1 {
+    --tint-bg: var(--gold-bg);
+    --tint-ink: var(--gold-ink);
+}
+
+.plinth.p2 {
+    --tint-bg: var(--silver-bg);
+    --tint-ink: var(--silver-ink);
+}
+
+.plinth.p3 {
+    --tint-bg: var(--bronze-bg);
+    --tint-ink: var(--bronze-ink);
+}
+
+.plinth .face {
+    width: 52px;
+    height: 52px;
+    border-radius: 13px;
+    font-size: 18px;
+}
+
+.plinth.p1 .face {
+    width: 64px;
+    height: 64px;
+    border-radius: 16px;
+    font-size: 22px;
+}
+
+.plinth .body {
+    display: grid;
+    grid-row: span 3;
+    grid-template-rows: subgrid;
+    row-gap: 0;
+    width: 100%;
+    min-width: 0;
+}
+
+/* Centred and free to wrap: a pair of long names gets a second line rather than two
+   ellipses, which is the one thing that made the podium unreadable on a narrow card. */
+.plinth .who {
+    font-weight: 600;
+    font-size: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 2px 8px;
+    overflow-wrap: anywhere;
+}
+
+.plinth.p1 .who {
+    font-size: 18px;
+}
+
+.plinth .who a:hover {
+    color: var(--pink);
+}
+
+.plinth .tally {
+    font-stretch: 125%;
+    font-weight: 700;
+    font-size: clamp(19px, 2.2vw, 27px);
+    line-height: 1.25;
+    margin-top: 6px;
+}
+
+.plinth.p1 .tally {
+    font-size: clamp(22px, 2.8vw, 34px);
+}
+
+.plinth .unit {
+    font-size: 13px;
+    color: var(--faint);
+}
+
+.plinth .extra {
+    margin-top: 2px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--sunk);
+    color: var(--mute);
+    font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- list */
+
+.list {
+    margin: 18px 0 0;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+}
+
+.list-head,
+.row {
+    display: grid;
+    grid-template-columns: 44px 36px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0 14px;
+}
+
+.list-head {
+    padding: 10px 16px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--faint);
+    background: var(--sunk);
+    border-bottom: 1px solid var(--line);
+}
+
+/* The ranks below are flush right in their column; the # sat flush left, a good 30px off. */
+.list-head > span:first-child,
+.list-head .n {
+    text-align: right;
+}
+
+.row {
+    padding: 12.5px 16px;
+    border-bottom: 1px solid var(--line);
+}
+
+.row:last-child {
+    border-bottom: 0;
+}
+
+.row:hover {
+    background: var(--sunk);
+}
+
+.row .rank {
+    font-stretch: 125%;
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--faint);
+    text-align: right;
+}
+
+.row.top .rank {
+    display: inline-grid;
+    place-items: center;
+    justify-self: end;
+    width: 26px;
+    height: 24px;
+    border-radius: 6px;
+    background: var(--tint-bg);
+    color: var(--tint-ink);
+    font-weight: 700;
+}
+
+.row.r1 {
+    --tint-bg: var(--gold-bg);
+    --tint-ink: var(--gold-ink);
+}
+
+.row.r2 {
+    --tint-bg: var(--silver-bg);
+    --tint-ink: var(--silver-ink);
+}
+
+.row.r3 {
+    --tint-bg: var(--bronze-bg);
+    --tint-ink: var(--bronze-ink);
+}
+
+.face {
+    position: relative;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    background: var(--sunk);
+    color: var(--faint);
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+}
+
+/* A pair is one entry, so it gets one avatar slot: the two faces overlapped, each ringed
+   in the page colour so they read as two people and not one torn picture. Cutting them
+   into a single tile along a diagonal was clever and unreadable at 36px. */
+.duo-face {
+    display: flex;
+    flex: none;
+}
+
+.duo-face .face {
+    box-shadow: 0 0 0 2px var(--paper);
+}
+
+.duo-face .face + .face {
+    margin-left: -12px;
+}
+
+/* A pair takes two faces' worth of room, so the avatar column widens for that board, and
+   the count column is pinned: sized to its own row it dragged every gauge out of line. */
+.list.duos .list-head,
+.list.duos .row {
+    grid-template-columns: 44px 60px minmax(0, 1fr) 96px;
+}
+
+/* Two names and a count of 118 left most of the row empty. The gauge takes that space
+   and puts the shape of the falloff in it: full at the top, a sliver deep in the tail.
+   Fixed width and pushed right, so every gauge starts on the same line and the lengths
+   are comparable down the column; sized off the names, it would be a ragged mess. */
+.gauge {
+    flex: none;
+    width: 230px;
+    margin-left: auto;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--line);
+    overflow: hidden;
+}
+
+.gauge::before {
+    content: "";
+    display: block;
+    width: var(--p);
+    height: 100%;
+    border-radius: 3px;
+    background: var(--line-strong);
+}
+
+/* The podium already gives each pair a card of its own; a gauge there measures nothing. */
+.plinth .gauge {
+    display: none;
+}
+
+.who .pair {
+    color: var(--faint);
+    font-size: .82em;
+    flex: none;
+}
+
+.face img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.row .who {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.row .who a {
+    font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-tbody tr {
-    color: #e0e0e0;
+.row .who a:hover {
+    color: var(--pink);
 }
 
-tr:nth-child(even) {
-    background-color: rgba(15, 52, 96, 0.3);
+.who a.gone {
+    color: var(--faint);
+    font-style: italic;
+    font-weight: 400;
 }
 
-tr:hover {
-    background-color: rgba(233, 69, 96, 0.15);
+.row .n {
+    font-stretch: 125%;
+    font-weight: 600;
+    font-size: 17.5px;
+    text-align: right;
+    white-space: nowrap;
 }
 
-/* Column sizing: rank is fixed, the name column absorbs the slack, counts sit right. */
-.col-rank {
-    width: 56px;
+.row .sub {
+    display: block;
+    font-stretch: 100%;
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--faint);
 }
 
-.col-count {
-    width: 150px;
+.modes {
+    display: inline-flex;
+    gap: 4px;
+    flex: none;
 }
 
-.col-plays {
-    width: 260px;
-}
-
-.rank-gold {
-    color: #ffd700;
-    font-weight: bold;
-}
-
-.rank-silver {
-    color: #c0c0c0;
-    font-weight: bold;
-}
-
-.rank-bronze {
-    color: #cd7f32;
-    font-weight: bold;
-}
-
-.username-link {
-    color: inherit;
-    text-decoration: none;
-}
-
-.username-link:hover {
-    color: var(--accent-soft);
-    text-decoration: underline;
-}
-
+/* Drawn, not masked. These are cross-origin and i.ppy.sh sends no CORS header, so as a
+   mask-image the browser dropped them and every icon painted nothing at all. Their alpha
+   is a plain disc in any case: the mark is in the colour, which a mask throws away. 16px
+   is their native size, so they land on the pixel grid. */
 .mode-icon {
     width: 16px;
     height: 16px;
-    vertical-align: middle;
-    opacity: 0.75;
+    flex: none;
+    background: var(--glyph) center / contain no-repeat;
 }
 
-.mode-icons {
-    display: inline-flex;
-    gap: 3px;
-    margin-left: 6px;
-    vertical-align: middle;
+.mode-icon.osu {
+    --glyph: url("https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67");
 }
 
-.duo-separator {
-    color: var(--accent);
-    margin: 0 4px;
+.mode-icon.taiko {
+    --glyph: url("https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67");
 }
 
-.loved-count {
-    color: var(--accent-soft);
-    font-size: 12px;
-    margin-left: 5px;
+.mode-icon.catch,
+.mode-icon.fruits {
+    --glyph: url("https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67");
 }
 
-/* --- Search --- */
+.mode-icon.mania {
+    --glyph: url("https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67");
+}
 
-.search-form {
+.legend {
     display: flex;
-    gap: 8px;
-    margin-bottom: 14px;
+    flex-wrap: wrap;
+    gap: 14px;
+    padding: 14px 2px 0;
+    font-size: 12.5px;
+    color: var(--mute);
 }
 
-.search-input {
-    flex: 1;
-    min-width: 0;
-    padding: 10px 14px;
-    background: var(--line-soft);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    color: var(--text);
-    font-size: 14px;
-    outline: none;
-    transition: border-color 0.2s;
+.legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 
-.search-input::placeholder {
-    color: var(--text-faint);
+/* ---------------------------------------------------------------- notes, states */
+
+.note {
+    margin: 16px 0 0;
+    font-size: 13.5px;
+    color: var(--mute);
+    max-width: 78ch;
 }
 
-.search-input:focus {
-    border-color: var(--accent);
-}
-
-.search-btn {
-    flex: 0 0 auto;
-    padding: 10px 16px;
-    background: rgba(233, 69, 96, 0.2);
-    border: 1px solid var(--accent);
-    border-radius: 6px;
-    color: var(--accent);
-    font-size: 14px;
+.note summary {
     cursor: pointer;
-    transition: all 0.2s;
+    list-style: none;
+    color: var(--ink);
+    font-weight: 500;
 }
 
-.search-btn:hover {
-    background: var(--accent);
-    color: var(--text);
+.note summary::-webkit-details-marker {
+    display: none;
 }
 
-/* --- Pagination --- */
+.note summary::before {
+    content: "+";
+    color: var(--pink);
+    display: inline-block;
+    width: 15px;
+    font-weight: 700;
+}
 
-.pagination {
+.note[open] summary::before {
+    content: "–";
+}
+
+.note p {
+    margin: 8px 0 0 15px;
+}
+
+.stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 16px 0 0;
+}
+
+.stats span {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--faint);
+}
+
+.stats b {
+    font-stretch: 125%;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--ink);
+}
+
+.blank {
+    padding: 48px 16px;
+    text-align: center;
+    color: var(--mute);
+}
+
+.blank strong {
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.pager {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    margin-top: 16px;
-    user-select: none;
+    gap: 10px;
+    margin: 20px 0 0;
+    font-size: 13.5px;
+    color: var(--mute);
 }
 
-.pagination-btn {
-    background: var(--line-soft);
+.pager button,
+.btn-ghost {
+    appearance: none;
+    background: var(--card);
     border: 1px solid var(--line);
-    color: var(--text-dim);
-    padding: 6px 12px;
-    border-radius: 4px;
+    border-radius: 999px;
+    color: var(--ink);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 500;
+    padding: 7px 15px;
     cursor: pointer;
+}
+
+.pager button:hover:not(:disabled),
+.btn-ghost:hover {
+    border-color: var(--line-strong);
+    background: var(--sunk);
+}
+
+.pager button:disabled {
+    opacity: .4;
+    cursor: default;
+}
+
+.pager input {
+    width: 58px;
+    text-align: center;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    font: inherit;
+    padding: 5px 4px;
+}
+
+/* ---------------------------------------------------------------- home */
+
+.hero {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
+    grid-template-areas:
+        "lead scan"
+        "extra scan";
+    /* The panel is taller than the copy beside it. Left to auto rows, that surplus was
+       split between them and opened a hole under the lede; the second row takes it all
+       and the small print stays put under the paragraph it belongs to. */
+    grid-template-rows: auto 1fr;
+    gap: 0 56px;
+    /* start, not center: the panel grows while a scan runs and must not shove the copy */
+    align-content: start;
+    padding: 60px 0 44px;
+}
+
+.hero-lead {
+    grid-area: lead;
+}
+
+.hero-extra {
+    grid-area: extra;
+    margin-top: 26px;
+}
+
+.scanbox {
+    grid-area: scan;
+}
+
+.hero-lead h1 {
+    font-stretch: 125%;
+    font-weight: 700;
+    font-size: clamp(32px, 3.7vw, 46px);
+    line-height: 1.03;
+    letter-spacing: -.035em;
+    margin: 0 0 16px;
+}
+
+.hero-lead p {
+    margin: 0;
+    color: var(--mute);
+    font-size: 16.5px;
+}
+
+.lede-more {
+    margin: 0;
+    font-size: 14.5px;
+    color: var(--faint);
+}
+
+.scanbox {
+    background:
+        radial-gradient(130% 100% at 50% -30%, color-mix(in srgb, var(--pink) 26%, transparent), transparent 66%),
+        var(--card);
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    padding: 26px 24px 24px;
+    box-shadow: 0 14px 34px rgba(45, 33, 25, .10);
+}
+
+.sigil {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    margin: 2px 0 20px;
+}
+
+.sigil img {
+    width: 74px;
+    height: 74px;
+}
+
+.sigil .mark-light,
+:root[data-theme="light"] .sigil .mark-dark {
+    display: none;
+}
+
+:root[data-theme="light"] .sigil .mark-light {
+    display: block;
+}
+
+/* Live type, not the wordmark baked into the logo: it stays crisp at any size and no
+   longer needs a dark plate to be legible. */
+.sigil b {
+    font-stretch: 125%;
+    font-weight: 700;
+    font-size: 27px;
+    letter-spacing: -.03em;
+    line-height: 1;
+}
+
+.sigil b em {
+    font-style: normal;
+    color: var(--pink);
+}
+
+.namefield {
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
+}
+
+.namefield input {
+    flex: 1;
+    min-width: 0;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    color: var(--ink);
+    font: inherit;
+    font-size: 16px;
+    padding: 13px 16px;
+}
+
+.namefield input::placeholder {
+    color: var(--faint);
+}
+
+.namefield input:focus {
+    border-color: var(--pink);
+    outline: none;
+}
+
+.btn {
+    appearance: none;
+    border: 0;
+    border-radius: var(--r-md);
+    background: var(--pink);
+    color: var(--on-pink);
+    font: inherit;
+    font-stretch: 125%;
+    font-weight: 700;
+    font-size: 15px;
+    padding: 0 24px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .14s;
+}
+
+.btn:hover {
+    background: var(--pink-hot);
+}
+
+.btn:disabled {
+    opacity: .55;
+    cursor: default;
+}
+
+.modes-grid {
+    display: grid;
+    gap: 7px;
+    margin: 14px 0 0;
+}
+
+.pick {
+    position: relative;
+    display: block;
+    background: var(--paper);
+    border: 1px solid transparent;
+    border-radius: var(--r-md);
+    padding: 11px 14px;
+    cursor: pointer;
+    transition: border-color .14s, background .14s;
+}
+
+.pick:hover {
+    border-color: var(--line-strong);
+}
+
+.pick input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+}
+
+.pick strong {
+    display: block;
+    font-size: 14.5px;
+    font-weight: 600;
+    margin-bottom: 1px;
+}
+
+.pick span {
+    display: block;
+    font-size: 13px;
+    color: var(--mute);
+    line-height: 1.4;
+}
+
+.pick:has(input:checked) {
+    border-color: var(--pink);
+    background: var(--sunk);
+}
+
+.pick:has(input:focus-visible) {
+    outline: 2px solid var(--pink);
+    outline-offset: 2px;
+}
+
+/* progress */
+
+.progress {
+    margin: 16px 0 0;
+}
+
+.bar {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--sunk);
+    overflow: hidden;
+}
+
+.bar i {
+    display: block;
+    height: 100%;
+    width: 34%;
+    background: var(--pink);
+    animation: slide 1.15s ease-in-out infinite;
+}
+
+@keyframes slide {
+    0% {
+        transform: translateX(-100%);
+    }
+
+    100% {
+        transform: translateX(390%);
+    }
+}
+
+.progress p {
+    margin: 10px 0 0;
+    color: var(--mute);
     font-size: 14px;
-    transition: all 0.2s;
 }
 
-.pagination-btn:hover {
-    border-color: var(--accent);
-    color: var(--text);
+.progress .actions {
+    padding-top: 10px;
 }
 
-.pagination-btn.disabled {
-    opacity: 0.35;
-    pointer-events: none;
+.alert {
+    margin: 14px 0 0;
+    padding: 12px 15px;
+    border-radius: var(--r-md);
+    border: 1px solid var(--pink);
+    background: var(--sunk);
+    color: var(--ink);
+    font-size: 14px;
 }
 
-.pagination-info {
+/* ---------------------------------------------------------------- results head */
+
+.subject {
     display: flex;
     align-items: center;
-    gap: 4px;
-    color: var(--text-dim);
-    font-size: 14px;
+    gap: 16px;
+    padding: 40px 0 8px;
 }
 
-.page-input {
-    width: 46px;
-    text-align: center;
-    background: var(--line-soft);
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    color: var(--text);
-    font-size: 14px;
-    padding: 4px;
-    outline: none;
-    transition: border-color 0.2s;
-    -moz-appearance: textfield;
+.subject img {
+    width: 66px;
+    height: 66px;
+    border-radius: var(--r-md);
+    background: var(--sunk);
 }
 
-.page-input::-webkit-outer-spin-button,
-.page-input::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
+.subject .label {
+    font-size: 13px;
+    color: var(--faint);
 }
 
-.page-input:focus {
-    border-color: var(--accent);
+.subject h1 {
+    font-stretch: 125%;
+    font-weight: 700;
+    font-size: clamp(26px, 4vw, 38px);
+    line-height: 1.08;
+    letter-spacing: -.03em;
+    margin: 2px 0 0;
 }
 
-.next-scan {
-    color: var(--info);
-    margin-top: 5px;
-    display: inline-block;
+.actions {
+    display: flex;
+    gap: 10px;
+    padding: 16px 0 0;
+    flex-wrap: wrap;
 }
 
-/* --- Footer --- */
+/* ---------------------------------------------------------------- footer */
 
-.site-footer {
-    margin-top: 36px;
-    text-align: center;
-    font-size: 12px;
-    color: var(--text-faint);
+footer {
+    margin: 54px 0 0;
+    border-top: 1px solid var(--line);
+    padding: 22px 0 40px;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    font-size: 13.5px;
+    color: var(--mute);
 }
 
-.site-footer a {
-    color: var(--accent-soft);
+footer a {
+    color: var(--mute);
+    text-decoration: underline;
+    text-decoration-color: var(--line-strong);
+    text-underline-offset: 3px;
+}
+
+footer a:hover {
+    color: var(--pink);
+}
+
+.paypal {
+    margin-left: auto;
+    background: var(--pink);
+    color: var(--on-pink);
+    border-radius: 999px;
+    padding: 7px 16px;
+    font-weight: 600;
+    font-size: 13px;
     text-decoration: none;
 }
 
-.site-footer a:hover {
-    text-decoration: underline;
+.paypal:hover {
+    background: var(--pink-hot);
+    color: var(--on-pink);
 }
 
-.paypal-btn {
-    display: inline-block;
-    background: linear-gradient(135deg, var(--accent-soft) 0%, var(--accent) 100%);
-    color: var(--text) !important;
-    padding: 8px 16px;
-    border-radius: 20px;
-    text-decoration: none !important;
-    font-size: 13px;
-    font-weight: 500;
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 8px rgba(233, 69, 96, 0.3);
-    margin-left: 8px;
-}
+/* ---------------------------------------------------------------- responsive */
 
-.paypal-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 15px rgba(233, 69, 96, 0.5);
-}
-
-.scan-info {
-    margin-top: 15px;
-    font-size: 12px;
-    color: var(--text-faint);
-}
-
-.no-data,
-.loading-msg {
-    padding: 30px;
-    color: var(--text-faint);
-    font-size: 15px;
-    text-align: center;
-}
-
-/* --- Narrow screens --- */
-
-@media (max-width: 600px) {
-    body {
-        padding: 16px 10px;
+@media (max-width: 860px) {
+    .hero {
+        grid-template-columns: 1fr;
+        /* Title, then the instrument, then the small print: the natural reading order, and
+           every scan option still lands above the fold. */
+        grid-template-areas:
+            "lead"
+            "scan"
+            "extra";
+        grid-template-rows: none;
+        gap: 12px 0;
+        padding: 8px 0 24px;
     }
 
-    .container {
-        padding: 20px 16px;
+    .hero-extra {
+        margin-top: 6px;
     }
 
-    h1 {
-        font-size: 21px;
-    }
-
-    th,
-    td {
-        padding: 10px 8px;
-        font-size: 13px;
-    }
-
-    /* Secondary counts drop out; rank, name and the headline number stay. */
-    .col-optional {
+    /* The bar above already shows the mark and the name; repeating them inside the panel
+       costs the room the scan options need. */
+    .sigil {
         display: none;
     }
 
-    .col-rank {
-        width: 40px;
+    .hero-lead h1 {
+        font-size: 26px;
+        margin-bottom: 10px;
     }
 
-    .col-count {
-        width: 110px;
+    .hero-lead p {
+        font-size: 14.5px;
+        line-height: 1.45;
     }
 
-    .col-plays {
-        width: 118px;
+    .scanbox {
+        padding: 16px 14px 14px;
     }
 
-    .loved-count {
-        display: block;
-        margin-left: 0;
-        font-size: 11px;
-        /* The cell is nowrap; the loved note needs to wrap inside it instead of clipping. */
-        white-space: normal;
+    .modes-grid {
+        gap: 6px;
+        margin-top: 10px;
     }
 
-    .section-tab {
-        padding: 8px 14px;
-        font-size: 13px;
+    .pick {
+        padding: 7px 12px;
     }
 
-    .mode-tabs,
-    .scope-tabs,
-    .section-tabs {
-        flex-wrap: wrap;
-        overflow-x: visible;
+    .pick span {
+        line-height: 1.35;
+        font-size: 12.5px;
+    }
+
+    /* The mode row is wider than a small phone; let it scroll inside itself rather than
+       push the whole page sideways. */
+    .control {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .seg {
+        max-width: 100%;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .seg::-webkit-scrollbar {
+        display: none;
+    }
+
+    .scanbox {
+        padding: 18px 16px 16px;
+    }
+
+    .sigil {
+        margin-bottom: 14px;
+        gap: 6px;
+    }
+
+    .sigil img {
+        width: 52px;
+        height: 52px;
+    }
+
+    .sigil b {
+        font-size: 22px;
+    }
+
+    .namefield {
+        gap: 8px;
+    }
+
+    .namefield input {
+        padding: 11px 14px;
+        font-size: 15px;
+    }
+
+    .pick {
+        padding: 9px 12px;
+    }
+
+    .podium {
+        gap: 0 8px;
+    }
+}
+
+@media (max-width: 620px) {
+    .shell {
+        padding: 0 14px;
+    }
+
+    /* The name stays: the panel no longer repeats it, so the bar is where it lives. */
+    .topbar .shell {
+        gap: 6px;
+    }
+
+    .brand {
+        font-size: 15px;
+        gap: 7px;
+    }
+
+    .nav a {
+        padding: 7px 9px;
+        font-size: 13.5px;
+    }
+
+    .namefield {
+        flex-direction: column;
+    }
+
+    .btn {
+        padding: 12px 24px;
+    }
+
+    .list-head,
+    .row {
+        grid-template-columns: 30px 32px minmax(0, 1fr) auto;
+        gap: 0 10px;
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+
+    .face {
+        width: 32px;
+        height: 32px;
+        border-radius: 9px;
+        font-size: 12.5px;
+    }
+
+    /* One card per row now, so there are no neighbours to keep in line: the cards go back
+       to sizing their own rows, otherwise all three land on top of each other. */
+    .podium {
+        grid-template-columns: 1fr;
+        grid-template-rows: none;
+        gap: 8px;
+    }
+
+    .plinth,
+    .plinth .body {
+        grid-row: auto;
+        grid-template-rows: none;
+    }
+
+    .plinth .face {
+        width: 46px;
+        height: 46px;
+    }
+
+    .plinth.p1 .face {
+        width: 56px;
+        height: 56px;
+    }
+
+    .plinth.p1 .who {
+        font-size: 17px;
+    }
+
+    .list.duos .list-head,
+    .list.duos .row {
+        grid-template-columns: 30px 52px minmax(0, 1fr) auto;
+    }
+
+
+    .gauge {
+        display: none;
+    }
+
+    .row .n {
+        font-size: 16px;
+    }
+
+    .subject img {
+        width: 52px;
+        height: 52px;
     }
 }
 
 @media (prefers-reduced-motion: reduce) {
+    * {
+        transition: none !important;
+        animation: none !important;
+    }
 
-    *,
-    *::before,
-    *::after {
-        transition-duration: 0.01ms !important;
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
+    .bar i {
+        width: 100%;
+    }
+}
+
+.hero-links {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+}
+
+.hero-links > span {
+    display: block;
+    font-size: 13px;
+    color: var(--faint);
+    margin-bottom: 8px;
+}
+
+.hero-links a {
+    display: inline-block;
+    margin: 0 16px 4px 0;
+    font-size: 14.5px;
+    font-weight: 500;
+    color: var(--mute);
+    border-bottom: 1px solid var(--line-strong);
+    padding-bottom: 1px;
+}
+
+.hero-links a:hover {
+    color: var(--pink);
+    border-bottom-color: var(--pink);
+}
+
+/* Below 360px the bar cannot hold the name as well as the nav. */
+@media (max-width: 359px) {
+    .brand .word {
+        display: none;
     }
 }

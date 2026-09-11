@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, Response, jsonify
+from flask import Flask, render_template, request, Response, jsonify, redirect
 import gzip
 import json
 from dotenv import load_dotenv
@@ -209,25 +209,45 @@ def job_status(job_id):
 def results_view(cache_id):
     data = RESULTS_CACHE.get(cache_id)
     if not data:
-        return "Results expired or not found. <a href='/'>Go Back</a>"
-    return render_template('results.html', 
-                           username=data['username'], 
+        return render_template('results.html', expired=True), 404
+    return render_template('results.html',
+                           username=data['username'],
+                           user_id=data.get('user_id'),
                            leaderboard=data['leaderboard'],
                            title_prefix=data['title_prefix'],
                            cache_id=cache_id)
+
+
+def _inline_css():
+    """The stylesheet as text, for a report that has to stand on its own.
+
+    A downloaded file cannot reach url_for('static', ...): the href resolves against
+    wherever it was saved, so the export would open unstyled. Read once, then reused.
+    """
+    if not hasattr(_inline_css, 'cached'):
+        with open(os.path.join(app.static_folder, 'style.css'), encoding='utf-8') as f:
+            _inline_css.cached = f.read()
+    return _inline_css.cached
+
 
 @app.route('/download/<cache_id>')
 def download_report(cache_id):
     data = RESULTS_CACHE.get(cache_id)
     if not data:
         return "Results expired."
-        
-    html = render_template('results.html', 
-                           username=data['username'], 
+
+    # standalone drops the nav and inlines the CSS; cache_id=None hides the download link
+    # from the copy being downloaded.
+    html = render_template('results.html',
+                           username=data['username'],
+                           user_id=data.get('user_id'),
                            leaderboard=data['leaderboard'],
                            title_prefix=data['title_prefix'],
-                           cache_id=None)
-                           
+                           cache_id=None,
+                           standalone=True,
+                           inline_css=_inline_css())
+
+
     # Filename matches the page title: "{title_prefix} {username}.html"
     title_prefix = data.get('title_prefix', 'Results')
     username = data['username']
@@ -261,10 +281,11 @@ def get_leaderboard_data(path='leaderboard'):
 def leaderboard():
     return render_template('leaderboard.html')
 
-# ---- Redesign, served alongside the current site until it replaces it ----
+# ---- Firebase namespace ----
 
-# The redesign reads its own Firebase prefix, so a rehearsal scan can fill it without
-# touching what the live pages serve. Offline it falls back to the same local caches.
+# The site still reads the prefix the redesign was rehearsed against. The unprefixed paths
+# hold an older scan with no profile_* fields, so pointing at them would put crawl figures
+# back on the sets board. Set NEXT_FIREBASE_NS='' to cut over once a scan has filled them.
 NEXT_NS = os.environ.get('NEXT_FIREBASE_NS', 'preprod').strip('/')
 
 
@@ -272,47 +293,42 @@ def next_path(name):
     return f'{NEXT_NS}/{name}' if NEXT_NS else name
 
 
+# ---- Redirects from the /next preview, whose links are already out in the wild ----
+
+@app.route('/next')
+def next_index():
+    return redirect('/', code=301)
+
+
+@app.route('/next/leaderboard')
+def next_leaderboard():
+    # Keeps ?board=... intact, which is the form of the links people shared.
+    return redirect(f'/leaderboard?{request.query_string.decode()}'
+                    if request.query_string else '/leaderboard', code=301)
+
+
+@app.route('/next/results_view/<cache_id>')
+def next_results_view(cache_id):
+    return redirect(f'/results_view/{cache_id}', code=301)
+
+
 @app.route('/api/next/leaderboard_data')
 @limiter.exempt
 def next_leaderboard_data():
-    data = get_leaderboard_data(next_path('leaderboard'))
-    return jsonify(data) if data else jsonify(None)
+    return redirect('/api/leaderboard_data', code=301)
 
 
 @app.route('/api/next/mappers_data')
 @limiter.exempt
 def next_mappers_data():
-    return gzipped_json(get_leaderboard_data(next_path('mappers')), 'mappers')
-
-
-@app.route('/next')
-def next_index():
-    return render_template('next_index.html')
-
-
-@app.route('/next/leaderboard')
-def next_leaderboard():
-    return render_template('next_leaderboard.html')
-
-
-@app.route('/next/results_view/<cache_id>')
-def next_results_view(cache_id):
-    data = RESULTS_CACHE.get(cache_id)
-    if not data:
-        return render_template('next_results.html', expired=True), 404
-    return render_template('next_results.html',
-                           username=data['username'],
-                           user_id=data.get('user_id'),
-                           leaderboard=data['leaderboard'],
-                           title_prefix=data['title_prefix'],
-                           cache_id=cache_id)
+    return redirect('/api/mappers_data', code=301)
 
 
 @app.route('/api/leaderboard_data')
 @limiter.exempt
 def leaderboard_data():
     """Returns full leaderboard JSON. Client handles filtering/pagination."""
-    data = get_leaderboard_data()
+    data = get_leaderboard_data(next_path('leaderboard'))
     if not data:
         return jsonify(None)
     return jsonify(data)
@@ -344,7 +360,7 @@ def gzipped_json(payload, cache_key):
 @limiter.exempt
 def mappers_data():
     """Returns the global mapper playcount leaderboard. Client handles filtering/pagination."""
-    return gzipped_json(get_leaderboard_data('mappers'), 'mappers')
+    return gzipped_json(get_leaderboard_data(next_path('mappers')), 'mappers')
 
 @app.route('/api/run_global_scan', methods=['POST'])
 def trigger_global_scan():

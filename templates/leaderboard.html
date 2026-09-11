@@ -1,635 +1,467 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends "base.html" %}
+{% set page = 'boards' %}
+{% block title %}Leaderboards — osu!scan{% endblock %}
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Global Leaderboards - osu!scan</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
+{% block content %}
+<section class="page-head">
+    <h1 class="wide" id="head-title">Leaderboards</h1>
+    <p id="head-desc"></p>
+    <div class="stats" id="stats"></div>
+</section>
 
-<body>
-    <div class="container">
-        <a href="/" class="back-link">← Back to osu!scan</a>
+<div class="tabs" role="tablist" id="tabs"></div>
 
-        <h1>Global Leaderboards</h1>
-
-        <div id="loading" class="loading-msg">Loading leaderboard data...</div>
-
-        <div id="leaderboard-content" style="display:none;">
-            <!-- Mode filter -->
-            <div class="mode-tabs" id="mode-tabs">
-                <button type="button" class="mode-tab active" data-mode="all">All</button>
-                <button type="button" class="mode-tab" data-mode="osu">osu!</button>
-                <button type="button" class="mode-tab" data-mode="taiko">Taiko</button>
-                <button type="button" class="mode-tab" data-mode="catch">Catch</button>
-                <button type="button" class="mode-tab" data-mode="mania">Mania</button>
-            </div>
-
-            <!-- Section tabs -->
-            <div class="section-tabs" id="section-tabs">
-                <button type="button" class="section-tab active" data-section="bns">Top BNs</button>
-                <button type="button" class="section-tab" data-section="duos">Iconic BN Duos</button>
-                <button type="button" class="section-tab" data-section="mappers">Most Played Mappers</button>
-                <button type="button" class="section-tab" data-section="sets">Most Ranked Sets</button>
-            </div>
-
-            <!-- Top BNs -->
-            <div id="section-bns" class="leaderboard-section active">
-                <div class="search-form">
-                    <input type="text" class="search-input" id="search-bns" placeholder="Search a nominator..."
-                        autocomplete="off">
-                    <button class="search-btn" id="search-bns-btn">Search</button>
-                </div>
-                <div class="table-wrapper">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th class="col-rank">#</th>
-                                <th>Nominator</th>
-                                <th class="col-count">Nominations</th>
-                            </tr>
-                        </thead>
-                        <tbody id="bns-tbody"></tbody>
-                    </table>
-                </div>
-                <div class="pagination" id="bns-pagination"></div>
-            </div>
-
-            <!-- Iconic BNs Duos -->
-            <div id="section-duos" class="leaderboard-section">
-                <div class="search-form">
-                    <input type="text" class="search-input" id="search-duos" placeholder="Search a duo..."
-                        autocomplete="off">
-                    <button class="search-btn" id="search-duos-btn">Search</button>
-                </div>
-                <div class="table-wrapper">
-                    <table>
-                        <thead id="duos-thead">
-                            <tr>
-                                <th class="col-rank">#</th>
-                                <th>Duo</th>
-                                <th class="col-count">Maps Together</th>
-                            </tr>
-                        </thead>
-                        <tbody id="duos-tbody"></tbody>
-                    </table>
-                </div>
-                <div class="pagination" id="duos-pagination"></div>
-            </div>
-
-            <div class="scope-tabs" id="scope-tabs">
-                <button type="button" class="scope-tab active" data-scope="all">Maps + GDs</button>
-                <button type="button" class="scope-tab" data-scope="own">Their own maps</button>
-                <button type="button" class="scope-tab" data-scope="guest">Their GDs</button>
-            </div>
-
-            <!-- Most Played Mappers -->
-            <div id="section-mappers" class="leaderboard-section">
-                <div class="search-form">
-                    <input type="text" class="search-input" id="search-mappers" placeholder="Search a mapper..."
-                        autocomplete="off">
-                    <button class="search-btn" id="search-mappers-btn">Search</button>
-                </div>
-                <div class="table-wrapper">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th class="col-rank">#</th>
-                                <th>Mapper</th>
-                                <th class="col-count col-optional" id="mappers-diff-header">Difficulties</th>
-                                <th class="col-plays">Playcount</th>
-                            </tr>
-                        </thead>
-                        <tbody id="mappers-tbody"></tbody>
-                    </table>
-                </div>
-                <div class="pagination" id="mappers-pagination"></div>
-            </div>
-
-            <!-- Most Ranked Sets -->
-            <div id="section-sets" class="leaderboard-section">
-                <div class="search-form">
-                    <input type="text" class="search-input" id="search-sets" placeholder="Search a mapper..."
-                        autocomplete="off">
-                    <button class="search-btn" id="search-sets-btn">Search</button>
-                </div>
-                <div class="table-wrapper">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th class="col-rank">#</th>
-                                <th>Mapper</th>
-                                <th class="col-count" id="sets-header">Mapsets</th>
-                            </tr>
-                        </thead>
-                        <tbody id="sets-tbody"></tbody>
-                    </table>
-                </div>
-                <div class="pagination" id="sets-pagination"></div>
-            </div>
-
-            <div class="scan-info" id="scan-info"></div>
-        </div>
-
-        <div id="no-data" class="no-data" style="display:none;">
-            No leaderboard data available yet. Scan has not been run.
-        </div>
-
-        <div class="site-footer">
-            Made by <a href="https://osu.ppy.sh/users/24230576">Fuxi66</a>
-            - Data from <a href="https://osu.ppy.sh">osu!</a>
-            and <a href="https://bn.mappersguild.com">Mapper's Guild</a>
-            - <a href="https://paypal.me/wFuxi66/7.27" target="_blank" class="paypal-btn">Support ☕</a>
-        </div>
+<div class="controls" style="padding-top:18px">
+    <div class="control" id="scope-control">
+        <label for="scope-seg">Counting</label>
+        <div class="seg" id="scope-seg"></div>
     </div>
+    <div class="control" id="mode-control">
+        <label for="mode-seg">Mode</label>
+        <div class="seg on-mode" id="mode-seg"></div>
+    </div>
+    <div class="control" id="loved-control">
+        <label for="loved-seg">Loved maps</label>
+        <div class="seg" id="loved-seg"></div>
+    </div>
+    <div class="search">
+        <input type="text" id="q" autocomplete="off" spellcheck="false" aria-label="Find someone">
+        <button class="clear" type="button" id="q-clear" aria-label="Clear the search" hidden>&times;</button>
+    </div>
+</div>
 
-    <script>
-        const PER_PAGE = 50;
+<div id="podium-slot"></div>
 
-        // State
-        let rawData = null;
-        let mapperData = null;
-        let currentMode = 'all';
-        let currentSection = 'bns';
-        let searchBns = '';
-        let searchDuos = '';
-        let searchMappers = '';
-        let currentScope = 'all';
-        let searchSets = '';
-        let pageSets = 1;
-        let scopeAvailable = false;
-        let pageBns = 1;
-        let pageDuos = 1;
-        let pageMappers = 1;
+<div class="list" id="list">
+    <div class="list-head">
+        <span id="col-rank">#</span>
+        <span></span>
+        <span id="col-who">Mapper</span>
+        <span class="n" id="col-n">Total</span>
+    </div>
+    <div id="rows"></div>
+</div>
 
-        // Read initial state from URL
-        (function readURL() {
-            const p = new URLSearchParams(window.location.search);
-            if (p.get('mode')) currentMode = p.get('mode');
-            if (p.get('section')) currentSection = p.get('section');
-            if (p.get('scope')) currentScope = p.get('scope');
-        })();
+<div class="pager" id="pager"></div>
 
-        // Fetch data once
-        fetch('/api/leaderboard_data')
-            .then(r => r.json())
-            .then(data => {
-                document.getElementById('loading').style.display = 'none';
-                if (!data) {
-                    document.getElementById('no-data').style.display = 'block';
-                    return;
-                }
-                rawData = data;
-                document.getElementById('leaderboard-content').style.display = 'block';
-                initUI();
-                render();
-            })
-            .catch(() => {
-                document.getElementById('loading').textContent = 'Failed to load data.';
-            });
+<div class="legend" id="legend">
+    <span><i class="mode-icon osu"></i>osu!</span>
+    <span><i class="mode-icon taiko"></i>Taiko</span>
+    <span><i class="mode-icon catch"></i>Catch</span>
+    <span><i class="mode-icon mania"></i>Mania</span>
+</div>
 
-        fetch('/api/mappers_data')
-            .then(r => r.json())
-            .then(data => {
-                mapperData = data;
-                // Data from a scan predating the split has no 'own' figures to filter on.
-                scopeAvailable = (data && data.mappers || []).some(m => 'own_playcount' in m);
-                if (!scopeAvailable) currentScope = 'all';
-                updateScopeVisibility();
-                renderMappers();
-                renderSets();
-                renderScanInfo();
-            })
-            .catch(() => { });
+<details class="note">
+    <summary id="note-summary">How this leaderboard counts</summary>
+    <div id="note-body"></div>
+</details>
+{% endblock %}
 
-        function initUI() {
-            // Mode tabs
-            document.querySelectorAll('#mode-tabs .mode-tab').forEach(tab => {
-                if (tab.dataset.mode === currentMode) tab.classList.add('active');
-                else tab.classList.remove('active');
-                tab.addEventListener('click', () => {
-                    currentMode = tab.dataset.mode;
-                    pageBns = 1;
-                    pageDuos = 1;
-                    pageMappers = 1;
-                    pageSets = 1;
-                    document.querySelectorAll('#mode-tabs .mode-tab').forEach(t => t.classList.remove('active'));
-                    tab.classList.add('active');
-                    updateURL();
-                    render();
-                });
-            });
+{% block scripts %}
+<script>
+    const PER_PAGE = 50;
 
-            // Section tabs
-            document.querySelectorAll('.section-tab').forEach(tab => {
-                if (tab.dataset.section === currentSection) tab.classList.add('active');
-                else tab.classList.remove('active');
-                tab.addEventListener('click', () => {
-                    currentSection = tab.dataset.section;
-                    document.querySelectorAll('.section-tab').forEach(t => t.classList.remove('active'));
-                    tab.classList.add('active');
-                    document.querySelectorAll('.leaderboard-section').forEach(s => s.classList.remove('active'));
-                    document.getElementById('section-' + currentSection).classList.add('active');
-                    updateScopeVisibility();
-                    updateURL();
-                    renderScanInfo();
-                });
-            });
+    const BOARDS = {
+        bns: {
+            tab: 'Top nominators',
+            title: 'Top nominators',
+            desc: 'Who pushes the most mapsets through to ranked.',
+            who: 'Nominator', unit: 'Nominations',
+            note: ['A mapset needs two nominators, and it counts once for each of them. Adding this '
+                + 'column up therefore gives you roughly twice the number of sets ever ranked, not the '
+                + 'size of the ranked pool.'],
+            scope: false, loved: false, modes: true,
+        },
+        duos: {
+            tab: 'Nominator duos',
+            title: 'Nominator duos',
+            desc: 'The pairs who keep signing off the same mapsets.',
+            who: 'Duo', unit: 'Sets together',
+            note: ['A pair only scores when both of them nominated the same mapset, and that set counts '
+                + 'once for the pair. Someone who nominates a great deal but rarely with the same partner '
+                + 'can top the nominator leaderboard and be absent from this one.'],
+            scope: false, loved: false, modes: true,
+        },
+        mappers: {
+            tab: 'Most played mappers',
+            title: 'Most played mappers',
+            desc: 'Ranked by the plays on every difficulty they had a hand in.',
+            who: 'Mapper', unit: 'Plays',
+            note: ['A difficulty made by several mappers counts its full playcount for every one of them. '
+                + 'That is why these totals run higher than sites crediting only the set host, and why '
+                + 'adding the column up gives more plays than the ranked pool actually holds.',
+            'Loved difficulties are in by default and called out under each total; switch them off to '
+                + 'compare ranked plays alone.'],
+            scope: true, loved: true, modes: true,
+        },
+        sets: {
+            tab: 'Most ranked sets',
+            title: 'Most ranked mapsets',
+            desc: 'Straight from the counts osu! prints on each mapper\u2019s profile.',
+            who: 'Mapper', unit: 'Mapsets',
+            note: ['These are osu!\u2019s own figures: ranked mapsets hosted under "As host", guest '
+                + 'participation under "As guest". No counting of our own, so they match a profile.',
+            'Loved sets join the hosted figure when loved is on. osu! does not split loved out of guest '
+                + 'participation, so those stay in it either way.',
+            'A profile prints no split by mode, so we read the sets behind it and file each one under '
+                + 'the mode its mapper worked in \u2014 the one they put the most difficulties in, if '
+                + 'they did several. A set counts once and only once: a std set carrying a guest taiko '
+                + 'difficulty is one std set for its host and one taiko set for that guest, so the modes '
+                + 'always add back up to the figure on "All".'],
+            scope: true, loved: true, modes: true,
+        },
+    };
 
-            // Show correct section
-            document.querySelectorAll('.leaderboard-section').forEach(s => s.classList.remove('active'));
-            document.getElementById('section-' + currentSection).classList.add('active');
-            updateScopeVisibility();
+    const SCOPES = [['all', 'Everything'], ['own', 'As host'], ['guest', 'As guest']];
+    const MODES = [['all', 'All'], ['osu', 'osu!'], ['taiko', 'Taiko'], ['catch', 'Catch'], ['mania', 'Mania']];
+    const LOVED = [['1', 'Included'], ['0', 'Excluded']];
 
-            // Search - BNs
-            const searchBnsInput = document.getElementById('search-bns');
-            const searchBnsBtn = document.getElementById('search-bns-btn');
-            searchBnsBtn.addEventListener('click', () => {
-                searchBns = searchBnsInput.value.trim().toLowerCase();
-                pageBns = 1;
-                render();
-            });
-            searchBnsInput.addEventListener('keydown', e => {
-                if (e.key === 'Enter') { e.preventDefault(); searchBnsBtn.click(); }
-            });
+    let bnData = null, mapperData = null, scopeAvailable = false;
+    let board = 'bns', scope = 'all', mode = 'all', query = '', withLoved = true;
+    // The mapset board has no per-mode figures to filter, so it ignores the mode segment.
+    let emode = 'all';
+    const pages = { bns: 1, duos: 1, mappers: 1, sets: 1 };
 
-            // Search - Duos
-            const searchDuosInput = document.getElementById('search-duos');
-            const searchDuosBtn = document.getElementById('search-duos-btn');
-            searchDuosBtn.addEventListener('click', () => {
-                searchDuos = searchDuosInput.value.trim().toLowerCase();
-                pageDuos = 1;
-                render();
-            });
-            searchDuosInput.addEventListener('keydown', e => {
-                if (e.key === 'Enter') { e.preventDefault(); searchDuosBtn.click(); }
-            });
+    // A leaderboard is worth linking to and worth sharing, so it lives in the URL.
+    const params = new URLSearchParams(location.search);
+    if (BOARDS[params.get('board')]) board = params.get('board');
+    if (['all', 'own', 'guest'].includes(params.get('scope'))) scope = params.get('scope');
+    if (MODES.some(([k]) => k === params.get('mode'))) mode = params.get('mode');
+    if (params.get('loved') === '0') withLoved = false;
 
-            // Scope tabs (own maps vs guest difficulties)
-            document.querySelectorAll('#scope-tabs .scope-tab').forEach(tab => {
-                if (tab.dataset.scope === currentScope) tab.classList.add('active');
-                else tab.classList.remove('active');
-                tab.addEventListener('click', () => {
-                    currentScope = tab.dataset.scope;
-                    pageMappers = 1;
-                    pageSets = 1;
-                    document.querySelectorAll('#scope-tabs .scope-tab').forEach(t => t.classList.remove('active'));
-                    tab.classList.add('active');
-                    updateURL();
-                    renderMappers();
-                    renderSets();
-                });
-            });
+    function syncURL() {
+        const p = new URLSearchParams();
+        if (board !== 'bns') p.set('board', board);
+        if (scope !== 'all') p.set('scope', scope);
+        // A board that ignores the mode segment should not advertise a filter in its link.
+        if (mode !== 'all' && BOARDS[board].modes) p.set('mode', mode);
+        if (!withLoved) p.set('loved', '0');
+        const qs = p.toString();
+        history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+    }
 
-            // Search - Mappers
-            const searchMappersInput = document.getElementById('search-mappers');
-            const searchMappersBtn = document.getElementById('search-mappers-btn');
-            searchMappersBtn.addEventListener('click', () => {
-                searchMappers = searchMappersInput.value.trim().toLowerCase();
-                pageMappers = 1;
-                renderMappers();
-            });
-            searchMappersInput.addEventListener('keydown', e => {
-                if (e.key === 'Enter') { e.preventDefault(); searchMappersBtn.click(); }
-            });
+    const $ = id => document.getElementById(id);
+    const num = n => (n || 0).toLocaleString('en-US');
+    const COMPACT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
 
-            // Search - Sets
-            const searchSetsInput = document.getElementById('search-sets');
-            const searchSetsBtn = document.getElementById('search-sets-btn');
-            searchSetsBtn.addEventListener('click', () => {
-                searchSets = searchSetsInput.value.trim().toLowerCase();
-                pageSets = 1;
-                renderSets();
-            });
-            searchSetsInput.addEventListener('keydown', e => {
-                if (e.key === 'Enter') { e.preventDefault(); searchSetsBtn.click(); }
+    // A restricted or deleted account comes back as a placeholder; there is no profile to link to.
+    const GONE = /^(User_\d+|ID:\d+)$/;
+    const nameCell = (id, name) => GONE.test(name)
+        ? '<a class="gone">Restricted account</a>'
+        : `<a href="https://osu.ppy.sh/users/${id}" target="_blank" rel="noopener">${esc(name)}</a>`;
+
+    function esc(s) {
+        const el = document.createElement('span');
+        el.textContent = s == null ? '' : s;
+        return el.innerHTML;
+    }
+
+    // The initial sits underneath, so a missing avatar degrades to a letter, not an empty tile.
+    const face = (id, name, cls) =>
+        `<span class="${cls}">${GONE.test(name) ? '?' : esc((name || '?').trim().charAt(0).toUpperCase())}`
+        + `<img src="https://a.ppy.sh/${id}" alt="" loading="lazy" decoding="async"`
+        + ` onerror="this.remove()"></span>`;
+
+    // A pair is one entry, so it gets one avatar: the two faces overlapped, the way a
+    // pair of people is drawn everywhere else.
+    const avatar = r => r.id2
+        ? `<span class="duo-face">${face(r.id, r.name1, 'face')}${face(r.id2, r.name2, 'face')}</span>`
+        : face(r.id, r.key, 'face');
+
+    // The mode logos read at a glance the way four coloured dots never did.
+    const MODE_NAMES = { osu: 'osu!', taiko: 'Taiko', catch: 'Catch', fruits: 'Catch', mania: 'Mania' };
+    const glyph = m => `<i class="mode-icon ${m}" title="${MODE_NAMES[m] || m}"></i>`;
+
+    function modeIcons(byMode) {
+        const keys = Object.keys(byMode || {}).filter(k => (byMode[k] || 0) > 0);
+        if (emode !== 'all' || !keys.length) return '';
+        return '<span class="modes">' + keys.map(glyph).join('') + '</span>';
+    }
+
+    function pick(byMode, total) {
+        if (emode === 'all') return total || 0;
+        const d = byMode || {};
+        if (emode === 'catch') return (d.catch || 0) + (d.fruits || 0);
+        return d[emode] || 0;
+    }
+
+    /* ---------------- rows: every builder returns the whole ranked leaderboard ---------------- */
+
+    function rowsBns() {
+        const out = [];
+        for (const bn of (bnData?.top_bns || [])) {
+            const v = pick(bn.by_mode, bn.total);
+            if (v > 0) out.push({
+                key: bn.username, id: bn.osu_id, value: v, main: num(v),
+                who: nameCell(bn.osu_id, bn.username) + modeIcons(bn.by_mode),
             });
         }
+        return out.sort((a, b) => b.value - a.value);
+    }
 
-        // The scope filter drives both mapper ladders and means nothing on the BN ones.
-        function updateScopeVisibility() {
-            const el = document.getElementById('scope-tabs');
-            el.hidden = !['mappers', 'sets'].includes(currentSection) || !scopeAvailable;
+    function rowsDuos() {
+        let duos = bnData?.duos || [];
+        if (emode !== 'all') {
+            duos = duos.filter(d => emode === 'catch'
+                ? (d.mode === 'catch' || d.mode === 'fruits') : d.mode === emode);
         }
+        duos = duos.slice().sort((a, b) => b.count - a.count);
+        // The gauge reads against the best pair on the board, so it says how far off the
+        // top a pair is rather than how it compares to whoever shares its page.
+        const best = duos[0]?.count || 1;
+        return duos.map(d => ({
+            key: `${d.bn1_name} ${d.bn2_name}`, id: d.bn1_id, id2: d.bn2_id,
+            name1: d.bn1_name, name2: d.bn2_name,
+            value: d.count, main: num(d.count),
+            who: nameCell(d.bn1_id, d.bn1_name) + '<span class="pair">\u00d7</span>'
+                + nameCell(d.bn2_id, d.bn2_name) + modeIcons({ [d.mode]: 1 })
+                + `<span class="gauge" style="--p:${(d.count / best * 100).toFixed(1)}%"></span>`,
+        }));
+    }
 
-        function updateURL() {
-            const p = new URLSearchParams();
-            if (currentMode !== 'all') p.set('mode', currentMode);
-            if (currentSection !== 'bns') p.set('section', currentSection);
-            if (currentScope !== 'all') p.set('scope', currentScope);
-            const qs = p.toString();
-            history.replaceState(null, '', '/leaderboard' + (qs ? '?' + qs : ''));
-        }
+    // Each figure is stored as a flat total and as a per-mode breakdown; the mode segment picks one.
+    const FIELDS = {
+        pc: ['playcount', 'by_mode'], ownPc: ['own_playcount', 'own_by_mode'],
+        lovedPc: ['loved_playcount', 'loved_by_mode'],
+        ownLovedPc: ['own_loved_playcount', 'own_loved_by_mode'],
+        maps: ['maps', 'maps_by_mode'], ownMaps: ['own_maps', 'own_maps_by_mode'],
+        lovedMaps: ['loved_maps', 'loved_maps_by_mode'],
+        ownLovedMaps: ['own_loved_maps', 'own_loved_maps_by_mode'],
+        sets: ['sets', 'sets_by_mode'], ownSets: ['own_sets', 'own_sets_by_mode'],
+    };
 
-        const MODE_ICONS = {
-            'osu': 'https://i.ppy.sh/7e7d307810cc1c87d72ef49aa8e00b0a532bf1a1/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6f73752e706e67',
-            'taiko': 'https://i.ppy.sh/76642fc45fefd770b0f7ace30437e64309ae68bf/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f7461696b6f2e706e67',
-            'catch': 'https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67',
-            'fruits': 'https://i.ppy.sh/fbcd428c2342a50e24972fd5ba4c9bea8082c445/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f63617463682e706e67',
-            'mania': 'https://i.ppy.sh/06fedd0caf3d993b5e1a8a8686118de95722353c/68747470733a2f2f6f73752e7070792e73682f77696b692f696d616765732f7368617265642f6d6f64652f6d616e69612e706e67',
-        };
+    // Only the "own" figures are stored, so a guest figure is the remainder.
+    const byScope = (all, own) => scope === 'own' ? own : scope === 'guest' ? all - own : all;
 
-        function modeIcon(mode) {
-            const url = MODE_ICONS[mode];
-            if (!url) return '';
-            return `<img src="${url}" class="mode-icon" title="${mode}" alt="${mode}">`;
-        }
-
-        const COMPACT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
-        function compact(n) { return COMPACT.format(n); }
-
-        function rankClass(r) {
-            if (r === 1) return 'rank-gold';
-            if (r === 2) return 'rank-silver';
-            if (r === 3) return 'rank-bronze';
-            return '';
-        }
-
-        function escapeHTML(s) {
-            const el = document.createElement('span');
-            el.textContent = s;
-            return el.innerHTML;
-        }
-
-        function render() {
-            renderBNs();
-            renderDuos();
-            renderMappers();
-            renderSets();
-            renderScanInfo();
-        }
-
-        function renderSets() {
-            const tbody = document.getElementById('sets-tbody');
-            if (!tbody) return;
-            if (!mapperData || !mapperData.mappers) {
-                tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">Mapper data not available yet.</td></tr>';
-                return;
-            }
-            if (!('sets' in (mapperData.mappers[0] || {}))) {
-                tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">This ladder needs a newer scan.</td></tr>';
-                return;
-            }
-
-            let rows = mapperRows('display_sets');
-            if (searchSets) rows = rows.filter(m => (m.username || '').toLowerCase().includes(searchSets));
-
-            const totalPages = Math.max(1, Math.ceil(rows.length / PER_PAGE));
-            pageSets = Math.min(pageSets, totalPages);
-            const page = rows.slice((pageSets - 1) * PER_PAGE, pageSets * PER_PAGE);
-
-            if (page.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>';
-            } else {
-                let html = '';
-                for (const m of page) {
-                    let icons = '';
-                    if (currentMode === 'all') {
-                        icons = Object.keys(m.by_mode || {}).filter(k => (m.by_mode[k] || 0) > 0).map(modeIcon).join('');
-                    }
-                    html += `<tr class="${rankClass(m.rank)}"><td>${m.rank}</td><td><a href="https://osu.ppy.sh/users/${m.osu_id}" target="_blank" class="username-link">${escapeHTML(m.username)}</a>${icons ? '<span class="mode-icons">' + icons + '</span>' : ''}</td><td>${m.display_sets}</td></tr>`;
-                }
-                tbody.innerHTML = html;
-            }
-
-            document.getElementById('sets-header').textContent =
-                { all: 'Mapsets', own: 'Own mapsets', guest: 'Mapsets guested on' }[currentScope];
-
-            renderPagination('sets-pagination', pageSets, totalPages, p => { pageSets = p; renderSets(); });
-        }
-
-        // Totals cover maps + GDs; only the 'own' figures are stored, so GDs are the remainder.
-        function mapperRows(sortKey) {
-            const rows = [];
-            for (const m of mapperData.mappers) {
-                const total = k => m[k] || 0;
-                const perMode = k => {
-                    const d = m[k] || {};
-                    if (currentMode === 'catch') return (d.catch || 0) + (d.fruits || 0);
-                    return d[currentMode] || 0;
-                };
-                const pick = currentMode === 'all' ? total : perMode;
-                const fields = currentMode === 'all'
-                    ? ['playcount', 'own_playcount', 'maps', 'own_maps', 'loved_playcount', 'own_loved_playcount', 'sets', 'own_sets']
-                    : ['by_mode', 'own_by_mode', 'maps_by_mode', 'own_maps_by_mode', 'loved_by_mode', 'own_loved_by_mode', 'sets_by_mode', 'own_sets_by_mode'];
-                const [allPc, ownPc, allMaps, ownMaps, allLoved, ownLoved, allSets, ownSets] = fields.map(pick);
-
-                let pc, maps, loved, sets;
-                if (currentScope === 'own') {
-                    pc = ownPc; maps = ownMaps; loved = ownLoved; sets = ownSets;
-                } else if (currentScope === 'guest') {
-                    pc = allPc - ownPc; maps = allMaps - ownMaps; loved = allLoved - ownLoved; sets = allSets - ownSets;
-                } else {
-                    pc = allPc; maps = allMaps; loved = allLoved; sets = allSets;
-                }
-                if (pc > 0) rows.push({ ...m, display_pc: pc, display_maps: maps, display_loved: loved, display_sets: sets });
-            }
-            // Ties on set count are common, so playcount breaks them rather than leaving them arbitrary.
-            rows.sort((a, b) => (b[sortKey] - a[sortKey]) || (b.display_pc - a.display_pc));
-            for (let i = 0; i < rows.length; i++) rows[i].rank = i + 1;
-            return rows;
-        }
-
-        function renderMappers() {
-            const tbody = document.getElementById('mappers-tbody');
-            if (!tbody) return;
-            if (!mapperData || !mapperData.mappers) {
-                tbody.innerHTML = '<tr><td colspan="4" style="color:#666;text-align:center;padding:20px;">Mapper data not available yet.</td></tr>';
-                return;
-            }
-
-            let mappers = mapperRows('display_pc');
-            if (searchMappers) mappers = mappers.filter(m => (m.username || '').toLowerCase().includes(searchMappers));
-
-            const totalPages = Math.max(1, Math.ceil(mappers.length / PER_PAGE));
-            pageMappers = Math.min(pageMappers, totalPages);
-            const page = mappers.slice((pageMappers - 1) * PER_PAGE, pageMappers * PER_PAGE);
-
-            if (page.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>';
-            } else {
-                let html = '';
-                for (const m of page) {
-                    let icons = '';
-                    if (currentMode === 'all') {
-                        icons = Object.keys(m.by_mode || {}).filter(k => (m.by_mode[k] || 0) > 0).map(modeIcon).join('');
-                    }
-                    html += `<tr class="${rankClass(m.rank)}"><td>${m.rank}</td><td><a href="https://osu.ppy.sh/users/${m.osu_id}" target="_blank" class="username-link">${escapeHTML(m.username)}</a>${icons ? '<span class="mode-icons">' + icons + '</span>' : ''}</td><td class="col-optional">${m.display_maps}</td><td class="col-plays">${m.display_pc.toLocaleString('en-US')}${m.display_loved ? `<span class="loved-count" title="Of which ${m.display_loved.toLocaleString('en-US')} plays are on loved difficulties">${compact(m.display_loved)} loved</span>` : ''}</td></tr>`;
-                }
-                tbody.innerHTML = html;
-            }
-
-            const heading = { all: 'Difficulties', own: 'Own difficulties', guest: 'Guest difficulties' }[currentScope];
-            document.getElementById('mappers-diff-header').textContent = heading;
-
-            renderPagination('mappers-pagination', pageMappers, totalPages, p => { pageMappers = p; renderMappers(); });
-        }
-
-        function renderBNs() {
-            const tbody = document.getElementById('bns-tbody');
-            if (!rawData || !rawData.top_bns) { tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>'; return; }
-
-            // Build filtered list
-            let bns = [];
-            for (const bn of rawData.top_bns) {
-                // Handle both 'catch' and 'fruits' in the old data
-                let count = 0;
-                if (currentMode === 'all') {
-                    count = bn.total || 0;
-                } else if (currentMode === 'catch') {
-                    count = ((bn.by_mode || {}).catch || 0) + ((bn.by_mode || {}).fruits || 0);
-                } else {
-                    count = (bn.by_mode || {})[currentMode] || 0;
-                }
-
-                if (count > 0) bns.push({ ...bn, display_count: count });
-            }
-            bns.sort((a, b) => b.display_count - a.display_count);
-
-            // Assign ranks before search filter
-            for (let i = 0; i < bns.length; i++) bns[i].rank = i + 1;
-
-            // Search filter (preserves ranks)
-            if (searchBns) bns = bns.filter(b => (b.username || '').toLowerCase().includes(searchBns));
-
-            // Pagination
-            const total = bns.length;
-            const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
-            pageBns = Math.min(pageBns, totalPages);
-            const page = bns.slice((pageBns - 1) * PER_PAGE, pageBns * PER_PAGE);
-
-            // Render rows
-            if (page.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>';
-            } else {
-                let html = '';
-                for (const bn of page) {
-                    const rc = rankClass(bn.rank);
-                    // Show mode icons for all modes the BN participated in (when in All filter)
-                    let icons = '';
-                    if (currentMode === 'all') {
-                        const modes = Object.keys(bn.by_mode || {}).filter(m => (bn.by_mode[m] || 0) > 0);
-                        icons = modes.map(modeIcon).join('');
-                    }
-                    html += `<tr class="${rc}"><td>${bn.rank}</td><td><a href="https://osu.ppy.sh/users/${bn.osu_id}" target="_blank" class="username-link">${escapeHTML(bn.username)}</a>${icons ? '<span class="mode-icons">' + icons + '</span>' : ''}</td><td>${bn.display_count}</td></tr>`;
-                }
-                tbody.innerHTML = html;
-            }
-
-            // Pagination controls
-            renderPagination('bns-pagination', pageBns, totalPages, p => { pageBns = p; render(); });
-        }
-
-        function renderDuos() {
-            const tbody = document.getElementById('duos-tbody');
-            const thead = document.getElementById('duos-thead');
-            if (!rawData || !rawData.duos) { tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>'; return; }
-
-            // Always 3 columns - mode icon goes inline in the duo name cell
-            thead.innerHTML = '<tr><th class="col-rank">#</th><th>Duo</th><th class="col-count">Maps Together</th></tr>';
-
-            // Filter by mode
-            let duos = rawData.duos;
-            if (currentMode !== 'all') {
-                if (currentMode === 'catch') {
-                    duos = duos.filter(d => d.mode === 'catch' || d.mode === 'fruits');
-                } else {
-                    duos = duos.filter(d => d.mode === currentMode);
-                }
-            }
-
-            // Assign ranks
-            for (let i = 0; i < duos.length; i++) duos[i].rank = i + 1;
-
-            // Search filter
-            if (searchDuos) duos = duos.filter(d => ((d.bn1_name || '') + ' ' + (d.bn2_name || '')).toLowerCase().includes(searchDuos));
-
-            // Pagination
-            const total = duos.length;
-            const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
-            pageDuos = Math.min(pageDuos, totalPages);
-            const page = duos.slice((pageDuos - 1) * PER_PAGE, pageDuos * PER_PAGE);
-
-            if (page.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="3" style="color:#666;text-align:center;padding:20px;">No results found.</td></tr>';
-            } else {
-                let html = '';
-                for (const duo of page) {
-                    const rc = rankClass(duo.rank);
-                    // Show mode icon inline only in All mode
-                    const icon = currentMode === 'all' ? modeIcon(duo.mode || '') : '';
-                    html += `<tr class="${rc}"><td>${duo.rank}</td><td><a href="https://osu.ppy.sh/users/${duo.bn1_id}" target="_blank" class="username-link">${escapeHTML(duo.bn1_name)}</a><span class="duo-separator">x</span><a href="https://osu.ppy.sh/users/${duo.bn2_id}" target="_blank" class="username-link">${escapeHTML(duo.bn2_name)}</a>${icon ? ' ' + icon : ''}</td><td>${duo.count}</td></tr>`;
-                }
-                tbody.innerHTML = html;
-            }
-
-            // Pagination controls
-            renderPagination('duos-pagination', pageDuos, totalPages, p => { pageDuos = p; render(); });
-        }
-
-        function renderPagination(containerId, currentPage, totalPages, onPageChange) {
-            const container = document.getElementById(containerId);
-            if (totalPages <= 1) { container.innerHTML = ''; return; }
-
-            const prevDisabled = currentPage <= 1 ? 'disabled' : '';
-            const nextDisabled = currentPage >= totalPages ? 'disabled' : '';
-
-            container.innerHTML = `
-                <span class="pagination-btn ${prevDisabled}" id="${containerId}-prev">&#9664;</span>
-                <span class="pagination-info">
-                    Page <input type="number" class="page-input" id="${containerId}-input" value="${currentPage}" min="1" max="${totalPages}"> / ${totalPages}
-                </span>
-                <span class="pagination-btn ${nextDisabled}" id="${containerId}-next">&#9654;</span>
-            `;
-
-            document.getElementById(`${containerId}-prev`).addEventListener('click', () => {
-                if (currentPage > 1) onPageChange(currentPage - 1);
-            });
-            document.getElementById(`${containerId}-next`).addEventListener('click', () => {
-                if (currentPage < totalPages) onPageChange(currentPage + 1);
-            });
-
-            const pageInput = document.getElementById(`${containerId}-input`);
-            const jumpTo = () => {
-                let val = parseInt(pageInput.value, 10);
-                if (isNaN(val) || val < 1) val = 1;
-                if (val > totalPages) val = totalPages;
-                if (val !== currentPage) onPageChange(val);
+    function mapperRows(valueOf, subOf) {
+        const out = [];
+        for (const m of (mapperData?.mappers || [])) {
+            const g = k => {
+                const [flat, perMode] = FIELDS[k];
+                return emode === 'all' ? (m[flat] || 0) : pick(m[perMode], 0);
             };
-            pageInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); jumpTo(); } });
-            pageInput.addEventListener('blur', jumpTo);
-        }
-
-        function renderScanInfo() {
-            const el = document.getElementById('scan-info');
-            if (!rawData) { el.textContent = ''; return; }
-
-            let lastScan = 'Never';
-            const onMapperLadder = ['mappers', 'sets'].includes(currentSection);
-            const stamp = onMapperLadder && mapperData ? mapperData.last_scan : rawData.last_scan;
-            if (stamp) {
-                try {
-                    const dt = new Date(stamp);
-                    lastScan = dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ', ' + dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-                } catch (e) {
-                    lastScan = stamp;
-                }
+            const allLoved = g('lovedPc'), ownLoved = g('ownLovedPc');
+            let allPc = g('pc'), ownPc = g('ownPc'), allMaps = g('maps'), ownMaps = g('ownMaps');
+            if (!withLoved) {
+                allPc -= allLoved; ownPc -= ownLoved;
+                allMaps -= g('lovedMaps'); ownMaps -= g('ownLovedMaps');
             }
 
-            // Calculate 1st of next month for the next scheduled scan
-            const now = new Date();
-            const nextScanDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0));
-            const nextScanStr = nextScanDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+            // osu! publishes these on every profile and that is the number people check
+            // against; our own crawl pages the search index, which runs short of it. The
+            // scan splits each category by the mode its mapper worked in, so a mode keeps
+            // the official figures too. Only a scan from before that pass falls back.
+            const p = (flat, perMode) => emode === 'all' ? (m[flat] || 0) : pick(m[perMode], 0);
+            let allSets, ownSets;
+            if (m.profile_ranked_sets == null
+                || (emode !== 'all' && !mapperData.profile_modes)) {
+                allSets = g('sets'); ownSets = g('ownSets');
+            } else {
+                ownSets = p('profile_ranked_sets', 'profile_ranked_by_mode')
+                    + (withLoved ? p('profile_loved_sets', 'profile_loved_by_mode') : 0);
+                allSets = ownSets + p('profile_guest_sets', 'profile_guest_by_mode');
+            }
 
-            const n = v => (v || 0).toLocaleString('en-US');
-            const source = onMapperLadder
-                ? `${n(mapperData && mapperData.total_mappers)} mappers over ${n(mapperData && mapperData.total_sets_scanned)} ranked & loved mapsets`
-                : `${n(rawData.total_bns_scanned)} BNs scanned, ${n(rawData.total_sets_scanned)} sets processed`;
-            el.innerHTML = `Last updated: ${lastScan} | ${source}<br><span class="next-scan">Next automated scan: ${nextScanStr}</span>`;
+            out.push({
+                name: m.username, id: m.osu_id, by_mode: m.by_mode,
+                pc: byScope(allPc, ownPc), maps: byScope(allMaps, ownMaps),
+                loved: withLoved ? byScope(allLoved, ownLoved) : 0,
+                sets: byScope(allSets, ownSets),
+            });
         }
-    </script>
-</body>
+        const ranked = out.filter(m => valueOf(m) > 0);
+        ranked.sort((a, b) => valueOf(b) - valueOf(a) || b.pc - a.pc);
+        return ranked.map(m => ({
+            key: m.name, id: m.id, value: valueOf(m),
+            main: num(valueOf(m)), sub: subOf(m),
+            who: nameCell(m.id, m.name) + modeIcons(m.by_mode),
+        }));
+    }
 
-</html>
+    const rowsMappers = () => mapperRows(m => m.pc, m =>
+        `${num(m.maps)} difficulties` + (m.loved > 0 ? ` · ${COMPACT.format(m.loved)} loved` : ''));
+    const rowsSets = () => mapperRows(m => m.sets, () => '');
+
+    const BUILD = { bns: rowsBns, duos: rowsDuos, mappers: rowsMappers, sets: rowsSets };
+
+    /* ---------------- render ---------------- */
+
+    function render() {
+        const cfg = BOARDS[board];
+        emode = cfg.modes ? mode : 'all';
+        $('head-title').textContent = cfg.title;
+        $('head-desc').textContent = cfg.desc;
+        $('col-who').textContent = cfg.who;
+        $('col-n').textContent = cfg.unit;
+        $('scope-control').hidden = !(cfg.scope && scopeAvailable);
+        $('mode-control').hidden = !cfg.modes;
+        $('loved-control').hidden = !cfg.loved;
+        $('legend').hidden = emode !== 'all';
+        $('list').classList.toggle('duos', board === 'duos');
+        $('note-body').innerHTML = cfg.note.map(p => `<p>${p}</p>`).join('');
+        $('q').placeholder = board === 'duos' ? 'Find a nominator' : 'Find yourself, or anyone else';
+        $('q-clear').hidden = query === '';
+
+        document.querySelectorAll('#tabs button').forEach(b =>
+            b.setAttribute('aria-selected', String(b.dataset.k === board)));
+        document.querySelectorAll('#scope-seg button').forEach(b =>
+            b.setAttribute('aria-pressed', String(b.dataset.k === scope)));
+        document.querySelectorAll('#mode-seg button').forEach(b =>
+            b.setAttribute('aria-pressed', String(b.dataset.k === mode)));
+        document.querySelectorAll('#loved-seg button').forEach(b =>
+            b.setAttribute('aria-pressed', String(b.dataset.k === (withLoved ? '1' : '0'))));
+
+        const sel = document.querySelector('#tabs button[aria-selected="true"]');
+        if (sel) $('tabs').scrollLeft = Math.max(0, sel.offsetLeft - 16);
+
+        if (!bnData && !mapperData) {
+            $('rows').innerHTML = '<div class="blank">Loading the board…</div>';
+            $('pager').innerHTML = '';
+            $('podium-slot').innerHTML = '';
+            return;
+        }
+
+        let all = BUILD[board]();
+        all.forEach((r, i) => r.rank = i + 1);      // rank before filtering, so it stays global
+
+        const rows = query ? all.filter(r => r.key.toLowerCase().includes(query)) : all;
+        const totalPages = Math.max(1, Math.ceil(rows.length / PER_PAGE));
+        const p = pages[board] = Math.min(pages[board], totalPages);
+        const slice = rows.slice((p - 1) * PER_PAGE, p * PER_PAGE);
+
+        // The podium is a way in, not a summary: it goes when you start looking for someone,
+        // and the list picks up at four so the same three never appear twice on one screen.
+        const showPodium = !query && p === 1 && all.length > 3;
+        $('podium-slot').innerHTML = showPodium ? podium(all.slice(0, 3), BOARDS[board].unit) : '';
+        const shown = showPodium ? slice.slice(3) : slice;
+
+        if (!shown.length) {
+            $('rows').innerHTML = `<div class="blank">Nobody here matches <strong>${esc(query)}</strong>. `
+                + `Check the spelling, or clear the search to see the whole board.</div>`;
+        } else {
+            $('rows').innerHTML = shown.map(r => {
+                const cls = r.rank <= 3 ? ` top r${r.rank}` : '';
+                return `<div class="row${cls}">`
+                    + `<span class="rank">${r.rank}</span>`
+                    + avatar(r)
+                    + `<span class="who">${r.who}</span>`
+                    + `<span class="n">${r.main}${r.sub ? `<span class="sub">${r.sub}</span>` : ''}</span>`
+                    + `</div>`;
+            }).join('');
+        }
+        pager(p, totalPages, rows.length);
+    }
+
+    function podium(three, unit) {
+        return '<div class="podium">' + three.map((r, i) => `
+            <div class="plinth p${i + 1}">
+                <div class="place">${i + 1}</div>
+                ${avatar(r)}
+                <div class="body">
+                    <span class="who">${r.who}</span>
+                    <div class="tally">${r.main}</div>
+                    <div class="unit">${unit.toLowerCase()}</div>
+                </div>
+                ${r.sub ? `<div class="extra">${r.sub}</div>` : ''}
+            </div>`).join('') + '</div>';
+    }
+
+    function pager(p, totalPages, count) {
+        if (totalPages <= 1) {
+            $('pager').innerHTML = `<span>${num(count)} ${count === 1 ? 'entry' : 'entries'}</span>`;
+            return;
+        }
+        $('pager').innerHTML =
+            `<button type="button" id="prev" ${p === 1 ? 'disabled' : ''}>Previous</button>`
+            + `<span>Page <input type="number" id="jump" min="1" max="${totalPages}" value="${p}"> of ${totalPages}</span>`
+            + `<button type="button" id="next" ${p === totalPages ? 'disabled' : ''}>Next</button>`;
+        $('prev').onclick = () => turn(p - 1);
+        $('next').onclick = () => turn(p + 1);
+        $('jump').onchange = e => turn(Math.min(totalPages, Math.max(1, parseInt(e.target.value, 10) || 1)));
+    }
+
+    function turn(to) {
+        pages[board] = to;
+        render();
+        document.querySelector('.list').scrollIntoView({ block: 'start' });
+    }
+
+    function stats() {
+        const bn = board === 'bns' || board === 'duos';
+        const d = bn ? bnData : mapperData;
+        if (!d?.last_scan) { $('stats').innerHTML = ''; return; }
+
+        // The scanner writes datetime.utcnow(), which carries no offset: read as local it
+        // would drift by the reader's own timezone, so it is pinned to UTC and labelled.
+        const t = new Date(d.last_scan + (/[Z+]|-\d\d:\d\d$/.test(d.last_scan) ? '' : 'Z'));
+        const on = t.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+        const at = t.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+        const chip = (n, label) => `<span><b>${num(n)}</b>${label}</span>`;
+
+        $('stats').innerHTML = chip(d.total_sets_scanned, 'mapsets scanned')
+            + chip(bn ? d.total_bns_scanned : d.total_mappers, bn ? 'nominators' : 'mappers')
+            + `<span>${on} \u00b7 ${at} UTC</span>`;
+    }
+
+    /* ---------------- wiring ---------------- */
+
+    $('tabs').innerHTML = Object.entries(BOARDS).map(([k, v]) =>
+        `<button type="button" role="tab" data-k="${k}" aria-selected="false">${v.tab}</button>`).join('');
+    $('scope-seg').innerHTML = SCOPES.map(([k, l]) =>
+        `<button type="button" data-k="${k}" aria-pressed="false">${l}</button>`).join('');
+    $('mode-seg').innerHTML = MODES.map(([k, l]) =>
+        `<button type="button" data-k="${k}" aria-pressed="false">${l}</button>`).join('');
+    $('loved-seg').innerHTML = LOVED.map(([k, l]) =>
+        `<button type="button" data-k="${k}" aria-pressed="false">${l}</button>`).join('');
+
+    $('tabs').onclick = e => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        board = b.dataset.k;
+        syncURL(); stats(); render();
+    };
+    $('scope-seg').onclick = e => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        scope = b.dataset.k;
+        pages.mappers = pages.sets = 1;
+        syncURL(); render();
+    };
+    $('mode-seg').onclick = e => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        mode = b.dataset.k;
+        Object.keys(pages).forEach(k => pages[k] = 1);
+        syncURL(); render();
+    };
+    $('loved-seg').onclick = e => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        withLoved = b.dataset.k === '1';
+        pages.mappers = pages.sets = 1;
+        syncURL(); render();
+    };
+    $('q').oninput = e => {
+        query = e.target.value.trim().toLowerCase();
+        Object.keys(pages).forEach(k => pages[k] = 1);
+        render();
+    };
+    $('q-clear').onclick = () => {
+        $('q').value = ''; query = '';
+        render();
+        $('q').focus();
+    };
+
+    render();
+
+    fetch('/api/leaderboard_data').then(r => r.json()).then(d => {
+        bnData = d; stats(); render();
+    }).catch(() => { });
+
+    fetch('/api/mappers_data').then(r => r.json()).then(d => {
+        mapperData = d;
+        scopeAvailable = 'own_playcount' in ((d.mappers || [])[0] || {});
+        stats(); render();
+    }).catch(() => { });
+</script>
+{% endblock %}

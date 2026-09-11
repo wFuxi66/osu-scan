@@ -1,348 +1,162 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends "base.html" %}
+{% set page = 'scan' %}
+{% block title %}osu!scan — who maps with you{% endblock %}
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>osu!scan</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <style>
-        /* min-height, not height: the card still scrolls when the viewport is short. */
-        body {
-            min-height: 100vh;
-            display: grid;
-            align-content: center;
-        }
+{% block content %}
+<section class="hero">
+    <div class="hero-lead">
+        <h1 class="wide">Find out who you really map with.</h1>
+        <p>Point it at a mapper and it reads every ranked set they touched, then ranks the people
+            behind them: the guest mappers, the hosts, the nominators.</p>
+    </div>
 
-        .container {
-            max-width: 460px;
-            text-align: center;
-        }
+    <div class="hero-extra">
+        <p class="lede-more">Nothing to install and no account needed. A scan takes a few
+            seconds to a couple of minutes, depending on how much they have mapped.</p>
 
-        .page-head {
-            display: flex;
-            justify-content: flex-end;
-            margin-bottom: 4px;
-        }
+        <nav class="hero-links" aria-label="Global leaderboards">
+            <span>Or look at everyone at once</span>
+            <a href="/leaderboard?board=bns">Top nominators</a>
+            <a href="/leaderboard?board=duos">Nominator duos</a>
+            <a href="/leaderboard?board=mappers">Most played mappers</a>
+            <a href="/leaderboard?board=sets">Most ranked sets</a>
+        </nav>
+    </div>
 
-        .page-head a {
-            color: var(--text-dim);
-            text-decoration: none;
-            font-size: 13px;
-            transition: color 0.2s;
-        }
-
-        .page-head a:hover {
-            color: var(--accent-soft);
-        }
-
-        .logo {
-            max-width: 200px;
-            width: 70%;
-            margin-bottom: 14px;
-        }
-
-        .tagline {
-            font-size: 14px;
-            color: var(--text-dim);
-            margin: 0 auto 24px;
-            max-width: 34em;
-        }
-
-        #username-input {
-            width: 100%;
-        }
-
-        .mode-selection {
-            display: grid;
-            gap: 8px;
-            margin: 20px 0;
-            text-align: left;
-        }
-
-        .mode-option {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 11px 13px;
-            border: 1px solid var(--line);
-            border-radius: 6px;
-            background: var(--line-soft);
-            color: var(--text-dim);
-            font-size: 14px;
-            cursor: pointer;
-            transition: border-color 0.2s, color 0.2s;
-        }
-
-        .mode-option:hover {
-            border-color: var(--accent);
-            color: var(--text);
-        }
-
-        .mode-option:has(input:checked) {
-            border-color: var(--accent);
-            background: rgba(233, 69, 96, 0.15);
-            color: var(--text);
-        }
-
-        .mode-option input {
-            accent-color: var(--accent);
-            margin: 0;
-            flex: 0 0 auto;
-        }
-
-        #scanBtn {
-            width: 100%;
-        }
-
-        #progress {
-            margin-top: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 15px;
-        }
-
-        #progress p {
-            margin: 0;
-            font-size: 15px;
-            color: var(--info);
-        }
-
-        .spinner {
-            border: 4px solid rgba(255, 255, 255, 0.15);
-            border-top: 4px solid var(--accent);
-            border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        .cancel-btn {
-            background-color: #2c3e50;
-            border: 1px solid var(--info);
-        }
-
-        .cancel-btn:hover {
-            background-color: #34495e;
-            border-color: var(--accent);
-        }
-
-        .error {
-            color: #ff6b6b;
-            margin-top: 15px;
-        }
-    </style>
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const form = document.getElementById('scanForm');
-            const progressDiv = document.getElementById('progress');
-            const statusText = document.getElementById('status-text');
-            const scanBtn = document.getElementById('scanBtn');
-            const cancelBtn = document.getElementById('cancelBtn');
-            const errorMsg = document.getElementById('error-msg');
-
-            let currentJobId = null;
-            let isCancelled = false;
-            let pollInterval = null;
-
-            if (form) {
-                form.addEventListener('submit', async (e) => {
-                    e.preventDefault();
-
-                    const usernameInput = document.getElementById('username-input');
-                    const username = usernameInput ? usernameInput.value : '';
-                    const modeInput = document.querySelector('input[name="mode"]:checked');
-                    const mode = modeInput ? modeInput.value : 'gd';
-
-                    if (!username) {
-                        alert("Please enter a username or ID");
-                        return;
-                    }
-
-                    // Reset UI
-                    scanBtn.classList.add('hidden');
-                    progressDiv.classList.remove('hidden');
-                    statusText.textContent = "Initializing...";
-
-                    isCancelled = false;
-                    cancelBtn.disabled = false;
-                    cancelBtn.textContent = "Cancel Scan";
-                    if (errorMsg) errorMsg.style.display = 'none';
-
-                    if (pollInterval) clearInterval(pollInterval);
-
-                    try {
-                        const formData = new FormData();
-                        formData.append('username', username);
-                        formData.append('mode', mode);
-
-                        const startRes = await fetch('/api/start_scan', {
-                            method: 'POST',
-                            body: formData
-                        });
-
-                        if (!startRes.ok) {
-                            throw new Error("Start Failed: " + startRes.statusText);
-                        }
-
-                        const startData = await startRes.json();
-
-                        if (startData.error) {
-                            alert(startData.error);
-                            resetUI();
-                            return;
-                        }
-
-                        currentJobId = startData.job_id;
-                        pollStatus(currentJobId);
-
-                    } catch (err) {
-                        console.error(err);
-                        alert("Network error starting scan: " + err.message);
-                        resetUI();
-                    }
-                });
-            }
-
-            if (cancelBtn) {
-                cancelBtn.addEventListener('click', async () => {
-                    if (!currentJobId) return;
-                    if (confirm("Stop scan?")) {
-                        cancelBtn.disabled = true;
-                        isCancelled = true;
-                        statusText.textContent = "Cancelling...";
-                        try {
-                            await fetch(`/api/cancel_scan/${currentJobId}`, { method: 'POST' });
-                        } catch (e) { console.error(e); }
-                        finally {
-                            setTimeout(() => { if (isCancelled) resetUI(); }, 1000);
-                        }
-                    }
-                });
-            }
-
-            function pollStatus(jobId) {
-                if (isCancelled) return;
-
-                pollInterval = setInterval(async () => {
-                    if (isCancelled) {
-                        clearInterval(pollInterval);
-                        resetUI();
-                        return;
-                    }
-
-                    try {
-                        const res = await fetch(`/api/status/${jobId}`);
-
-                        if (res.status === 404) {
-                            clearInterval(pollInterval);
-                            alert("Job lost (Server Restarted). Please try again.");
-                            resetUI();
-                            return;
-                        }
-
-                        if (!res.ok) {
-                            return;
-                        }
-
-                        const data = await res.json();
-
-                        if (data.status === 'running') {
-                            statusText.textContent = data.message;
-                        } else if (data.status === 'done') {
-                            clearInterval(pollInterval);
-                            window.location.href = `/results_view/${jobId}`;
-                        } else if (data.status === 'cancelled') {
-                            clearInterval(pollInterval);
-                            statusText.textContent = "Cancelled.";
-                            setTimeout(resetUI, 1500);
-                        } else if (data.status === 'error') {
-                            clearInterval(pollInterval);
-                            alert("Error: " + data.error);
-                            resetUI();
-                        }
-
-                    } catch (err) {
-                        console.error(err);
-                    }
-                }, 1000);
-            }
-
-            function resetUI() {
-                if (scanBtn) {
-                    scanBtn.disabled = false;
-                    scanBtn.classList.remove('hidden');
-                }
-                if (progressDiv) progressDiv.classList.add('hidden');
-                currentJobId = null;
-                isCancelled = false;
-                if (pollInterval) {
-                    clearInterval(pollInterval);
-                    pollInterval = null;
-                }
-            }
-        });
-    </script>
-</head>
-
-<body>
-    <div class="container">
-        <div class="page-head">
-            <a href="/leaderboard">Global Leaderboards →</a>
+    <form class="scanbox" id="scanform" autocomplete="off">
+        <div class="sigil">
+            <img class="mark-dark" src="{{ url_for('static', filename='favicon.png') }}" alt="" width="74"
+                height="74">
+            <img class="mark-light" src="{{ url_for('static', filename='mark-ink.png') }}" alt="" width="74"
+                height="74">
+            <b>osu<em>!</em>scan</b>
         </div>
 
-        <img src="{{ url_for('static', filename='logo.png') }}" alt="osu!scan" class="logo">
+        <div class="namefield">
+        <input type="text" id="who" name="username" placeholder="Username or user ID" required
+            aria-label="Username or user ID">
+        <button class="btn" type="submit" id="go">Start scan</button>
+    </div>
 
-        <p class="tagline">
-            See who guest-mapped your sets, whose sets you guest-mapped, and which nominators
-            keep showing up on your maps.
-        </p>
+    <div class="modes-grid" role="radiogroup" aria-label="What to look up">
+        <label class="pick">
+            <input type="radio" name="mode" value="gd" checked>
+            <strong>Who guest-mapped for me</strong>
+            <span>The mappers who made the most difficulties on sets you host.</span>
+        </label>
+        <label class="pick">
+            <input type="radio" name="mode" value="gd_hosts">
+            <strong>Who I guest-mapped for</strong>
+            <span>The hosts whose sets you turn up on most often.</span>
+        </label>
+        <label class="pick">
+            <input type="radio" name="mode" value="nominators">
+            <strong>Who nominated me</strong>
+            <span>The nominators who pushed the most of your sets to ranked.</span>
+        </label>
+        <label class="pick">
+            <input type="radio" name="mode" value="bn">
+            <strong>Who a nominator favours</strong>
+            <span>Enter a nominator instead: the mappers they sign off on most.</span>
+        </label>
+    </div>
 
-        <form id="scanForm">
-            <input type="text" id="username-input" name="username" placeholder="Username or ID" required>
-
-            <div class="mode-selection">
-                <label class="mode-option">
-                    <input type="radio" name="mode" value="gd" checked>
-                    <span>Top GDer in my maps</span>
-                </label>
-                <label class="mode-option">
-                    <input type="radio" name="mode" value="gd_hosts">
-                    <span>Top mapper I made GDs for</span>
-                </label>
-                <label class="mode-option">
-                    <input type="radio" name="mode" value="nominators">
-                    <span>Top BN that nominated my maps</span>
-                </label>
-                <label class="mode-option">
-                    <input type="radio" name="mode" value="bn">
-                    <span>Top favorite mapper for a BN</span>
-                </label>
-            </div>
-
-            <button type="submit" id="scanBtn">Start scan</button>
-        </form>
-
-        <div id="progress" class="hidden">
-            <div class="spinner"></div>
-            <p id="status-text">Starting scan...</p>
-            <button id="cancelBtn" class="cancel-btn">Cancel scan</button>
-        </div>
-
-        <div class="site-footer">
-            Made by <a href="https://osu.ppy.sh/users/24230576">Fuxi66</a>
-            • Data from <a href="https://osu.ppy.sh">osu!</a>
-            • <a href="https://paypal.me/wFuxi66/7.27" target="_blank" class="paypal-btn">Support ☕</a>
+    <div class="progress" id="progress" hidden>
+        <div class="bar"><i></i></div>
+        <p id="progress-msg">Starting…</p>
+        <div class="actions">
+            <button class="btn-ghost" type="button" id="stop">Cancel scan</button>
         </div>
     </div>
-</body>
 
-</html>
+        <div class="alert" id="alert" hidden></div>
+    </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const form = document.getElementById('scanform');
+    const go = document.getElementById('go');
+    const who = document.getElementById('who');
+    const progress = document.getElementById('progress');
+    const msg = document.getElementById('progress-msg');
+    const alertBox = document.getElementById('alert');
+    const stop = document.getElementById('stop');
+    let jobId = null, polling = null;
+
+    function fail(text) {
+        alertBox.textContent = text;
+        alertBox.hidden = false;
+        progress.hidden = true;
+        go.disabled = false;
+        go.textContent = 'Start scan';
+    }
+
+    function stopPolling() {
+        if (polling) { clearInterval(polling); polling = null; }
+    }
+
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const username = who.value.trim();
+        if (!username) return;
+
+        alertBox.hidden = true;
+        progress.hidden = false;
+        msg.textContent = 'Starting…';
+        go.disabled = true;
+        go.textContent = 'Scanning…';
+
+        const body = new FormData();
+        body.append('username', username);
+        body.append('mode', form.querySelector('input[name="mode"]:checked').value);
+
+        let started;
+        try {
+            const r = await fetch('/api/start_scan', { method: 'POST', body });
+            started = await r.json();
+            if (!r.ok) return fail(started.error || 'The scan could not be started.');
+        } catch {
+            return fail('Could not reach the server. Check your connection and try again.');
+        }
+
+        jobId = started.job_id;
+        poll();
+        polling = setInterval(poll, 1200);
+    });
+
+    async function poll() {
+        if (!jobId) return;
+        let job;
+        try {
+            const r = await fetch(`/api/status/${jobId}`);
+            job = await r.json();
+        } catch {
+            return;  // one dropped poll is not a failed scan
+        }
+
+        if (job.message) msg.textContent = job.message;
+
+        if (job.status === 'done') {
+            stopPolling();
+            window.location.href = `/results_view/${job.result_id}`;
+        } else if (job.status === 'error') {
+            stopPolling();
+            fail(job.error || 'The scan stopped before it finished.');
+        } else if (job.status === 'cancelled') {
+            stopPolling();
+            fail('Scan cancelled.');
+        }
+    }
+
+    stop.addEventListener('click', async () => {
+        if (!jobId) return;
+        stop.disabled = true;
+        try { await fetch(`/api/cancel_scan/${jobId}`, { method: 'POST' }); } catch { }
+        stopPolling();
+        fail('Scan cancelled.');
+        stop.disabled = false;
+    });
+</script>
+{% endblock %}

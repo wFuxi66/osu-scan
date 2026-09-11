@@ -10,7 +10,13 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='next.css') }}">
+    {% if standalone %}
+    {# A downloaded report resolves hrefs against wherever it was saved, so the stylesheet
+       travels inside the file rather than as a link back to a server it may never reach. #}
+    <style>{{ inline_css }}</style>
+    {% else %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    {% endif %}
     <script>
         // Applied before first paint, so the chosen theme never flashes the other one.
         try {
@@ -21,9 +27,11 @@
 </head>
 
 <body>
+    {# Nav and theme toggle are dead weight in a saved file: nothing to navigate to. #}
+    {% if not standalone %}
     <header class="topbar">
         <div class="shell">
-            <a class="brand" href="/next">
+            <a class="brand" href="/">
                 <img class="mark mark-dark" src="{{ url_for('static', filename='favicon.png') }}" alt="" width="28"
                     height="28">
                 <img class="mark mark-light" src="{{ url_for('static', filename='mark-ink.png') }}" alt="" width="28"
@@ -31,14 +39,15 @@
                 <span class="word">osu<em>!</em>scan</span>
             </a>
             <nav class="nav">
-                <a href="/next" {% if page=='scan' %}aria-current="page" {% endif %}>Scan</a>
-                <a href="/next/leaderboard" {% if page=='boards' %}aria-current="page" {% endif %}>Leaderboards</a>
+                <a href="/" {% if page=='scan' %}aria-current="page" {% endif %}>Scan</a>
+                <a href="/leaderboard" {% if page=='boards' %}aria-current="page" {% endif %}>Leaderboards</a>
             </nav>
             <button class="theme-toggle" type="button" id="theme" aria-label="Switch the colour theme">
                 <span id="theme-icon">☀</span>
             </button>
         </div>
     </header>
+    {% endif %}
 
     <main class="shell">
         {% block content %}{% endblock %}
