@@ -10,6 +10,7 @@ refuses to publish a leaderboard it could not finish.
 import concurrent.futures
 import os
 import pickle
+import threading
 import time
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -42,12 +43,16 @@ CHECKPOINT_EVERY = 20  # pages
 STATE_PATH = os.environ.get('MAPPER_SCAN_STATE', 'mapper_scan_state.pickle')
 # Verified cap: asking for 51 ids returns 50 with no error, so never chunk larger.
 BEATMAP_IDS_PER_CALL = 50
-# An owners pass adds ~5 calls per page; pace them to stay a polite guest on the API.
-OWNERS_PACING = 0.15
-# One profile read per mapper, so it is worth some concurrency. Paced to sit around
-# 900 requests a minute, comfortably under the burst the API will start refusing.
 PROFILE_WORKERS = 8
-PROFILE_PACING = 0.5
+# Every request in this module goes through one shared throttle, so the rate is a property
+# of the scan rather than of whichever phase happens to be running.
+#
+# The old per-call sleeps paced each thread on its own: 8 profile workers 0.5s apart came to
+# ~960 requests a minute. That sits under the burst the API refuses outright but far over
+# what it sustains, so an hour in it started throttling everything, and each thread then
+# backed off alone while the other seven kept the pressure on. The 2026-09-11 run spent
+# nearly four hours that way and never finished.
+RATE_PER_MIN = float(os.environ.get('OSU_RATE_PER_MIN', 300))
 # The profile pass is enrichment on top of a finished crawl, so it gets a clock. Without one
 # a throttled API keeps it retrying until the runner's job timeout kills the whole run and
 # the ladder is never saved at all - the crawl's work thrown away for the optional part.
@@ -83,6 +88,37 @@ def authenticate():
         "explicit mapsets.")
 
 
+class RateLimiter:
+    """One throttle shared by every thread, so the scan has a single overall request rate.
+
+    Spacing requests here rather than sleeping inside each caller is what keeps the total
+    rate flat no matter how many workers are running. `pause` exists because a 429 is a
+    statement about the whole scan, not about the one thread that happened to receive it:
+    backing that thread off alone leaves the others hammering and the throttle never lifts.
+    """
+
+    def __init__(self, per_minute):
+        self.gap = 60.0 / per_minute if per_minute > 0 else 0.0
+        self._lock = threading.Lock()
+        self._next_at = 0.0
+
+    def wait(self):
+        with self._lock:
+            now = time.monotonic()
+            due = max(now, self._next_at)
+            self._next_at = due + self.gap
+        if due > now:
+            time.sleep(due - now)
+
+    def pause(self, seconds):
+        """Hold every thread back for `seconds`, starting now."""
+        with self._lock:
+            self._next_at = max(self._next_at, time.monotonic() + seconds)
+
+
+RATE = RateLimiter(RATE_PER_MIN)
+
+
 def get(session, url, headers, params=None, deadline=None):
     """A GET that keeps trying. Returns the response, or None once the patience runs out.
 
@@ -93,11 +129,16 @@ def get(session, url, headers, params=None, deadline=None):
         if deadline and time.monotonic() > deadline:
             return None
         if wait:
-            print(f"Request failed ({url}), waiting {wait}s...", flush=True)
             time.sleep(wait)
+        RATE.wait()
+        # The throttle can hold a thread for a whole Retry-After window, so the deadline is
+        # worth re-reading on the way out: no point spending a request on expired work.
+        if deadline and time.monotonic() > deadline:
+            return None
         try:
             r = session.get(url, headers=headers, params=params, timeout=30)
-        except requests.exceptions.RequestException:
+        except requests.exceptions.RequestException as e:
+            print(f"Request error ({url}): {e.__class__.__name__}, retrying...", flush=True)
             continue
         if r.status_code == 200:
             return r
@@ -105,6 +146,19 @@ def get(session, url, headers, params=None, deadline=None):
             raise AuthRejected(f"{r.status_code} from {url}")
         if r.status_code == 404:
             return None
+        if r.status_code == 429:
+            # Retry-After is the API telling us exactly how long it wants; guessing shorter
+            # just spends the retry budget re-tripping the same limit.
+            try:
+                held = max(1.0, float(r.headers.get('Retry-After') or 60))
+            except ValueError:
+                held = 60.0
+            print(f"Rate limited (429), holding every thread {held:.0f}s...", flush=True)
+            RATE.pause(held)
+            continue
+        # The status code is the difference between "slow down" and "the API is down",
+        # so it goes in the log rather than a bare "request failed".
+        print(f"Request failed ({r.status_code}) for {url}, retrying...", flush=True)
     return None
 
 
@@ -219,7 +273,6 @@ def resolve_owners(session, beatmapsets, token, mode):
                     return None
                 for bmap in r.json().get('beatmaps') or []:
                     owners[bmap['id']] = [o['id'] for o in (bmap.get('owners') or [])]
-                time.sleep(OWNERS_PACING)
             return owners
 
         for bset in beatmapsets:
@@ -228,7 +281,6 @@ def resolve_owners(session, beatmapsets, token, mode):
                 return None
             for bmap in r.json().get('beatmaps') or []:
                 owners[bmap['id']] = [o['id'] for o in (bmap.get('owners') or [])]
-            time.sleep(OWNERS_PACING)
         return owners
     except AuthRejected:
         return None
@@ -306,7 +358,6 @@ def fetch_profile_counts(session, uids, token, progress=None, budget=None):
         for offset in range(0, count, SETS_PAGE):
             r = get(session, f'{API_USER_URL}/{uid}/beatmapsets/{kind}', headers,
                     {'limit': SETS_PAGE, 'offset': offset}, deadline=deadline)
-            time.sleep(PROFILE_PACING)
             if r is None:
                 return None  # A short read would under-report; drop the split, keep the count.
             for bset in r.json() or []:
@@ -326,7 +377,6 @@ def fetch_profile_counts(session, uids, token, progress=None, budget=None):
         for i in range(0, len(ids), BEATMAP_IDS_PER_CALL):
             r = get(session, API_BEATMAPS_URL, headers, {'ids[]': ids[i:i + BEATMAP_IDS_PER_CALL]},
                     deadline=deadline)
-            time.sleep(OWNERS_PACING)
             if r is None:
                 return None
             for bmap in r.json().get('beatmaps') or []:
@@ -343,7 +393,6 @@ def fetch_profile_counts(session, uids, token, progress=None, budget=None):
         if time.monotonic() > deadline:
             return uid, None
         r = get(session, f'{API_USER_URL}/{uid}', headers, {'key': 'id'}, deadline=deadline)
-        time.sleep(PROFILE_PACING)
         if r is None:
             return uid, None
         data = r.json()
