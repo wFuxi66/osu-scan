@@ -23,6 +23,11 @@ jobs:
 
     env:
       PYTHONUNBUFFERED: "1"
+      # osu! asks for 60 requests a minute. The 2026-09-11 run sat at ~75 and tripped a
+      # flat 1800s hold roughly every 45 minutes - and a fixed penalty means going faster
+      # only collects it more often, never sooner-and-done. Staying under the line is both
+      # politer and, once the holds are counted, quicker.
+      OSU_RATE_PER_MIN: "60"
       OSU_CLIENT_ID: ${{ secrets.OSU_CLIENT_ID }}
       OSU_CLIENT_SECRET: ${{ secrets.OSU_CLIENT_SECRET }}
       FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
