@@ -429,7 +429,7 @@ tr:hover {
     text-decoration: underline;
 }
 
-.kofi-btn {
+.paypal-btn {
     display: inline-block;
     background: linear-gradient(135deg, var(--accent-soft) 0%, var(--accent) 100%);
     color: var(--text) !important;
@@ -443,7 +443,7 @@ tr:hover {
     margin-left: 8px;
 }
 
-.kofi-btn:hover {
+.paypal-btn:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 15px rgba(233, 69, 96, 0.5);
 }

@@ -1216,7 +1216,7 @@ footer a:hover {
     color: var(--pink);
 }
 
-.kofi {
+.paypal {
     margin-left: auto;
     background: var(--pink);
     color: var(--on-pink);
@@ -1227,7 +1227,7 @@ footer a:hover {
     text-decoration: none;
 }
 
-.kofi:hover {
+.paypal:hover {
     background: var(--pink-hot);
     color: var(--on-pink);
 }
