@@ -11,7 +11,7 @@ import concurrent.futures
 import os
 import pickle
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime
 
 import requests
@@ -240,40 +240,113 @@ def diff_owners(bmap, owners_by_diff=None):
 # ---- Official profile counts ----
 
 # What osu! prints on a profile, and what a mapper will compare our ladder against.
-PROFILE_FIELDS = {
-    'profile_ranked_sets': 'ranked_beatmapset_count',
-    'profile_loved_sets': 'loved_beatmapset_count',
-    'profile_guest_sets': 'guest_beatmapset_count',
+# Per category: the field we store, osu!'s own field, and where its mode split goes.
+PROFILE_KINDS = {
+    'ranked': ('profile_ranked_sets', 'ranked_beatmapset_count', 'profile_ranked_by_mode'),
+    'loved': ('profile_loved_sets', 'loved_beatmapset_count', 'profile_loved_by_mode'),
+    'guest': ('profile_guest_sets', 'guest_beatmapset_count', 'profile_guest_by_mode'),
 }
+SETS_PAGE = 100
+# Ties go by this order, so the same set never changes column between scans.
+MODE_ORDER = ('osu', 'taiko', 'catch', 'mania')
+
+
+def set_mode(diffs, uid=None):
+    """The one mode a set counts under: where its mapper put the most difficulties.
+
+    A set is a set. Filing a hybrid under every mode it touches is what stops the columns
+    adding up to the total osu! prints, and a mapper who did the taiko half of a std set
+    ranked one taiko set, not one of each.
+    """
+    modes = Counter('catch' if b.get('mode') == 'fruits' else b.get('mode')
+                    for b in diffs if uid is None or b.get('user_id') == uid)
+    modes.pop(None, None)
+    if not modes:
+        return None
+    return max(modes, key=lambda m: (modes[m], -(MODE_ORDER + (m,)).index(m)))
 
 
 def fetch_profile_counts(session, uids, token, progress=None):
-    """Read each mapper's own mapset counts off their profile.
+    """Read each mapper's mapset counts off their profile, split by the mode they mapped in.
 
-    Our crawl sees ranked and loved sets only, so it lands a few short of the figure on a
-    profile, which also counts approved and qualified sets. Those numbers live on the
-    single-user endpoint alone, hence one call per mapper. A mapper whose call fails is
-    simply absent from the result, and the ladder keeps the crawled figure for them.
+    Our crawl pages the search index, which runs short of what a profile prints: it never
+    sees qualified sets, and misses some ranked ones outright. The profile is the number a
+    mapper checks us against, so it wins, and the category listings behind it are the only
+    place the split by mode can come from honestly.
+
+    A set is counted once, under the mode the mapper actually worked in on it. Counting the
+    modes a set *contains* instead would file one hybrid set under two modes and the columns
+    would stop adding up to the total, which is the whole complaint this answers.
     """
     if not token:
         return {}
     headers = {**HEADERS, 'Authorization': f'Bearer {token}'}
     counts = {}
 
+    def own_modes(uid, kind, count, host):
+        """Which mode a mapper worked in on each of their sets in one category.
+
+        osu! stores one author per difficulty and lists the rest under `owners`, which the
+        category listing omits, so a collab looks like it belongs to nobody. Those sets get
+        a second look through the beatmaps endpoint rather than being dropped.
+        """
+        modes = defaultdict(int)
+        collabs = []
+        for offset in range(0, count, SETS_PAGE):
+            r = get(session, f'{API_USER_URL}/{uid}/beatmapsets/{kind}', headers,
+                    {'limit': SETS_PAGE, 'offset': offset})
+            time.sleep(PROFILE_PACING)
+            if r is None:
+                return None  # A short read would under-report; drop the split, keep the count.
+            for bset in r.json() or []:
+                diffs = bset.get('beatmaps') or []
+                mine = set_mode(diffs, uid)
+                # Getting a set ranked makes it yours even when every difficulty is a guest's,
+                # exactly as the crawl credits it and as osu! counts it on the profile.
+                if mine is None and host:
+                    mine = set_mode(diffs)
+                if mine is not None:
+                    modes[mine] += 1
+                else:
+                    collabs.append(diffs)
+
+        ids = [b['id'] for diffs in collabs for b in diffs if b.get('id')]
+        owners = {}
+        for i in range(0, len(ids), BEATMAP_IDS_PER_CALL):
+            r = get(session, API_BEATMAPS_URL, headers, {'ids[]': ids[i:i + BEATMAP_IDS_PER_CALL]})
+            time.sleep(OWNERS_PACING)
+            if r is None:
+                return None
+            for bmap in r.json().get('beatmaps') or []:
+                owners[bmap['id']] = [o['id'] for o in (bmap.get('owners') or [])]
+        for diffs in collabs:
+            mine = set_mode([b for b in diffs if uid in owners.get(b.get('id'), [])])
+            if mine is not None:
+                modes[mine] += 1
+        return dict(modes)
+
     def one(uid):
         r = get(session, f'{API_USER_URL}/{uid}', headers, {'key': 'id'})
         time.sleep(PROFILE_PACING)
-        return uid, (r.json() if r is not None else None)
+        if r is None:
+            return uid, None
+        data = r.json()
+        row = {}
+        for kind, (count_key, src, mode_key) in PROFILE_KINDS.items():
+            count = data.get(src) or 0
+            row[count_key] = count
+            row[mode_key] = (own_modes(uid, kind, count, kind != 'guest') or {}) if count else {}
+        return uid, row
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=PROFILE_WORKERS) as pool:
         futures = [pool.submit(one, uid) for uid in uids]
         for done, fut in enumerate(concurrent.futures.as_completed(futures), 1):
             try:
-                uid, data = fut.result()
+                uid, row = fut.result()
             except (AuthRejected, requests.exceptions.RequestException):
                 continue
-            if data:
-                counts[uid] = {k: data.get(src) or 0 for k, src in PROFILE_FIELDS.items()}
+            if row:
+                counts[uid] = row
             if progress and done % 500 == 0:
                 progress(f"Read {done}/{len(uids)} profiles...")
     return counts
@@ -554,6 +627,9 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         'total_mappers': len(all_ids),
         'collab_credit': state['owners_mode'] != 'none',
         'names_current': names_current,
+        # Firebase stores an empty object as nothing, so a mapper with an empty category
+        # loses its split. One flag for the scan says the split was read, per row or not.
+        'profile_modes': bool(profiles),
         'mappers': mappers,
     }
 
@@ -660,23 +736,62 @@ if __name__ == '__main__':
     assert resolve_owners(refusing, [{'id': 1, 'beatmaps': [{'id': 2}]}], 'bad', 'bulk') is None
     print("auth handling OK: refused token fails fast and stops collab credit")
 
-    # The official counts are the whole point of the profile pass; a 404 must not zero them.
+    # The whole point of the profile pass: osu!'s own counts, split by the mode the mapper
+    # worked in, each set landing in exactly one column so the columns add up to the count.
+    ME = 33599
     class Profiles:
         status_code = 200
-        def get(self, url, **k):
-            self.uid = int(url.rsplit('/', 1)[1])
-            if self.uid == 404:
-                self.status_code = 404
-                return self
+        def get(self, url, params=None, **k):
+            self.url, self.status_code = url, 200
             return self
         def json(self):
-            return {'ranked_beatmapset_count': 423, 'loved_beatmapset_count': 2,
-                    'guest_beatmapset_count': 220}
-    got = fetch_profile_counts(Profiles(), [33599], 'token')
-    assert got == {33599: {'profile_ranked_sets': 423, 'profile_loved_sets': 2,
-                           'profile_guest_sets': 220}}, got
-    assert fetch_profile_counts(Profiles(), [33599], None) == {}, "no token means no counts"
-    print("profile pass OK")
+            if self.url.endswith('/beatmaps'):     # the collab's real authors
+                return {'beatmaps': [{'id': 9, 'owners': [{'id': ME}, {'id': 7}]}]}
+            if self.url.endswith('/ranked'):
+                return [
+                    # Hers: a hybrid set she mapped the osu half of. One set, one column.
+                    {'beatmaps': [{'id': 1, 'mode': 'osu', 'user_id': ME},
+                                  {'id': 2, 'mode': 'taiko', 'user_id': 7}]},
+                    # Hosted, every difficulty a guest's: still hers, and still one set.
+                    {'beatmaps': [{'id': 3, 'mode': 'mania', 'user_id': 7}]},
+                    # Both halves hers: one set, filed where she did the most work.
+                    {'beatmaps': [{'id': 10, 'mode': 'taiko', 'user_id': ME},
+                                  {'id': 11, 'mode': 'mania', 'user_id': ME},
+                                  {'id': 12, 'mode': 'mania', 'user_id': ME}]},
+                ]
+            if self.url.endswith('/loved'):
+                return [{'beatmaps': [{'id': 4, 'mode': 'fruits', 'user_id': ME}]}]
+            if self.url.endswith('/guest'):
+                return [
+                    {'beatmaps': [{'id': 5, 'mode': 'taiko', 'user_id': ME},
+                                  {'id': 6, 'mode': 'osu', 'user_id': 7}]},
+                    # A collab: the author on record is someone else, owners knows better.
+                    {'beatmaps': [{'id': 9, 'mode': 'osu', 'user_id': 7}]},
+                ]
+            return {'ranked_beatmapset_count': 3, 'loved_beatmapset_count': 1,
+                    'guest_beatmapset_count': 2}
+    got = fetch_profile_counts(Profiles(), [ME], 'token')
+    assert got == {ME: {
+        'profile_ranked_sets': 3, 'profile_ranked_by_mode': {'osu': 1, 'mania': 2},
+        'profile_loved_sets': 1, 'profile_loved_by_mode': {'catch': 1},
+        'profile_guest_sets': 2, 'profile_guest_by_mode': {'taiko': 1, 'osu': 1},
+    }}, got
+    for count_key, mode_key in [('profile_ranked_sets', 'profile_ranked_by_mode'),
+                                ('profile_guest_sets', 'profile_guest_by_mode')]:
+        assert sum(got[ME][mode_key].values()) == got[ME][count_key], \
+            f"{mode_key} must add up to {count_key}: {got[ME]}"
+    assert fetch_profile_counts(Profiles(), [ME], None) == {}, "no token means no counts"
+
+    # A category listing that fails must cost the split, never the official count.
+    class HalfProfile(Profiles):
+        def get(self, url, params=None, **k):
+            self.url = url
+            self.status_code = 404 if url.endswith('/ranked') else 200
+            return self
+    got = fetch_profile_counts(HalfProfile(), [ME], 'token')
+    assert got[ME]['profile_ranked_sets'] == 3, got
+    assert got[ME]['profile_ranked_by_mode'] == {}, got
+    print("profile pass OK: counts official, modes add up, collabs credited")
 
     # Configured credentials must never degrade to the public search in silence.
     _real_token = scan_logic.get_token
