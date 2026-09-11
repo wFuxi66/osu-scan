@@ -48,6 +48,10 @@ OWNERS_PACING = 0.15
 # 900 requests a minute, comfortably under the burst the API will start refusing.
 PROFILE_WORKERS = 8
 PROFILE_PACING = 0.5
+# The profile pass is enrichment on top of a finished crawl, so it gets a clock. Without one
+# a throttled API keeps it retrying until the runner's job timeout kills the whole run and
+# the ladder is never saved at all - the crawl's work thrown away for the optional part.
+PROFILE_BUDGET = float(os.environ.get('PROFILE_BUDGET_MIN', 90)) * 60
 # Bumped whenever the checkpoint layout changes, so an old one is discarded, not misread.
 STATE_VERSION = 5
 
@@ -79,9 +83,15 @@ def authenticate():
         "explicit mapsets.")
 
 
-def get(session, url, headers, params=None):
-    """A GET that keeps trying. Returns the response, or None once the patience runs out."""
+def get(session, url, headers, params=None, deadline=None):
+    """A GET that keeps trying. Returns the response, or None once the patience runs out.
+
+    `deadline` (a time.monotonic() stamp) caps that patience for callers whose work is
+    optional: past it the retries stop immediately instead of sitting out another backoff.
+    """
     for wait in RETRY_WAITS:
+        if deadline and time.monotonic() > deadline:
+            return None
         if wait:
             print(f"Request failed ({url}), waiting {wait}s...", flush=True)
             time.sleep(wait)
@@ -266,7 +276,7 @@ def set_mode(diffs, uid=None):
     return max(modes, key=lambda m: (modes[m], -(MODE_ORDER + (m,)).index(m)))
 
 
-def fetch_profile_counts(session, uids, token, progress=None):
+def fetch_profile_counts(session, uids, token, progress=None, budget=None):
     """Read each mapper's mapset counts off their profile, split by the mode they mapped in.
 
     Our crawl pages the search index, which runs short of what a profile prints: it never
@@ -282,6 +292,7 @@ def fetch_profile_counts(session, uids, token, progress=None):
         return {}
     headers = {**HEADERS, 'Authorization': f'Bearer {token}'}
     counts = {}
+    deadline = time.monotonic() + (PROFILE_BUDGET if budget is None else budget)
 
     def own_modes(uid, kind, count, host):
         """Which mode a mapper worked in on each of their sets in one category.
@@ -294,7 +305,7 @@ def fetch_profile_counts(session, uids, token, progress=None):
         collabs = []
         for offset in range(0, count, SETS_PAGE):
             r = get(session, f'{API_USER_URL}/{uid}/beatmapsets/{kind}', headers,
-                    {'limit': SETS_PAGE, 'offset': offset})
+                    {'limit': SETS_PAGE, 'offset': offset}, deadline=deadline)
             time.sleep(PROFILE_PACING)
             if r is None:
                 return None  # A short read would under-report; drop the split, keep the count.
@@ -313,7 +324,8 @@ def fetch_profile_counts(session, uids, token, progress=None):
         ids = [b['id'] for diffs in collabs for b in diffs if b.get('id')]
         owners = {}
         for i in range(0, len(ids), BEATMAP_IDS_PER_CALL):
-            r = get(session, API_BEATMAPS_URL, headers, {'ids[]': ids[i:i + BEATMAP_IDS_PER_CALL]})
+            r = get(session, API_BEATMAPS_URL, headers, {'ids[]': ids[i:i + BEATMAP_IDS_PER_CALL]},
+                    deadline=deadline)
             time.sleep(OWNERS_PACING)
             if r is None:
                 return None
@@ -326,7 +338,11 @@ def fetch_profile_counts(session, uids, token, progress=None):
         return dict(modes)
 
     def one(uid):
-        r = get(session, f'{API_USER_URL}/{uid}', headers, {'key': 'id'})
+        # Checked before the request so the mappers still queued behind a throttle return at
+        # once, instead of each sitting through its own backoff chain long past the deadline.
+        if time.monotonic() > deadline:
+            return uid, None
+        r = get(session, f'{API_USER_URL}/{uid}', headers, {'key': 'id'}, deadline=deadline)
         time.sleep(PROFILE_PACING)
         if r is None:
             return uid, None
@@ -578,11 +594,15 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
 
     profiles = {}
     if token:
-        progress(f"Reading {len(top_ids)} profiles for the official mapset counts...")
+        progress(f"Reading {len(top_ids)} profiles for the official mapset counts "
+                 f"(up to {PROFILE_BUDGET / 60:.0f} min)...")
         session = requests.Session()
         profiles = fetch_profile_counts(session, top_ids, token, progress)
         session.close()
         progress(f"Official counts read for {len(profiles)}/{len(top_ids)} mappers.")
+        if len(profiles) < len(top_ids):
+            progress("The profile pass ran out of budget or hit throttling. Publishing the "
+                     "ladder anyway: playcounts come from the crawl, which is complete.")
     else:
         progress("No API token: mapset counts stay as crawled, not as osu! shows them.")
 
