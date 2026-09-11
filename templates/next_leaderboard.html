@@ -103,9 +103,9 @@
                 + 'participation under "As guest". No counting of our own, so they match a profile.',
             'Loved sets join the hosted figure when loved is on. osu! does not split loved out of guest '
                 + 'participation, so those stay in it either way.',
-            'A profile publishes one number per category and no split by mode, so picking a mode '
-                + 'falls back to our own crawl of the ranked pool: per-mode, but no longer the figure '
-                + 'printed on the profile.'],
+            'A profile prints one number per category and no split by mode, so we read the categories '
+                + 'themselves for that. A mapset carrying two modes counts once in each, which is why '
+                + 'the modes can add up to more than the figure on "All".'],
             scope: true, loved: true, modes: true,
         },
     };
@@ -246,15 +246,18 @@
             }
 
             // osu! publishes these on every profile and that is the number people check
-            // against; our own crawl never sees approved or qualified sets. A profile
-            // carries no breakdown by mode, so picking one drops back to the crawl — as
-            // do older scans, which have no profile figures at all.
+            // against; our own crawl reaches the search index, which runs a few sets short
+            // of it. The scan pages each category for the mode split, so a mode gets the
+            // official figure too — only a scan from before that pass falls back.
+            const p = (flat, perMode) => emode === 'all' ? (m[flat] || 0) : pick(m[perMode], 0);
             let allSets, ownSets;
-            if (emode !== 'all' || m.profile_ranked_sets == null) {
+            if (m.profile_ranked_sets == null
+                || (emode !== 'all' && m.profile_ranked_by_mode == null)) {
                 allSets = g('sets'); ownSets = g('ownSets');
             } else {
-                ownSets = m.profile_ranked_sets + (withLoved ? m.profile_loved_sets : 0);
-                allSets = ownSets + m.profile_guest_sets;
+                ownSets = p('profile_ranked_sets', 'profile_ranked_by_mode')
+                    + (withLoved ? p('profile_loved_sets', 'profile_loved_by_mode') : 0);
+                allSets = ownSets + p('profile_guest_sets', 'profile_guest_by_mode');
             }
 
             out.push({
@@ -413,10 +416,6 @@
         const b = e.target.closest('button');
         if (!b) return;
         board = b.dataset.k;
-        // The mapset board's headline is the figure off the profile, and that one has no
-        // split by mode. A mode carried over from another board would silently swap it for
-        // our crawl, so arriving here clears it; picking a mode from here still works.
-        if (board === 'sets') mode = 'all';
         syncURL(); stats(); render();
     };
     $('scope-seg').onclick = e => {
