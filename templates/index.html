@@ -158,6 +158,18 @@
         }
     }
 
+    // Leaving for the results pushes a history entry, so Back lands on this page restored
+    // from the bfcache: frozen mid-scan, polling a job that finished. Hand back a fresh form.
+    addEventListener('pageshow', e => {
+        if (!e.persisted) return;
+        stopPolling();
+        jobId = null;
+        progress.hidden = true;
+        alertBox.hidden = true;
+        go.disabled = false;
+        go.textContent = 'Start scan';
+    });
+
     stop.addEventListener('click', async () => {
         if (!jobId) return;
         stop.disabled = true;

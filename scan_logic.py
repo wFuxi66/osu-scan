@@ -117,7 +117,9 @@ def get_beatmapsets(user_id, token, cancel_event=None):
     """Fetches all beatmap sets for a user."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
-    set_types = ['ranked', 'loved']
+    # Qualified sets have no bucket of their own: they sit in 'pending' alongside the wip and
+    # pending ones, which nobody has signed off on and which are filtered back out below.
+    set_types = ['ranked', 'loved', 'pending']
     session = requests.Session()
     
     for s_type in set_types:
@@ -145,7 +147,9 @@ def get_beatmapsets(user_id, token, cancel_event=None):
                     break
                     
                 for s in data:
-                    s['status_category'] = s_type
+                    if s_type == 'pending' and s.get('status') != 'qualified':
+                        continue
+                    s['status_category'] = s.get('status') or s_type
                     all_sets.append(s)
                 
                 if len(data) < limit:
