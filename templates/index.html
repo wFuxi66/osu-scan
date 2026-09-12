@@ -136,13 +136,18 @@
 
     async function poll() {
         if (!jobId) return;
+        const mine = jobId;
         let job;
         try {
-            const r = await fetch(`/api/status/${jobId}`);
+            const r = await fetch(`/api/status/${mine}`);
             job = await r.json();
         } catch {
             return;  // one dropped poll is not a failed scan
         }
+
+        // A poll still in flight when the page was left resolves on the way back, and would
+        // send a reader who pressed Back straight forward to the results again.
+        if (mine !== jobId) return;
 
         if (job.message) msg.textContent = job.message;
 
@@ -163,10 +168,11 @@
         }
     }
 
-    // Leaving for the results pushes a history entry, so Back lands on this page restored
-    // from the bfcache: frozen mid-scan, polling a job that finished. Hand back a fresh form.
-    addEventListener('pageshow', e => {
-        if (!e.persisted) return;
+    // Leaving for the results pushes a history entry, so Back can land on this page exactly
+    // as it was left: frozen mid-scan, polling a job that finished. Reset on every pageshow
+    // rather than only on a bfcache restore - on a fresh load it changes nothing, and which
+    // of the two a browser gives us is not worth betting the page on.
+    addEventListener('pageshow', () => {
         stopPolling();
         jobId = null;
         progress.hidden = true;
