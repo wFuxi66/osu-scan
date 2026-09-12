@@ -1,6 +1,5 @@
 from flask import Flask, render_template, request, Response, jsonify, redirect
 import gzip
-import hmac
 import json
 from dotenv import load_dotenv
 import threading
@@ -242,8 +241,6 @@ def results_view(cache_id):
 
 # ---- Global BN Leaderboard ----
 
-GLOBAL_SCAN_RUNNING = False
-
 # Server-side cache for leaderboard data (avoids hitting Firebase on every request)
 LEADERBOARD_CACHE = {}
 LEADERBOARD_CACHE_TTL = 300  # 5 minutes
@@ -347,35 +344,9 @@ def mappers_data():
     """Returns the global mapper playcount leaderboard. Client handles filtering/pagination."""
     return gzipped_json(get_leaderboard_data(next_path('mappers')), 'mappers')
 
-@app.route('/api/run_global_scan', methods=['POST'])
-def trigger_global_scan():
-    global GLOBAL_SCAN_RUNNING
-    
-    # Check secret key
-    secret = request.form.get('secret') or request.args.get('secret') or ''
-    expected = os.environ.get('SCAN_SECRET', '')
-    
-    if not expected or not hmac.compare_digest(secret, expected):
-        return jsonify({'error': 'Unauthorized'}), 403
-    
-    if GLOBAL_SCAN_RUNNING:
-        return jsonify({'error': 'Scan already running'}), 409
-    
-    GLOBAL_SCAN_RUNNING = True
-
-    def run():
-        global GLOBAL_SCAN_RUNNING
-        try:
-            global_scan.run_global_scan()
-        except Exception as e:
-            print(f"Global scan error: {e}")
-        finally:
-            GLOBAL_SCAN_RUNNING = False
-    
-    thread = threading.Thread(target=run, daemon=True)
-    thread.start()
-    
-    return jsonify({'status': 'started'})
+# The scans run in GitHub Actions ("Site Scan"), which is where they belong: hours of API
+# calls, a checkpoint between attempts, and a cache that survives the run. The web service
+# only ever reads what they publish - it has no trigger of its own, and wants none.
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

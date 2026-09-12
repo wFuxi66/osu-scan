@@ -21,7 +21,6 @@ Analytical tool for osu! mappers to evaluate beatmap and nomination history.
 2. Configure environment: Create `.env` based on `.env.example`:
    - `OSU_CLIENT_ID` & `OSU_CLIENT_SECRET`: osu! API credentials
    - `FIREBASE_URL` & `FIREBASE_SECRET`: Realtime database
-   - `SCAN_SECRET`: Key for manual scan triggers
 3. Run: `python app.py`
 
 ## Technical Stack
