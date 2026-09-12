@@ -13,6 +13,7 @@ TOKEN_URL = 'https://osu.ppy.sh/oauth/token'
 # under an older name. Anything unfinished - pending, wip, graveyard - is not a credit and
 # never enters a count, whichever endpoint hands it over.
 COUNTED_STATUSES = ('ranked', 'approved', 'qualified', 'loved')
+SETTLED_STATUSES = ('ranked', 'approved', 'loved')
 
 # User Credentials - MUST be set via environment variables
 # On Render: Set in Dashboard > Environment
@@ -280,30 +281,39 @@ def analyze_sets(beatmapsets, host_id, token=None, progress_callback=None, cance
     return all_gds
 
 def process_nominator_set(bset, token, session=None):
-    """Deep fetches a set to find its nominators."""
+    """Finds a set's nominators, from the cache when the set is done moving."""
     headers = {'Authorization': f'Bearer {token}'}
-    nominations = []
-    
+    sid = bset['id']
+    # Both dates can be absent on a set that is still in qualification.
+    date = (bset.get('ranked_date') or bset.get('last_updated') or '').split('T')[0]
+    title = f"{bset['artist']} - {bset['title']}"
+
+    def entries(ids):
+        return [{'nominator_id': uid, 'set_title': title, 'date': date} for uid in ids]
+
+    cached = NOM_CACHE.get(sid)
+    if cached is not None:
+        return entries(cached)
+
     try:
-        url = f'{API_BASE}/beatmapsets/{bset["id"]}'
+        url = f'{API_BASE}/beatmapsets/{sid}'
         # Use session if provided, else standard request
         req_func = session.get if session else requests.get
         r = req_func(url, headers=headers, timeout=20) # Increased timeout to 20s
-        
+
         if r.status_code == 200:
-            data = r.json()
-            current_noms = data.get('current_nominations', [])
-            
-            for nom in current_noms:
-                nominations.append({
-                    'nominator_id': nom['user_id'],
-                    'set_title': f"{bset['artist']} - {bset['title']}",
-                    'date': (bset.get('ranked_date') or bset.get('last_updated')).split('T')[0]
-                })
+            ids = [nom['user_id'] for nom in r.json().get('current_nominations', [])]
+            # Who nominated a ranked set is settled history. A qualified one can still be
+            # disqualified and re-nominated by someone else, so it is read again every scan.
+            if bset.get('status') in SETTLED_STATUSES:
+                NOM_CACHE[sid] = ids
+            return entries(ids)
     except Exception as e:
-        print(f"Error fetching set {bset['id']}: {e}")
-        
-    return nominations
+        print(f"Error fetching set {sid}: {e}")
+
+    # Nothing is cached on a failed read: an empty answer here means "unknown", not "none".
+    return []
+
             
 # User Cache with persistent file storage
 USER_CACHE_FILE = 'user_cache.json'
@@ -327,6 +337,31 @@ def save_user_cache():
         print(f"Error saving user cache: {e}")
 
 load_user_cache()
+
+# Nominations of a settled set never change, and reading them costs one request per set -
+# the slowest thing a scan does. Cached by set id, they cost nothing on every scan after
+# the first. ponytail: grows without bound, one small list per set; prune it if the file
+# ever gets heavy, the way user_cache.json never has.
+NOM_CACHE_FILE = 'nominations_cache.json'
+NOM_CACHE = {}
+
+def load_nom_cache():
+    global NOM_CACHE
+    if os.path.exists(NOM_CACHE_FILE):
+        try:
+            with open(NOM_CACHE_FILE, 'r') as f:
+                NOM_CACHE = {int(k): v for k, v in json.load(f).items()}
+        except Exception as e:
+            print(f"Error loading nomination cache: {e}")
+
+def save_nom_cache():
+    try:
+        with open(NOM_CACHE_FILE, 'w') as f:
+            json.dump(NOM_CACHE, f)
+    except Exception as e:
+        print(f"Error saving nomination cache: {e}")
+
+load_nom_cache()
 
 # The bulk endpoint takes 50 ids per request, turning 8000 lookups into 160.
 USER_BATCH = 50
@@ -419,6 +454,7 @@ def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=
     if cancel_event and cancel_event.is_set(): return []
     
     session = requests.Session()
+    known = len(NOM_CACHE)
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         future_to_set = {executor.submit(process_nominator_set, bset, token, session): bset for bset in target_sets}
@@ -436,6 +472,9 @@ def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=
                 print(f"Nominator scan exception: {e}")
             
     session.close()
+    # Written once, off the worker threads, and only when this scan actually learnt something.
+    if len(NOM_CACHE) > known:
+        save_nom_cache()
     return all_nominations
 
 def resolve_and_aggregate_nominators(noms, token, progress_callback=None):

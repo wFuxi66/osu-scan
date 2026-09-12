@@ -23,6 +23,7 @@ leaderboard_*.html
 
 # Cache
 user_cache.json
+nominations_cache.json
 leaderboard_cache.json
 mappers_cache.json
 
