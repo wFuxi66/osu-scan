@@ -297,24 +297,37 @@ def process_nominator_set(bset, token, session=None):
     if cached is not None:
         return entries(cached)
 
-    try:
-        url = f'{API_BASE}/beatmapsets/{sid}'
-        # Use session if provided, else standard request
-        req_func = session.get if session else requests.get
-        r = req_func(url, headers=headers, timeout=20) # Increased timeout to 20s
+    url = f'{API_BASE}/beatmapsets/{sid}'
+    # Eight threads reading a few hundred sets go through the rate limit, and the answer to
+    # that is to wait exactly as long as the API asks. ponytail: a retry per thread is
+    # enough while the cache absorbs the repeat scans; pace the pool if it stops being.
+    for attempt in range(3):
+        try:
+            # Use session if provided, else standard request
+            req_func = session.get if session else requests.get
+            r = req_func(url, headers=headers, timeout=20) # Increased timeout to 20s
+        except Exception as e:
+            print(f"Error fetching set {sid}: {e}")
+            time.sleep(1 + attempt)
+            continue
 
-        if r.status_code == 200:
-            ids = [nom['user_id'] for nom in r.json().get('current_nominations', [])]
-            # Who nominated a ranked set is settled history. A qualified one can still be
-            # disqualified and re-nominated by someone else, so it is read again every scan.
-            if bset.get('status') in SETTLED_STATUSES:
-                NOM_CACHE[sid] = ids
-            return entries(ids)
-    except Exception as e:
-        print(f"Error fetching set {sid}: {e}")
+        if r.status_code == 429:
+            time.sleep(min(int(r.headers.get('Retry-After', 2 ** attempt)), 30))
+            continue
 
-    # Nothing is cached on a failed read: an empty answer here means "unknown", not "none".
-    return []
+        if r.status_code != 200:
+            break
+
+        ids = [nom['user_id'] for nom in r.json().get('current_nominations', [])]
+        # Who nominated a ranked set is settled history. A qualified one can still be
+        # disqualified and re-nominated by someone else, so it is read again every scan.
+        if bset.get('status') in SETTLED_STATUSES:
+            NOM_CACHE[sid] = ids
+        return entries(ids)
+
+    # Nothing is cached, and None rather than []: an unread set has unknown nominators, and
+    # counting it as a set with none quietly shortens everybody's total.
+    return None
 
             
 # User Cache with persistent file storage
@@ -444,8 +457,9 @@ def resolve_users_parallel(user_ids, token, progress_callback=None, refresh=Fals
 
 
 def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=None):
-    """Fetches nominators for the provided beatmap sets using threading."""
+    """Fetches nominators for the provided sets, and reports how many it could not read."""
     all_nominations = []
+    unread = 0
     
     target_sets = [b for b in beatmapsets if b['status'] in COUNTED_STATUSES]
     total = len(target_sets)
@@ -469,15 +483,19 @@ def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=
             
             try:
                 results = future.result()
-                all_nominations.extend(results)
             except Exception as e:
                 print(f"Nominator scan exception: {e}")
+                results = None
+            if results is None:
+                unread += 1
+            else:
+                all_nominations.extend(results)
             
     session.close()
     # Written once, off the worker threads, and only when this scan actually learnt something.
     if len(NOM_CACHE) > known:
         save_nom_cache()
-    return all_nominations
+    return all_nominations, unread
 
 def resolve_and_aggregate_nominators(noms, token, progress_callback=None):
     """Resolves names and builds the nominator leaderboard using parallel resolution."""
@@ -523,12 +541,12 @@ def generate_nominator_leaderboard_for_user(username_input, progress_callback=No
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     # Analyze
-    noms = analyze_nominators(sets, token, progress_callback, cancel_event)
+    noms, unread = analyze_nominators(sets, token, progress_callback, cancel_event)
     
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     if not noms:
-         return {'username': username, 'user_id': user_id, 'leaderboard': []}
+         return {'username': username, 'user_id': user_id, 'leaderboard': [], 'unread_sets': unread}
          
     leaderboard = resolve_and_aggregate_nominators(noms, token, progress_callback)
     
@@ -537,6 +555,7 @@ def generate_nominator_leaderboard_for_user(username_input, progress_callback=No
         'user_id': user_id,
         'leaderboard': leaderboard,
         'sets_read': len(sets),
+        'unread_sets': unread,
         'type': 'Nominators'
     }
 

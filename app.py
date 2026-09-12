@@ -117,6 +117,7 @@ def run_scan_job(job_id, username, mode, cancel_event):
                 'user_id': result.get('user_id'),
                 'leaderboard': result['leaderboard'],
                 'sets_read': result.get('sets_read'),
+                'unread_sets': result.get('unread_sets'),
                 'title_prefix': title_prefix
             }
             RESULTS_CACHE[job_id] = dict(payload, created_at=time.time())
@@ -206,7 +207,8 @@ def results_view(cache_id):
                            user_id=data.get('user_id'),
                            leaderboard=data['leaderboard'],
                            title_prefix=data['title_prefix'],
-                           sets_read=data.get('sets_read'))
+                           sets_read=data.get('sets_read'),
+                           unread_sets=data.get('unread_sets'))
 
 
 # ---- Global BN Leaderboard ----

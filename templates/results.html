@@ -37,6 +37,13 @@
     <a class="btn-ghost" href="/leaderboard">Global leaderboards</a>
 </div>
 
+{% if unread_sets %}
+{# A total short of what it should be is worse than no total, so it never passes for whole. #}
+<p class="alert">{{ unread_sets }} {{ 'set' if unread_sets == 1 else 'sets' }} could not be
+    read — the osu! API kept refusing. Their nominators are missing from this list; running the scan
+    again picks up where this one stopped.</p>
+{% endif %}
+
 {% if not leaderboard %}
 <div class="blank">
     <p>Nothing to rank yet — no {{ unit }} came back for <strong>{{ username }}</strong>.</p>
