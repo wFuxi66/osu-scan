@@ -534,6 +534,7 @@ def generate_nominator_leaderboard_for_user(username_input, progress_callback=No
         'username': username,
         'user_id': user_id,
         'leaderboard': leaderboard,
+        'sets_read': len(sets),
         'type': 'Nominators'
     }
 
@@ -550,6 +551,7 @@ def generate_bn_leaderboard_for_user(username_input, progress_callback=None, can
     # 1. Fetch nominated sets
     if progress_callback: progress_callback(f"Fetching maps nominated by {username}...")
     sets = get_nominated_beatmapsets(user_id, token, cancel_event)
+    sets = [b for b in sets if b.get('status') in COUNTED_STATUSES]
     
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
@@ -597,6 +599,7 @@ def generate_bn_leaderboard_for_user(username_input, progress_callback=None, can
         'username': username,
         'user_id': user_id,
         'leaderboard': leaderboard,
+        'sets_read': len(sets),
         'type': 'Nominations'
     }
 
@@ -702,6 +705,7 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
         'username': username,
         'user_id': user_id,
         'leaderboard': leaderboard,
+        'sets_read': len(sets),
         'type': 'GD Hosts'
     }
 
@@ -771,7 +775,8 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
     return {
         'username': username,
         'user_id': user_id,
-        'leaderboard': leaderboard
+        'leaderboard': leaderboard,
+        'sets_read': len(sets)
     }
 
 

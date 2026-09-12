@@ -44,7 +44,8 @@
 {% else %}
 <p class="note" style="margin-top:26px">
     {{ leaderboard|length }} {{ 'person' if leaderboard|length == 1 else 'people' }},
-    {{ leaderboard|sum(attribute='total_gds') }} {{ unit }} in total.
+    {{ leaderboard|sum(attribute='total_gds') }} {{ unit }} in total{% if sets_read %},
+    read across {{ sets_read }} ranked, qualified and loved {{ 'set' if sets_read == 1 else 'sets' }}{% endif %}.
 </p>
 
 <div class="list">

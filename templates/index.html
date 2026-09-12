@@ -149,6 +149,11 @@
         if (job.status === 'done') {
             stopPolling();
             window.location.href = `/results_view/${job.result_id}`;
+        } else if (job.status === 'unknown') {
+            // The server forgot the job: it restarted mid-scan. Polling it forever only
+            // leaves a bar moving over nothing.
+            stopPolling();
+            fail('The scan was lost when the server restarted. Starting it again should work.');
         } else if (job.status === 'error') {
             stopPolling();
             fail(job.error || 'The scan stopped before it finished.');

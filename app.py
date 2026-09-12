@@ -112,28 +112,20 @@ def run_scan_job(job_id, username, mode, cancel_event):
              JOBS[job_id]['status'] = 'error'
              JOBS[job_id]['error'] = result['error']
         else:
-            # Done - save to results cache
-            RESULTS_CACHE[job_id] = {
-                'username': result['username'], 
+            payload = {
+                'username': result['username'],
                 'user_id': result.get('user_id'),
                 'leaderboard': result['leaderboard'],
-                'title_prefix': title_prefix,
-                'created_at': time.time()
+                'sets_read': result.get('sets_read'),
+                'title_prefix': title_prefix
             }
+            RESULTS_CACHE[job_id] = dict(payload, created_at=time.time())
             JOBS[job_id]['status'] = 'done'
             JOBS[job_id]['result_id'] = job_id
             
             # Also save to SCAN_CACHE for future requests
             cache_key = f"{username.lower().strip()}:{mode}"
-            SCAN_CACHE[cache_key] = {
-                'result': {
-                    'username': result['username'],
-                    'user_id': result.get('user_id'),
-                    'leaderboard': result['leaderboard'],
-                    'title_prefix': title_prefix
-                },
-                'created_at': time.time()
-            }
+            SCAN_CACHE[cache_key] = {'result': payload, 'created_at': time.time()}
             
     except Exception as e:
         JOBS[job_id]['status'] = 'error'
@@ -158,13 +150,7 @@ def start_scan():
     if cached and (time.time() - cached['created_at'] < SCAN_CACHE_TTL):
         # Return cached result instantly!
         job_id = str(uuid.uuid4())
-        RESULTS_CACHE[job_id] = {
-            'username': cached['result']['username'],
-            'user_id': cached['result'].get('user_id'),
-            'leaderboard': cached['result']['leaderboard'],
-            'title_prefix': cached['result']['title_prefix'],
-            'created_at': time.time()
-        }
+        RESULTS_CACHE[job_id] = dict(cached['result'], created_at=time.time())
         JOBS[job_id] = {
             'status': 'done',
             'message': 'Loaded from cache',
@@ -219,7 +205,8 @@ def results_view(cache_id):
                            username=data['username'],
                            user_id=data.get('user_id'),
                            leaderboard=data['leaderboard'],
-                           title_prefix=data['title_prefix'])
+                           title_prefix=data['title_prefix'],
+                           sets_read=data.get('sets_read'))
 
 
 # ---- Global BN Leaderboard ----
