@@ -430,6 +430,18 @@ SETS_PAGE = 100
 MODE_ORDER = ('osu', 'taiko', 'catch', 'mania')
 
 
+def dominant_mode(modes):
+    """The one mode a set counts under, given a mapper's difficulty counts per mode.
+
+    Ties go by MODE_ORDER so the same set never changes column between scans. Shared by the
+    crawl and the profile pass: two routes to the same figure have to file a set the same
+    way, or the per-mode columns disagree with each other depending on which one ran.
+    """
+    if not modes:
+        return None
+    return max(modes, key=lambda m: (modes[m], -(MODE_ORDER + (m,)).index(m)))
+
+
 def set_mode(diffs, uid=None):
     """The one mode a set counts under: where its mapper put the most difficulties.
 
@@ -440,9 +452,7 @@ def set_mode(diffs, uid=None):
     modes = Counter('catch' if b.get('mode') == 'fruits' else b.get('mode')
                     for b in diffs if uid is None or b.get('user_id') == uid)
     modes.pop(None, None)
-    if not modes:
-        return None
-    return max(modes, key=lambda m: (modes[m], -(MODE_ORDER + (m,)).index(m)))
+    return dominant_mode(modes)
 
 
 def fetch_profile_counts(session, uids, token, progress=None, budget=None):
@@ -545,14 +555,17 @@ def aggregate_page(beatmapsets, stats, names, owners_by_diff=None):
     for bset in beatmapsets:
         if bset.get('creator'):
             names[bset['user_id']] = bset['creator']
-        set_modes = defaultdict(set)  # (uid, role) -> modes the mapper worked in on this set
-        set_modes_all = set()         # every mode present on the set, whoever mapped it
+        # (uid, role) -> how many difficulties the mapper made on this set, per mode. Counted
+        # rather than collected, because the set is filed under the one mode they worked in
+        # most, exactly as set_mode() files it from a profile listing.
+        set_modes = defaultdict(Counter)
+        set_modes_all = Counter()     # every mode present on the set, whoever mapped it
         for bmap in bset.get('beatmaps', []):
             # ponytail: a loved set can hold non-loved diffs; those land in the ranked bucket. ~0.1% of diffs.
             status = bmap.get('status') or bset.get('status')
             state = 'loved' if status == 'loved' else 'ranked'
             mode = 'catch' if bmap.get('mode') == 'fruits' else bmap.get('mode', 'osu')
-            set_modes_all.add(mode)
+            set_modes_all[mode] += 1
             pc = bmap.get('playcount') or 0
             # A collab counts in full for every author, so each co-mapper shows its plays.
             for uid in diff_owners(bmap, owners_by_diff):
@@ -563,19 +576,21 @@ def aggregate_page(beatmapsets, stats, names, owners_by_diff=None):
                 b['maps'][uid] += 1
                 b['mode_pc'][uid][mode] += pc
                 b['mode_maps'][uid][mode] += 1
-                set_modes[(uid, role)].add(mode)
+                set_modes[(uid, role)][mode] += 1
 
         # Getting a set ranked makes it yours even when every difficulty on it is a guest's:
         # osu! counts it on your profile, so the mapset ladder counts it too. Playcount and
         # difficulty totals stay untouched — this credits the set, not work nobody did.
         host = bset.get('user_id')
         if host and set_modes_all and not set_modes[(host, 'own')]:
-            set_modes[(host, 'own')] = set(set_modes_all)
+            set_modes[(host, 'own')] = Counter(set_modes_all)
 
         for (uid, role), modes in set_modes.items():
             stats['sets'][role]['count'][uid] += 1
-            for mode in modes:
-                stats['sets'][role]['modes'][uid][mode] += 1
+            # One set, one mode. Adding it to every mode the mapper touched is what made
+            # sets_by_mode overshoot the total for the 4% of mappers who work in more than
+            # one mode on a single set - a hybrid mapper ranked one set, not one of each.
+            stats['sets'][role]['modes'][uid][dominant_mode(modes)] += 1
 
 
 def prefer_name(resolved, stored):
@@ -961,7 +976,22 @@ if __name__ == '__main__':
     assert dict(stats['sets']['own']['modes'][7]) == {'taiko': 1}
     # The loved set holds one diff of user 2 and one of its host: one mapset each, not two.
     assert sets_gd[2] == 2 and sets_own[3] == 1
-    assert dict(stats['sets']['guest']['modes'][2]) == {'osu': 2, 'catch': 1}, "modes counted per set" 
+    # User 2 mapped one osu and one catch diff on set 1, and one osu diff on the loved set.
+    # That is two mapsets, so two is what the columns must add to - the catch diff moves the
+    # set's column only if it outnumbers the others, and here it ties and loses on MODE_ORDER.
+    assert dict(stats['sets']['guest']['modes'][2]) == {'osu': 2}, dict(stats['sets']['guest']['modes'][2])
+
+    # The invariant the whole per-mode split exists to keep: a set is filed under exactly one
+    # mode, so every mapper's columns add back up to the figure shown on "All".
+    for role in ROLES:
+        counts, modes = stats['sets'][role]['count'], stats['sets'][role]['modes']
+        for uid, total in counts.items():
+            assert sum(modes[uid].values()) == total, (
+                f"{role} sets for {uid}: columns {dict(modes[uid])} do not sum to {total}")
+
+    assert dominant_mode(Counter({'osu': 1, 'taiko': 3})) == 'taiko', "the majority mode wins"
+    assert dominant_mode(Counter({'taiko': 2, 'osu': 2})) == 'osu', "ties go by MODE_ORDER"
+    assert dominant_mode(Counter()) is None
     assert dict(guest['mode_pc'][2]) == {'osu': 5, 'catch': 3}
     assert merge_modes(guest['mode_pc'][2], stats[('loved', 'guest')]['mode_pc'][2]) == {'osu': 105, 'catch': 3}
     assert names == {1: 'Host', 3: 'LovedHost', 4: 'CollabHost', 7: 'GhostHost'}
