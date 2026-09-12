@@ -428,6 +428,9 @@ PROFILE_KINDS = {
 SETS_PAGE = 100
 # Ties go by this order, so the same set never changes column between scans.
 MODE_ORDER = ('osu', 'taiko', 'catch', 'mania')
+# What the crawl's corpus is made of. A set outside these is not missing from the ladder:
+# qualified and graveyard sets were never meant to be on it.
+CORPUS_STATUS = ('ranked', 'approved', 'loved')
 
 
 def dominant_mode(modes):
@@ -455,7 +458,8 @@ def set_mode(diffs, uid=None):
     return dominant_mode(modes)
 
 
-def fetch_profile_counts(session, uids, token, progress=None, budget=None):
+def fetch_profile_counts(session, uids, token, progress=None, budget=None,
+                         seen=None, harvest=None):
     """Read each mapper's mapset counts off their profile, split by the mode they mapped in.
 
     Our crawl pages the search index, which runs short of what a profile prints: it never
@@ -466,6 +470,11 @@ def fetch_profile_counts(session, uids, token, progress=None, budget=None):
     A set is counted once, under the mode the mapper actually worked in on it. Counting the
     modes a set *contains* instead would file one hybrid set under two modes and the columns
     would stop adding up to the total, which is the whole complaint this answers.
+
+    Given `seen` (the set ids the crawl reached) and a `harvest` dict, every leaderboarded
+    set in these listings that the crawl never saw is stashed there for the caller to fold
+    in. They cost nothing: the listings are being read anyway, and they carry each set in
+    full, difficulty playcounts included.
     """
     if not token:
         return {}
@@ -473,7 +482,7 @@ def fetch_profile_counts(session, uids, token, progress=None, budget=None):
     counts = {}
     deadline = time.monotonic() + (PROFILE_BUDGET if budget is None else budget)
 
-    def own_modes(uid, kind, count, host):
+    def own_modes(uid, kind, count, host, found=None):
         """Which mode a mapper worked in on each of their sets in one category.
 
         osu! stores one author per difficulty and lists the rest under `owners`, which the
@@ -488,6 +497,12 @@ def fetch_profile_counts(session, uids, token, progress=None, budget=None):
             if r is None:
                 return None  # A short read would under-report; drop the split, keep the count.
             for bset in r.json() or []:
+                # A set the crawl never reached. A DMCA takedown leaves a mapset ranked,
+                # playable and counted on its mapper's profile, but drops it from every
+                # search page - so this listing is the only place its plays turn up.
+                if found is not None and bset.get('id') not in seen \
+                        and bset.get('status') in CORPUS_STATUS:
+                    found[bset['id']] = bset
                 diffs = bset.get('beatmaps') or []
                 mine = set_mode(diffs, uid)
                 # Getting a set ranked makes it yours even when every difficulty is a guest's,
@@ -518,30 +533,67 @@ def fetch_profile_counts(session, uids, token, progress=None, budget=None):
         # Checked before the request so the mappers still queued behind a throttle return at
         # once, instead of each sitting through its own backoff chain long past the deadline.
         if time.monotonic() > deadline:
-            return uid, None
+            return uid, None, None
         r = get(session, f'{API_USER_URL}/{uid}', headers, {'key': 'id'}, deadline=deadline)
         if r is None:
-            return uid, None
+            return uid, None, None
         data = r.json()
         row = {}
+        # Filled by the worker, merged by the collector below: three threads sharing one
+        # harvest dict would be one more thing to get right for nothing.
+        found = {} if harvest is not None and seen is not None else None
         for kind, (count_key, src, mode_key) in PROFILE_KINDS.items():
             count = data.get(src) or 0
             row[count_key] = count
-            row[mode_key] = (own_modes(uid, kind, count, kind != 'guest') or {}) if count else {}
-        return uid, row
+            row[mode_key] = (own_modes(uid, kind, count, kind != 'guest', found) or {}) if count else {}
+        return uid, row, found
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=PROFILE_WORKERS) as pool:
         futures = [pool.submit(one, uid) for uid in uids]
         for done, fut in enumerate(concurrent.futures.as_completed(futures), 1):
             try:
-                uid, row = fut.result()
+                uid, row, found = fut.result()
             except (AuthRejected, requests.exceptions.RequestException):
                 continue
             if row:
                 counts[uid] = row
+            if found:
+                # By set id, so a set two mappers both point at is folded once.
+                harvest.update(found)
             if progress and done % 500 == 0:
                 progress(f"Read {done}/{len(uids)} profiles...")
     return counts
+
+
+def fold_unlisted(session, unlisted, token, owners_mode, stats, names, progress):
+    """Fold in the mapsets the search index does not list, and say how many there were.
+
+    The crawl pages the search index, so a set the index drops is invisible to it and its
+    plays are missing from the ladder - even though the set is still ranked, still playable,
+    and still counted on its mapper's profile. DMCA takedowns are what does that.
+
+    The profile pass already read those sets in full while it was reading the listings for
+    the mode split, so recovering them costs one owners lookup and nothing else.
+    """
+    if not unlisted:
+        return 0
+    sets = list(unlisted.values())
+    owners = resolve_owners(session, sets, token, owners_mode)
+    if owners is None:
+        # Falling back to the stored author would hand one mapper a collaborator's plays.
+        progress(f"{len(sets)} mapsets the search index does not list were found, but their "
+                 f"authors could not be read; left out rather than credited to the wrong mapper.")
+        return 0
+    # Usernames were refreshed against the API before this runs, and a mapset carries the
+    # name its host had when it ranked, so the listing's `creator` may be several renames
+    # out of date. It is the fallback here, never the answer.
+    stored = {}
+    aggregate_page(sets, stats, stored, owners)
+    for uid, name in stored.items():
+        names.setdefault(uid, name)
+    progress(f"Folded in {len(sets)} mapsets the search index does not list "
+             f"(a DMCA takedown keeps a set ranked but drops it from search).")
+    return len(sets)
 
 
 # ---- Aggregation ----
@@ -859,6 +911,7 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         progress("No API token: usernames stay as they were stored on each mapset.")
 
     profiles = {}
+    unlisted_sets = 0
     if token:
         # A mapper's official counts only move when their set count moves - which the crawl
         # has just measured for every mapper - so most of them need no request at all. The
@@ -877,7 +930,18 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         progress(f"Profiles: {len(top_ids) - len(stale)} unchanged since the last scan, "
                  f"reading {len(stale)} (up to {PROFILE_BUDGET / 60:.0f} min)...")
         session = requests.Session()
-        readings = fetch_profile_counts(session, stale, token, progress)
+        # The listings this pass reads are also the only place a set the search index drops
+        # can be recovered from, so it collects them on the way past.
+        unlisted = {}
+        readings = fetch_profile_counts(session, stale, token, progress,
+                                        seen=state['seen'], harvest=unlisted)
+        unlisted_sets = fold_unlisted(session, unlisted, token, state['owners_mode'],
+                                      stats, names, progress)
+        # A mapper whose only ranked set is one of those is new to the ladder here, after
+        # top_ids was built. Appended, not re-sorted: the rows are ordered by playcount below.
+        for uid in sorted({u for b in BUCKETS for u in stats[b]['pc']} - all_ids):
+            all_ids.add(uid)
+            top_ids.append(uid)
         session.close()
 
         for uid, row_data in readings.items():
@@ -931,11 +995,13 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
             **profiles.get(uid, {}),
         }
 
-    mappers = [row(uid) for uid in top_ids]
+    # top_ids was ordered before the fold above, which can add plays to any mapper.
+    mappers = sorted((row(uid) for uid in top_ids), key=lambda m: -m['playcount'])
 
     result = {
         'last_scan': datetime.utcnow().isoformat(),
-        'total_sets_scanned': total_sets,
+        # The crawl's corpus, plus whatever the fold recovered from outside the index.
+        'total_sets_scanned': total_sets + unlisted_sets,
         'reported_total': state['reported_total'],
         'total_mappers': len(all_ids),
         'collab_credit': state['owners_mode'] != 'none',
@@ -1137,6 +1203,56 @@ if __name__ == '__main__':
     assert got[ME]['profile_ranked_sets'] == 3, got
     assert got[ME]['profile_ranked_by_mode'] == {}, got
     print("profile pass OK: counts official, modes add up, collabs credited")
+
+    # A DMCA takedown keeps a set ranked and on the profile but drops it from search, so the
+    # crawl never sees it. The listings the pass just read are where it comes back from.
+    class Unlisted(Profiles):
+        def json(self):
+            if self.url.endswith('/ranked'):
+                return [
+                    {'id': 100, 'user_id': ME, 'creator': 'osuplayer111', 'status': 'ranked',
+                     'beatmaps': [{'id': 500, 'mode': 'osu', 'user_id': ME,
+                                   'status': 'ranked', 'playcount': 7}]},
+                    # Qualified is not missing from the ladder, it was never meant to be on it.
+                    {'id': 101, 'user_id': ME, 'creator': 'Andrea', 'status': 'qualified',
+                     'beatmaps': [{'id': 501, 'mode': 'osu', 'user_id': ME,
+                                   'status': 'qualified', 'playcount': 9}]},
+                    # Already crawled: folding it in again would double its plays.
+                    {'id': 102, 'user_id': ME, 'creator': 'Andrea', 'status': 'ranked',
+                     'beatmaps': [{'id': 502, 'mode': 'osu', 'user_id': ME,
+                                   'status': 'ranked', 'playcount': 3}]},
+                ]
+            return Profiles.json(self)
+
+    harvest = {}
+    counts = fetch_profile_counts(Unlisted(), [ME], 'token', seen={102}, harvest=harvest)
+    assert set(harvest) == {100}, f"only unseen, leaderboarded sets are worth folding: {harvest}"
+    assert counts[ME]['profile_ranked_sets'] == 3, "harvesting must not disturb the counts"
+    assert fetch_profile_counts(Unlisted(), [ME], 'token') is not None, "harvest stays optional"
+
+    folded_stats, folded_names = new_stats(), {}
+    assert fold_unlisted(Profiles(), harvest, 'token', 'bulk',
+                         folded_stats, folded_names, lambda _m: None) == 1
+    assert folded_stats[('ranked', 'own')]['pc'][ME] == 7, "the recovered plays must land"
+    assert folded_stats['sets']['own']['count'][ME] == 1, "and so must the set"
+    assert folded_names[ME] == 'osuplayer111', "a mapper new to the ladder still gets a name"
+    # Usernames are refreshed before the fold runs, and a mapset carries the name its host
+    # had when it ranked - so the fold must not drag a rename back.
+    refreshed = {ME: 'Andrea'}
+    fold_unlisted(Profiles(), harvest, 'token', 'bulk', new_stats(), refreshed, lambda _m: None)
+    assert refreshed[ME] == 'Andrea', "the fold must not overwrite a refreshed username"
+
+    # No authors, no credit: guessing would hand one mapper a collaborator's plays.
+    class NoOwners(Profiles):
+        def get(self, url, params=None, **k):
+            self.url = url
+            self.status_code = 404 if url.endswith('/beatmaps') else 200
+            return self
+    empty = new_stats()
+    assert fold_unlisted(NoOwners(), harvest, 'token', 'bulk', empty, {}, lambda _m: None) == 0
+    assert not empty[('ranked', 'own')]['pc'], "a failed owners lookup must fold nothing"
+    assert fold_unlisted(Profiles(), {}, 'token', 'bulk', empty, {}, lambda _m: None) == 0
+    print("unlisted sets OK: recovered from the profile listings, qualified and seen ones left out")
 
     # Configured credentials must never degrade to the public search in silence.
     _real_token = scan_logic.get_token
