@@ -74,6 +74,16 @@ def load_from_firebase(path='leaderboard'):
 
 # ---- API Helpers with Rate Limit Resilience ----
 
+def list_looks_truncated(found, known, floor=0.9):
+    """Whether a list that should hold `known` entries came back too short to trust.
+
+    Sources go down, and every one of them reports that as an empty list rather than as an
+    error. Measured against the last good scan, so there is no fixed number to maintain, and
+    disabled entirely when there is nothing to measure against - a first run has to publish.
+    """
+    return bool(known) and found < known * floor
+
+
 class ApiUnavailable(Exception):
     """The endpoint could not be read at all.
 
@@ -193,7 +203,20 @@ def run_global_scan(progress_callback=None, cancel_event=None):
     # 2. Fetch all BNs
     progress("Fetching BN list from Mapper's Guild...")
     all_bns = bn_data.get_all_bns()
-    
+
+    # Mapper's Guild supplies about two thirds of this list, and both of its fetches answer a
+    # refusal with an empty list - so an outage there arrives looking exactly like a community
+    # that shrank overnight. Publishing that drops every BN it failed to mention, and every duo
+    # they were half of, out of the ladder. Measured against what the last good scan found, so
+    # there is no magic number to keep up to date.
+    previous = load_from_firebase() or {}
+    known = previous.get('total_bns_scanned') or 0
+    if list_looks_truncated(len(all_bns), known):
+        msg = (f"Only {len(all_bns)} nominators listed, against {known} in the last scan - "
+               f"one of the sources is down. Previous leaderboard kept; re-run to try again.")
+        progress(msg)
+        return {'error': msg, 'total_bns': len(all_bns), 'previous_total_bns': known}
+
     if cancel_event and cancel_event.is_set():
         return {'error': 'Cancelled'}
     
@@ -357,13 +380,44 @@ def run_global_scan(progress_callback=None, cancel_event=None):
         return {'error': msg, 'unread_bns': len(unread_bns), 'total_bns': total_bns}
 
     progress("Saving results to Firebase...")
-    save_to_firebase(result)
+    if not save_to_firebase(result):
+        # The fallback file lands on whatever machine ran the scan, and on a CI runner that
+        # machine is about to be deleted. Saying "complete" here is how two hours of work
+        # disappear behind a green tick.
+        msg = "Scan finished but could not be published to Firebase; nothing was updated."
+        progress(msg)
+        return {'error': msg}
 
     progress(f"Scan complete! {len(top_bns)} BNs ranked, {len(duos)} duo pairs found.")
     return result
 
 
 if __name__ == '__main__':
+    # A short source list must never reach Firebase, and a publish that did not happen must
+    # never read as a finished scan. Both guards are one `if` each; this is what holds them.
+    assert list_looks_truncated(300, 955), 'a third of the list missing is an outage'
+    assert not list_looks_truncated(955, 955), 'the same list as last time is fine'
+    assert not list_looks_truncated(900, 955), 'nominators do retire; a small drop is normal'
+    assert not list_looks_truncated(0, 0), 'a first scan has nothing to measure against'
+    assert not list_looks_truncated(1200, 955), 'a growing list is not a truncated one'
+
+    import unittest.mock
+    _saved = (FIREBASE_URL, FIREBASE_SECRET)
+    globals()['FIREBASE_URL'], globals()['FIREBASE_SECRET'] = 'https://example.invalid', 'secret'
+    try:
+        with unittest.mock.patch.object(requests, 'put',
+                                        side_effect=requests.exceptions.Timeout('down')):
+            assert save_to_firebase({'x': 1}, path='selfcheck') is False, \
+                'a refused publish must report failure, not fall back in silence'
+        with unittest.mock.patch.object(requests, 'put',
+                                        return_value=unittest.mock.Mock(status_code=200)):
+            assert save_to_firebase({'x': 1}, path='selfcheck') is True
+    finally:
+        globals()['FIREBASE_URL'], globals()['FIREBASE_SECRET'] = _saved
+        if os.path.exists('selfcheck_cache.json'):
+            os.remove('selfcheck_cache.json')
+    print('global_scan self-check OK')
+
     from dotenv import load_dotenv
     load_dotenv()
     

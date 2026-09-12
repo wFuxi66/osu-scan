@@ -1019,7 +1019,15 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
     }
 
     progress("Saving mapper leaderboard to Firebase...")
-    save_to_firebase(result, path='mappers')
+    if not save_to_firebase(result, path='mappers'):
+        # Everything below this line throws away the work that would let a retry be cheap: the
+        # checkpoint that holds the finished crawl, and the owners paid for along the way. A
+        # publish that did not happen is not a finished scan, so none of it runs.
+        save_state(state)
+        save_cache(cache)
+        msg = "Scan finished but could not be published to Firebase; nothing was updated."
+        progress(msg)
+        return {'error': msg, 'total_sets_scanned': total_sets}
 
     # Only a complete pass may prune. Dropping entries the crawl simply never reached would
     # quietly bill the next run for work already paid for, and on a run that died early it
