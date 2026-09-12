@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, Response, jsonify, redirect
 import gzip
+import hmac
 import json
 from dotenv import load_dotenv
 import threading
@@ -25,11 +26,16 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 86400
 
 # Get real IP behind Render's proxy
 def get_real_ip():
-    # X-Forwarded-For contains: "client_ip, proxy1, proxy2..."
+    """The address the rate limiter counts against.
+
+    X-Forwarded-For reads "client, proxy1, proxy2...", and the left of it is whatever the
+    caller sent - a client that writes its own header gets a fresh identity per request and
+    the limit stops existing. Only the rightmost entry was appended by our own proxy, so
+    that is the one entry nobody outside can forge.
+    """
     forwarded = request.headers.get('X-Forwarded-For', '')
     if forwarded:
-        # Get the first IP (real client)
-        return forwarded.split(',')[0].strip()
+        return forwarded.split(',')[-1].strip()
     return request.remote_addr or '127.0.0.1'
 
 # Rate Limiter Configuration (per user IP)
@@ -39,6 +45,13 @@ limiter = Limiter(
     default_limits=["2000 per day", "500 per hour"],
     storage_uri="memory://"
 )
+
+# One scan is minutes of osu! API calls held in a thread of its own, so accepting them as
+# fast as they arrive is how one visitor takes the dyno down - and how the API starts
+# throttling everyone else's. Turning them away is the honest answer; they retry in a moment.
+MAX_CONCURRENT_SCANS = 6
+SCANS_RUNNING = 0
+SCANS_LOCK = threading.Lock()
 
 # JOBS storage: { 'job_id': { 'status', 'message', 'result', 'cancel_event', 'created_at' } }
 JOBS = {}
@@ -60,19 +73,20 @@ def cleanup_old_entries():
     old_jobs = [jid for jid, job in JOBS.items() 
                 if now - job.get('created_at', now) > CACHE_TTL_SECONDS]
     for jid in old_jobs:
-        del JOBS[jid]
+        # pop, not del: two cleanups racing would have the second one raise KeyError.
+        JOBS.pop(jid, None)
     
     # Cleanup old results (view cache)
     old_results = [cid for cid, result in RESULTS_CACHE.items() 
                    if now - result.get('created_at', now) > CACHE_TTL_SECONDS]
     for cid in old_results:
-        del RESULTS_CACHE[cid]
+        RESULTS_CACHE.pop(cid, None)
     
     # Cleanup old scan cache
     old_scans = [key for key, data in SCAN_CACHE.items()
                  if now - data.get('created_at', now) > SCAN_CACHE_TTL]
     for key in old_scans:
-        del SCAN_CACHE[key]
+        SCAN_CACHE.pop(key, None)
     
     if old_jobs or old_results or old_scans:
         print(f"Cleanup: removed {len(old_jobs)} jobs, {len(old_results)} results, {len(old_scans)} cached scans")
@@ -83,13 +97,19 @@ def index():
 
 def run_scan_job(job_id, username, mode, cancel_event):
     """Background thread function."""
+    # A scan that outlives its own job entry - the cleanup drops them after CACHE_TTL_SECONDS -
+    # used to finish, raise KeyError writing its result, and throw the whole scan away. The
+    # work is done by then; the least it can do is not crash on the way out.
+    def set_job(**fields):
+        job = JOBS.get(job_id)
+        if job is not None:
+            job.update(fields)
+
     def update_progress(msg):
-        if job_id in JOBS:
-            if cancel_event.is_set():
-                JOBS[job_id]['status'] = 'cancelled'
-                JOBS[job_id]['message'] = 'Cancelled.'
-                return
-            JOBS[job_id]['message'] = msg
+        if cancel_event.is_set():
+            set_job(status='cancelled', message='Cancelled.')
+            return
+        set_job(message=msg)
             
     try:
         if mode == 'nominators':
@@ -106,11 +126,9 @@ def run_scan_job(job_id, username, mode, cancel_event):
             title_prefix = "Guest Difficulties for"
             
         if cancel_event.is_set():
-            JOBS[job_id]['status'] = 'cancelled'
-            JOBS[job_id]['message'] = 'Scan cancelled by user.'
+            set_job(status='cancelled', message='Scan cancelled by user.')
         elif 'error' in result:
-             JOBS[job_id]['status'] = 'error'
-             JOBS[job_id]['error'] = result['error']
+            set_job(status='error', error=result['error'])
         else:
             payload = {
                 'username': result['username'],
@@ -118,23 +136,27 @@ def run_scan_job(job_id, username, mode, cancel_event):
                 'leaderboard': result['leaderboard'],
                 'sets_read': result.get('sets_read'),
                 'unread_sets': result.get('unread_sets'),
+                'listing_truncated': result.get('listing_truncated'),
                 'title_prefix': title_prefix
             }
             RESULTS_CACHE[job_id] = dict(payload, created_at=time.time())
-            JOBS[job_id]['status'] = 'done'
-            JOBS[job_id]['result_id'] = job_id
+            set_job(status='done', result_id=job_id)
             
             # Also save to SCAN_CACHE for future requests
             cache_key = f"{username.lower().strip()}:{mode}"
             SCAN_CACHE[cache_key] = {'result': payload, 'created_at': time.time()}
             
     except Exception as e:
-        JOBS[job_id]['status'] = 'error'
-        JOBS[job_id]['error'] = str(e)
+        set_job(status='error', error=str(e))
+    finally:
+        global SCANS_RUNNING
+        with SCANS_LOCK:
+            SCANS_RUNNING -= 1
 
 @app.route('/api/start_scan', methods=['POST'])
 @limiter.limit("30 per minute") # Max 30 scans per minute per IP
 def start_scan():
+    global SCANS_RUNNING
     # Run cleanup before starting new scan
     cleanup_old_entries()
     
@@ -160,6 +182,11 @@ def start_scan():
         }
         return jsonify({'job_id': job_id, 'cached': True})
         
+    with SCANS_LOCK:
+        if SCANS_RUNNING >= MAX_CONCURRENT_SCANS:
+            return jsonify({'error': 'Too many scans running right now. Try again in a minute.'}), 429
+        SCANS_RUNNING += 1
+
     job_id = str(uuid.uuid4())
     cancel_event = threading.Event()
     
@@ -170,8 +197,9 @@ def start_scan():
         'created_at': time.time()
     }
     
-    # Start background thread
-    thread = threading.Thread(target=run_scan_job, args=(job_id, username, mode, cancel_event))
+    # Start background thread. Daemon: a scan wedged on a slow API must not hold up a restart.
+    thread = threading.Thread(target=run_scan_job, args=(job_id, username, mode, cancel_event),
+                              daemon=True)
     thread.start()
     
     return jsonify({'job_id': job_id})
@@ -208,7 +236,8 @@ def results_view(cache_id):
                            leaderboard=data['leaderboard'],
                            title_prefix=data['title_prefix'],
                            sets_read=data.get('sets_read'),
-                           unread_sets=data.get('unread_sets'))
+                           unread_sets=data.get('unread_sets'),
+                           listing_truncated=data.get('listing_truncated'))
 
 
 # ---- Global BN Leaderboard ----
@@ -326,7 +355,7 @@ def trigger_global_scan():
     secret = request.form.get('secret') or request.args.get('secret') or ''
     expected = os.environ.get('SCAN_SECRET', '')
     
-    if not expected or secret != expected:
+    if not expected or not hmac.compare_digest(secret, expected):
         return jsonify({'error': 'Unauthorized'}), 403
     
     if GLOBAL_SCAN_RUNNING:

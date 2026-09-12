@@ -40,6 +40,14 @@
     <a class="btn-ghost" href="/leaderboard">Global leaderboards</a>
 </div>
 
+{% if listing_truncated %}
+{# The listing itself broke off, so we do not even know how many sets are missing. Printing
+   "read across N sets" underneath without saying so would pass a partial scan off as whole. #}
+<p class="alert">The osu! API stopped answering while listing {{ username }}'s sets, so this
+    scan did not see all of them. The names below are real, but some are missing — run the scan
+    again in a minute for the full picture.</p>
+{% endif %}
+
 {% if unread_sets %}
 {# A total short of what it should be is worse than no total, so it never passes for whole. #}
 <p class="alert">{{ unread_sets }} {{ 'set' if unread_sets == 1 else 'sets' }} could not be

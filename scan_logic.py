@@ -3,6 +3,7 @@ import time
 import os
 import json
 import concurrent.futures
+import threading
 from collections import defaultdict
 
 # Configuration constants
@@ -105,8 +106,9 @@ def get_user_id(username_or_id, token):
     try:
         response = requests.get(url, headers=headers, params=params, timeout=5)
         if response.status_code == 200:
-            return response.json()['id'], response.json()['username']
-    except:
+            data = response.json()
+            return data['id'], data['username']
+    except Exception:
         pass
 
     # If failed, maybe it was an ID?
@@ -115,32 +117,39 @@ def get_user_id(username_or_id, token):
         try:
             response = requests.get(url, headers=headers, timeout=5)
             if response.status_code == 200:
-                return response.json()['id'], response.json()['username']
-        except:
+                data = response.json()
+                return data['id'], data['username']
+        except Exception:
             pass
             
     return None, None
 
 
 def get_beatmapsets(user_id, token, cancel_event=None):
-    """Fetches all beatmap sets for a user."""
+    """Every counted set on a user's profile, and whether the listing ran short.
+
+    A page the API refuses is not a page with nothing on it. Returning the sets that did
+    arrive without a word turns a throttled scan into a confident, wrong report - it prints
+    "read across N sets" for an N nobody can tell is short.
+    """
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
     # Qualified sets have no bucket of their own: they sit in 'pending' alongside the wip and
     # pending ones, which the status filter below drops.
     set_types = ['ranked', 'loved', 'pending']
+    truncated = False
     session = requests.Session()
     
     for s_type in set_types:
         if cancel_event and cancel_event.is_set():
             session.close()
-            return []
+            return [], False
         offset = 0
         limit = 100
         while True:
             if cancel_event and cancel_event.is_set():
                 session.close()
-                return []
+                return [], False
             params = {'limit': limit, 'offset': offset}
             url = f'{API_BASE}/users/{user_id}/beatmapsets/{s_type}'
             
@@ -170,15 +179,17 @@ def get_beatmapsets(user_id, token, cancel_event=None):
                 time.sleep(0.05) 
             except Exception as e:
                 print(f"Warning: Failed to fetch {s_type} sets: {e}")
+                truncated = True
                 break
                 
     session.close()
-    return all_sets
+    return all_sets, truncated
 
 def get_nominated_beatmapsets(user_id, token, cancel_event=None):
-    """Fetches all beatmap sets nominated by a user."""
+    """Every set a user nominated, and whether the listing ran short. See get_beatmapsets."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
+    truncated = False
     session = requests.Session()
     
     offset = 0
@@ -187,7 +198,7 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
     while True:
         if cancel_event and cancel_event.is_set():
             session.close()
-            return []
+            return [], False
         
         # This is a hidden endpoint, pagination support is assumed but not guaranteed.
         # If pagination doesn't accept 'offset', we might only get the first page.
@@ -212,10 +223,11 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
             time.sleep(0.05)
         except Exception as e:
             print(f"Warning: Failed to fetch nominated sets: {e}")
+            truncated = True
             break
             
     session.close()
-    return all_sets
+    return all_sets, truncated
 
 def get_set_with_retry(url, headers, session=None):
     """Reads one set, waiting out a rate limit. None means the read did not happen."""
@@ -342,12 +354,25 @@ def load_user_cache():
         except Exception as e:
             print(f"Error loading user cache: {e}")
 
-def save_user_cache():
+# Two scans running at once were writing these files on top of each other: a half-written
+# JSON is unreadable next boot, and json.dump over a dict another thread is filling raises
+# outright. One writer at a time, and the rename is what makes the swap atomic.
+CACHE_WRITE_LOCK = threading.Lock()
+
+
+def _save_json_atomic(path, data, label):
     try:
-        with open(USER_CACHE_FILE, 'w') as f:
-            json.dump(USER_CACHE, f)
+        with CACHE_WRITE_LOCK:
+            tmp = f'{path}.tmp'
+            with open(tmp, 'w') as f:
+                json.dump(dict(data), f)
+            os.replace(tmp, path)
     except Exception as e:
-        print(f"Error saving user cache: {e}")
+        print(f"Error saving {label}: {e}")
+
+
+def save_user_cache():
+    _save_json_atomic(USER_CACHE_FILE, USER_CACHE, 'user cache')
 
 load_user_cache()
 
@@ -368,11 +393,7 @@ def load_nom_cache():
             print(f"Error loading nomination cache: {e}")
 
 def save_nom_cache():
-    try:
-        with open(NOM_CACHE_FILE, 'w') as f:
-            json.dump(NOM_CACHE, f)
-    except Exception as e:
-        print(f"Error saving nomination cache: {e}")
+    _save_json_atomic(NOM_CACHE_FILE, NOM_CACHE, 'nomination cache')
 
 load_nom_cache()
 
@@ -465,7 +486,9 @@ def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=
     msg = f"Scanning {total} sets for Nominators..."
     if progress_callback: progress_callback(msg)
     
-    if cancel_event and cancel_event.is_set(): return []
+    # Two values, like every other exit: the caller unpacks them, and a bare [] here used to
+    # turn a cancelled scan into "not enough values to unpack".
+    if cancel_event and cancel_event.is_set(): return [], 0
     
     session = requests.Session()
     known = len(NOM_CACHE)
@@ -534,7 +557,7 @@ def generate_nominator_leaderboard_for_user(username_input, progress_callback=No
         
     # Fetch sets
     if progress_callback: progress_callback(f"Fetching beatmap sets for {username}...")
-    sets = get_beatmapsets(user_id, token, cancel_event)
+    sets, truncated = get_beatmapsets(user_id, token, cancel_event)
     sets = [b for b in sets if b.get('status') in NOMINATED_STATUSES]
     
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
@@ -545,7 +568,8 @@ def generate_nominator_leaderboard_for_user(username_input, progress_callback=No
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     if not noms:
-         return {'username': username, 'user_id': user_id, 'leaderboard': [], 'unread_sets': unread}
+         return {'username': username, 'user_id': user_id, 'leaderboard': [],
+                 'unread_sets': unread, 'listing_truncated': truncated}
          
     leaderboard = resolve_and_aggregate_nominators(noms, token, progress_callback)
     
@@ -555,6 +579,7 @@ def generate_nominator_leaderboard_for_user(username_input, progress_callback=No
         'leaderboard': leaderboard,
         'sets_read': len(sets),
         'unread_sets': unread,
+        'listing_truncated': truncated,
         'type': 'Nominators'
     }
 
@@ -570,13 +595,14 @@ def generate_bn_leaderboard_for_user(username_input, progress_callback=None, can
     
     # 1. Fetch nominated sets
     if progress_callback: progress_callback(f"Fetching maps nominated by {username}...")
-    sets = get_nominated_beatmapsets(user_id, token, cancel_event)
+    sets, truncated = get_nominated_beatmapsets(user_id, token, cancel_event)
     sets = [b for b in sets if b.get('status') in NOMINATED_STATUSES]
     
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     if not sets:
-         return {'username': username, 'user_id': user_id, 'leaderboard': []}
+         return {'username': username, 'user_id': user_id, 'leaderboard': [],
+                 'listing_truncated': truncated}
 
     # 2. Count mappers (user_id field in beatmapset)
     if progress_callback: progress_callback(f"Analyzing {len(sets)} nominations...")
@@ -620,13 +646,15 @@ def generate_bn_leaderboard_for_user(username_input, progress_callback=None, can
         'user_id': user_id,
         'leaderboard': leaderboard,
         'sets_read': len(sets),
+        'listing_truncated': truncated,
         'type': 'Nominations'
     }
 
 def get_guest_beatmapsets(user_id, token, cancel_event=None):
-    """Fetches all beatmap sets where the user has contributed a guest difficulty."""
+    """Every set the user guested on, and whether the listing ran short. See get_beatmapsets."""
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
+    truncated = False
     session = requests.Session()
     
     offset = 0
@@ -635,7 +663,7 @@ def get_guest_beatmapsets(user_id, token, cancel_event=None):
     while True:
         if cancel_event and cancel_event.is_set():
             session.close()
-            return []
+            return [], False
         
         params = {'limit': limit, 'offset': offset}
         url = f'{API_BASE}/users/{user_id}/beatmapsets/guest'
@@ -659,10 +687,11 @@ def get_guest_beatmapsets(user_id, token, cancel_event=None):
             time.sleep(0.05)
         except Exception as e:
             print(f"Warning: Failed to fetch guest sets: {e}")
+            truncated = True
             break
             
     session.close()
-    return all_sets
+    return all_sets, truncated
 
 def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=None, cancel_event=None):
     """New Mode: Find which mappers the user has made the most GDs for."""
@@ -676,12 +705,13 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
     
     # 1. Fetch guest beatmapsets (maps where user contributed a GD)
     if progress_callback: progress_callback(f"Fetching GD sets for {username}...")
-    sets = get_guest_beatmapsets(user_id, token, cancel_event)
+    sets, truncated = get_guest_beatmapsets(user_id, token, cancel_event)
     
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     if not sets:
-         return {'username': username, 'user_id': user_id, 'leaderboard': []}
+         return {'username': username, 'user_id': user_id, 'leaderboard': [],
+                 'listing_truncated': truncated}
 
     # 2. Count hosts (user_id field in each beatmapset = the host)
     if progress_callback: progress_callback(f"Analyzing {len(sets)} GD sets...")
@@ -726,6 +756,7 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
         'user_id': user_id,
         'leaderboard': leaderboard,
         'sets_read': len(sets),
+        'listing_truncated': truncated,
         'type': 'GD Hosts'
     }
 
@@ -779,7 +810,7 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
         
     if progress_callback: progress_callback(f"Found User: {username}. Fetching sets...")
     
-    sets = get_beatmapsets(user_id, token, cancel_event)
+    sets, truncated = get_beatmapsets(user_id, token, cancel_event)
     
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
@@ -788,7 +819,8 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     if not gds:
-        return {'username': username, 'user_id': user_id, 'leaderboard': []}
+        return {'username': username, 'user_id': user_id, 'leaderboard': [],
+                'listing_truncated': truncated}
         
     leaderboard = resolve_and_aggregate(gds, token, progress_callback)
     
@@ -796,7 +828,8 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
         'username': username,
         'user_id': user_id,
         'leaderboard': leaderboard,
-        'sets_read': len(sets)
+        'sets_read': len(sets),
+        'listing_truncated': truncated
     }
 
 
@@ -806,6 +839,8 @@ if __name__ == '__main__':
             self.status_code, self._payload, self.headers = status, payload, {'Retry-After': retry_after}
         def json(self):
             return self._payload
+        def raise_for_status(self):
+            pass
 
     class FakeSession:
         def __init__(self, *responses):
@@ -838,5 +873,43 @@ if __name__ == '__main__':
         out = resolve_users_parallel([1, 2], 'tok')
     assert out == {1: 'Kecco', 2: 'User_2'}, 'a user the endpoint omits is restricted'
     assert USER_CACHE[2] == 'User_2'
+
+    # A listing that gives up mid-way must say so. Reporting the sets that did arrive as if
+    # they were all of them is what turns a throttled scan into a confident, wrong report.
+    class PagedSession:
+        def __init__(self, pages):
+            self.pages, self.n = pages, 0
+        def get(self, url, headers=None, params=None, timeout=None):
+            # Out of scripted pages means an empty bucket, which is an answer, not a failure:
+            # get_beatmapsets walks three of them.
+            if self.n >= len(self.pages):
+                return FakeResp(200, [])
+            page = self.pages[self.n]
+            self.n += 1
+            if isinstance(page, Exception):
+                raise page
+            return FakeResp(200, page)
+        def close(self):
+            pass
+
+    full = [{'id': i, 'status': 'ranked'} for i in range(100)]
+    with unittest.mock.patch(__name__ + '.requests.Session',
+                             lambda: PagedSession([full, requests.exceptions.Timeout('boom')])):
+        sets, truncated = get_beatmapsets(1, 'tok')
+    assert truncated is True, 'a listing that broke off must report it'
+    assert len(sets) == 100, 'the sets that did arrive are still worth keeping'
+
+    with unittest.mock.patch(__name__ + '.requests.Session',
+                             lambda: PagedSession([full[:5]])):
+        sets, truncated = get_beatmapsets(1, 'tok')
+    assert truncated is False and len(sets) == 5, 'a listing that finished is not truncated'
+
+    # Cancelling used to hand the caller a bare list, which it unpacks into two names.
+    cancelled = threading.Event()
+    cancelled.set()
+    noms, unread = analyze_nominators([], 'tok', None, cancelled)
+    assert (noms, unread) == ([], 0)
+    sets, truncated = get_beatmapsets(1, 'tok', cancelled)
+    assert (sets, truncated) == ([], False)
 
     print('scan_logic self-check OK')
