@@ -150,11 +150,10 @@
         ? '<a class="gone">Restricted account</a>'
         : `<a href="https://osu.ppy.sh/users/${id}" target="_blank" rel="noopener">${esc(name)}</a>`;
 
-    function esc(s) {
-        const el = document.createElement('span');
-        el.textContent = s == null ? '' : s;
-        return el.innerHTML;
-    }
+    const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+    // A DOM node per name was fine at a handful of rows; the duo board builds 36,000 of
+    // them before it can show fifty.
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ESCAPES[c]);
 
     // The initial sits underneath, so a missing avatar degrades to a letter, not an empty tile.
     const face = (id, name, cls) =>
@@ -185,16 +184,15 @@
         return d[emode] || 0;
     }
 
-    /* ---------------- rows: every builder returns the whole ranked leaderboard ---------------- */
+    /* ---------------- rows: every builder returns the whole ranked leaderboard ----------------
+       They carry data, not markup. Building the name cell for all 18k entries in order to show
+       fifty of them is what made typing in the search box stutter. See CELL below. */
 
     function rowsBns() {
         const out = [];
         for (const bn of (bnData?.top_bns || [])) {
             const v = pick(bn.by_mode, bn.total);
-            if (v > 0) out.push({
-                key: bn.username, id: bn.osu_id, value: v, main: num(v),
-                who: nameCell(bn.osu_id, bn.username) + modeIcons(bn.by_mode),
-            });
+            if (v > 0) out.push({ key: bn.username, id: bn.osu_id, by_mode: bn.by_mode, value: v });
         }
         return out.sort((a, b) => b.value - a.value);
     }
@@ -211,11 +209,8 @@
         const best = duos[0]?.count || 1;
         return duos.map(d => ({
             key: `${d.bn1_name} ${d.bn2_name}`, id: d.bn1_id, id2: d.bn2_id,
-            name1: d.bn1_name, name2: d.bn2_name,
-            value: d.count, main: num(d.count),
-            who: nameCell(d.bn1_id, d.bn1_name) + '<span class="pair">\u00d7</span>'
-                + nameCell(d.bn2_id, d.bn2_name) + modeIcons({ [d.mode]: 1 })
-                + `<span class="gauge" style="--p:${(d.count / best * 100).toFixed(1)}%"></span>`,
+            name1: d.bn1_name, name2: d.bn2_name, mode: d.mode,
+            value: d.count, gauge: (d.count / best * 100).toFixed(1),
         }));
     }
 
@@ -233,7 +228,7 @@
     // Only the "own" figures are stored, so a guest figure is the remainder.
     const byScope = (all, own) => scope === 'own' ? own : scope === 'guest' ? all - own : all;
 
-    function mapperRows(valueOf, subOf) {
+    function mapperRows(valueOf) {
         const out = [];
         for (const m of (mapperData?.mappers || [])) {
             const g = k => {
@@ -272,17 +267,46 @@
         const ranked = out.filter(m => valueOf(m) > 0);
         ranked.sort((a, b) => valueOf(b) - valueOf(a) || b.pc - a.pc);
         return ranked.map(m => ({
-            key: m.name, id: m.id, value: valueOf(m),
-            main: num(valueOf(m)), sub: subOf(m),
-            who: nameCell(m.id, m.name) + modeIcons(m.by_mode),
+            key: m.name, id: m.id, by_mode: m.by_mode, value: valueOf(m),
+            maps: m.maps, loved: m.loved,
         }));
     }
 
-    const rowsMappers = () => mapperRows(m => m.pc, m =>
-        `${num(m.maps)} difficulties` + (m.loved > 0 ? ` · ${COMPACT.format(m.loved)} loved` : ''));
-    const rowsSets = () => mapperRows(m => m.sets, () => '');
+    const rowsMappers = () => mapperRows(m => m.pc);
+    const rowsSets = () => mapperRows(m => m.sets);
 
     const BUILD = { bns: rowsBns, duos: rowsDuos, mappers: rowsMappers, sets: rowsSets };
+
+    // The markup for one entry, built only for the entries a reader can actually see.
+    const CELL = {
+        bns: r => ({ who: nameCell(r.id, r.key) + modeIcons(r.by_mode) }),
+        duos: r => ({
+            who: nameCell(r.id, r.name1) + '<span class="pair">\u00d7</span>'
+                + nameCell(r.id2, r.name2) + modeIcons({ [r.mode]: 1 })
+                + `<span class="gauge" style="--p:${r.gauge}%"></span>`,
+        }),
+        mappers: r => ({
+            who: nameCell(r.id, r.key) + modeIcons(r.by_mode),
+            sub: `${num(r.maps)} difficulties`
+                + (r.loved > 0 ? ` · ${COMPACT.format(r.loved)} loved` : ''),
+        }),
+        sets: r => ({ who: nameCell(r.id, r.key) + modeIcons(r.by_mode) }),
+    };
+
+    // Building a board means walking every mapper, or every pair, and sorting the result. That
+    // only changes when the filters or the data do - not when someone types a letter or turns a
+    // page, which is when it was being redone.
+    let memo = { key: null, rows: [] }, dataVersion = 0;
+
+    function built() {
+        const key = [board, scope, emode, withLoved, dataVersion].join('|');
+        if (memo.key !== key) {
+            const rows = BUILD[board]();
+            rows.forEach((r, i) => r.rank = i + 1);   // rank before filtering, so it stays global
+            memo = { key, rows };
+        }
+        return memo.rows;
+    }
 
     /* ---------------- render ---------------- */
 
@@ -321,8 +345,7 @@
             return;
         }
 
-        let all = BUILD[board]();
-        all.forEach((r, i) => r.rank = i + 1);      // rank before filtering, so it stays global
+        const all = built();
 
         const rows = query ? all.filter(r => r.key.toLowerCase().includes(query)) : all;
         const totalPages = Math.max(1, Math.ceil(rows.length / PER_PAGE));
@@ -340,12 +363,13 @@
                 + `Check the spelling, or clear the search to see the whole board.</div>`;
         } else {
             $('rows').innerHTML = shown.map(r => {
+                const c = CELL[board](r);
                 const cls = r.rank <= 3 ? ` top r${r.rank}` : '';
                 return `<div class="row${cls}">`
                     + `<span class="rank">${r.rank}</span>`
                     + avatar(r)
-                    + `<span class="who">${r.who}</span>`
-                    + `<span class="n">${r.main}${r.sub ? `<span class="sub">${r.sub}</span>` : ''}</span>`
+                    + `<span class="who">${c.who}</span>`
+                    + `<span class="n">${num(r.value)}${c.sub ? `<span class="sub">${c.sub}</span>` : ''}</span>`
                     + `</div>`;
             }).join('');
         }
@@ -353,17 +377,20 @@
     }
 
     function podium(three, unit) {
-        return '<div class="podium">' + three.map((r, i) => `
+        return '<div class="podium">' + three.map((r, i) => {
+            const c = CELL[board](r);
+            return `
             <div class="plinth p${i + 1}">
                 <div class="place">${i + 1}</div>
                 ${avatar(r)}
                 <div class="body">
-                    <span class="who">${r.who}</span>
-                    <div class="tally">${r.main}</div>
+                    <span class="who">${c.who}</span>
+                    <div class="tally">${num(r.value)}</div>
                     <div class="unit">${unit.toLowerCase()}</div>
                 </div>
-                ${r.sub ? `<div class="extra">${r.sub}</div>` : ''}
-            </div>`).join('') + '</div>';
+                ${c.sub ? `<div class="extra">${c.sub}</div>` : ''}
+            </div>`;
+        }).join('') + '</div>';
     }
 
     function pager(p, totalPages, count) {
@@ -455,13 +482,13 @@
     render();
 
     fetch('/api/leaderboard_data').then(r => r.json()).then(d => {
-        bnData = d; stats(); render();
+        bnData = d; dataVersion++; stats(); render();
     }).catch(() => { });
 
     fetch('/api/mappers_data').then(r => r.json()).then(d => {
         mapperData = d;
         scopeAvailable = 'own_playcount' in ((d.mappers || [])[0] || {});
-        stats(); render();
+        dataVersion++; stats(); render();
     }).catch(() => { });
 </script>
 {% endblock %}
