@@ -219,50 +219,8 @@ def results_view(cache_id):
                            username=data['username'],
                            user_id=data.get('user_id'),
                            leaderboard=data['leaderboard'],
-                           title_prefix=data['title_prefix'],
-                           cache_id=cache_id)
+                           title_prefix=data['title_prefix'])
 
-
-def _inline_css():
-    """The stylesheet as text, for a report that has to stand on its own.
-
-    A downloaded file cannot reach url_for('static', ...): the href resolves against
-    wherever it was saved, so the export would open unstyled. Read once, then reused.
-    """
-    if not hasattr(_inline_css, 'cached'):
-        with open(os.path.join(app.static_folder, 'style.css'), encoding='utf-8') as f:
-            _inline_css.cached = f.read()
-    return _inline_css.cached
-
-
-@app.route('/download/<cache_id>')
-def download_report(cache_id):
-    data = RESULTS_CACHE.get(cache_id)
-    if not data:
-        return "Results expired."
-
-    # standalone drops the nav and inlines the CSS; cache_id=None hides the download link
-    # from the copy being downloaded.
-    html = render_template('results.html',
-                           username=data['username'],
-                           user_id=data.get('user_id'),
-                           leaderboard=data['leaderboard'],
-                           title_prefix=data['title_prefix'],
-                           cache_id=None,
-                           standalone=True,
-                           inline_css=_inline_css())
-
-
-    # Filename matches the page title: "{title_prefix} {username}.html"
-    title_prefix = data.get('title_prefix', 'Results')
-    username = data['username']
-    filename = f"{title_prefix} {username}.html"
-    
-    return Response(
-        html,
-        mimetype="text/html",
-        headers={"Content-Disposition": f"attachment;filename={filename}"}
-    )
 
 # ---- Global BN Leaderboard ----
 

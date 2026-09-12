@@ -9,6 +9,11 @@ from collections import defaultdict
 API_BASE = 'https://osu.ppy.sh/api/v2'
 TOKEN_URL = 'https://osu.ppy.sh/oauth/token'
 
+# What a scan credits. Qualified is in because it ranks within the week; approved is ranked
+# under an older name. Anything unfinished - pending, wip, graveyard - is not a credit and
+# never enters a count, whichever endpoint hands it over.
+COUNTED_STATUSES = ('ranked', 'approved', 'qualified', 'loved')
+
 # User Credentials - MUST be set via environment variables
 # On Render: Set in Dashboard > Environment
 # Locally: Create a .env file (see .env.example)
@@ -209,6 +214,7 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
 def process_set(bset, host_id, token=None):
     """Scans a single set and finds unique GDers."""
     gds_in_set = []
+    loved = bset.get('status') == 'loved'
     
     beats = bset.get('beatmaps')
     if beats is None and token:
@@ -239,7 +245,8 @@ def process_set(bset, host_id, token=None):
                     gd_entry = {
                         'mapper_id': owner['id'],
                         'mapper_name': owner.get('username'), 
-                        'last_updated': beatmap.get('last_updated', '').split('T')[0]
+                        'last_updated': beatmap.get('last_updated', '').split('T')[0],
+                        'loved': loved
                     }
                     gds_in_set.append(gd_entry)
                     seen_mappers_in_set.add(owner['id'])
@@ -249,7 +256,8 @@ def process_set(bset, host_id, token=None):
                 gd_entry = {
                     'mapper_id': mapper_id,
                     'mapper_name': None, 
-                    'last_updated': beatmap.get('last_updated', '').split('T')[0]
+                    'last_updated': beatmap.get('last_updated', '').split('T')[0],
+                    'loved': loved
                 }
                 gds_in_set.append(gd_entry)
                 seen_mappers_in_set.add(mapper_id)
@@ -402,7 +410,7 @@ def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=
     """Fetches nominators for the provided beatmap sets using threading."""
     all_nominations = []
     
-    target_sets = [b for b in beatmapsets if b['status'] in ['ranked', 'loved', 'qualified', 'approved']]
+    target_sets = [b for b in beatmapsets if b['status'] in COUNTED_STATUSES]
     total = len(target_sets)
     
     msg = f"Scanning {total} sets for Nominators..."
@@ -579,7 +587,9 @@ def get_guest_beatmapsets(user_id, token, cancel_event=None):
             
             if not data: break
                 
-            all_sets.extend(data)
+            # The bucket is whatever the endpoint feels like returning; only the four statuses
+            # a scan counts are kept. A graveyard or wip set is not a credit.
+            all_sets.extend(s for s in data if s.get('status') in COUNTED_STATUSES)
             
             if len(data) < limit: break
             
@@ -614,12 +624,13 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
     # 2. Count hosts (user_id field in each beatmapset = the host)
     if progress_callback: progress_callback(f"Analyzing {len(sets)} GD sets...")
     
-    stats = defaultdict(lambda: {'count': 0, 'last_date': ''})
+    stats = defaultdict(lambda: {'count': 0, 'loved': 0, 'last_date': ''})
     hosts_to_resolve = set()
     
     for bset in sets:
         host_id = bset['user_id']
         hosts_to_resolve.add(host_id)
+        stats[host_id]['loved'] += bset.get('status') == 'loved'
         
         # Use ranked_date or last_updated as date
         date = (bset.get('ranked_date') or bset.get('last_updated') or '').split('T')[0]
@@ -642,6 +653,7 @@ def generate_gd_hosts_leaderboard_for_user(username_input, progress_callback=Non
             'mapper_id': host_id,
             'mapper_name': name,
             'total_gds': data['count'],
+            'loved_gds': data['loved'],
             'last_gd_date': data['last_date']
         })
         
@@ -664,7 +676,7 @@ def resolve_and_aggregate(gds, token, progress_callback=None):
     user_cache = resolve_users_parallel(unique_ids_to_resolve, token, progress_callback)
             
     # Aggregate
-    stats = defaultdict(lambda: {'count': 0, 'last_date': '', 'name': None})
+    stats = defaultdict(lambda: {'count': 0, 'loved': 0, 'last_date': '', 'name': None})
     
     for gd in gds:
         row = stats[gd['mapper_id']]
@@ -673,6 +685,8 @@ def resolve_and_aggregate(gds, token, progress_callback=None):
         date = gd['last_updated']
         
         row['count'] += 1
+        # In the total, as on the boards, but named under it: loved is not ranked.
+        row['loved'] += bool(gd.get('loved'))
         if date > row['last_date']:
             row['last_date'] = date
 
@@ -683,6 +697,7 @@ def resolve_and_aggregate(gds, token, progress_callback=None):
             'mapper_id': uid,
             'mapper_name': data['name'] or user_cache.get(uid, f"ID:{uid}"),
             'total_gds': data['count'],
+            'loved_gds': data['loved'],
             'last_gd_date': data['last_date']
         })
     

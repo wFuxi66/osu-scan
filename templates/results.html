@@ -32,16 +32,10 @@
     </div>
 </section>
 
-{% if not standalone %}
 <div class="actions">
     <a class="btn-ghost" href="/">Scan someone else</a>
     <a class="btn-ghost" href="/leaderboard">Global leaderboards</a>
-    {# Absent from the downloaded copy, which is already the thing it would offer. #}
-    {% if cache_id %}
-    <a class="btn-ghost" href="/download/{{ cache_id }}" download>Save as HTML</a>
-    {% endif %}
 </div>
-{% endif %}
 
 {% if not leaderboard %}
 <div class="blank">
@@ -79,7 +73,10 @@
         </span>
         <span class="n">
             {{ entry.total_gds }}
-            {% if entry.last_gd_date %}<span class="sub">last {{ entry.last_gd_date }}</span>{% endif %}
+            {# Loved counts, as it does on the boards, but it is not ranked: say so under the total. #}
+            {% set sub = [(entry.loved_gds ~ ' loved') if entry.loved_gds else '',
+                          ('last ' ~ entry.last_gd_date) if entry.last_gd_date else '']|select|list %}
+            {% if sub %}<span class="sub">{{ sub|join(' · ') }}</span>{% endif %}
         </span>
     </div>
     {% endfor %}
