@@ -2,6 +2,14 @@
 {% set page = 'scan' %}
 {% block title %}osu!scan — who maps with you{% endblock %}
 
+{% block head %}
+{# The boards are two large payloads fetched on arrival, which is a wait nobody asked for.
+   Pulling them at idle priority while someone types a username means /leaderboard finds
+   them in the cache. Worth nothing without the Cache-Control those endpoints send. #}
+<link rel="prefetch" href="{{ url_for('leaderboard_data') }}" as="fetch">
+<link rel="prefetch" href="{{ url_for('mappers_data') }}" as="fetch">
+{% endblock %}
+
 {% block content %}
 <section class="hero">
     <div class="hero-lead">

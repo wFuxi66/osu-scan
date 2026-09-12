@@ -18,6 +18,11 @@ from flask_limiter import Limiter
 
 app = Flask(__name__)
 
+# The stylesheet and the two marks only change when the repo does. Without this Flask asks
+# the browser to revalidate each one on every page view: three round trips to be told
+# nothing moved.
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 86400
+
 # Get real IP behind Render's proxy
 def get_real_ip():
     # X-Forwarded-For contains: "client_ip, proxy1, proxy2..."
@@ -328,13 +333,12 @@ def next_mappers_data():
 @limiter.exempt
 def leaderboard_data():
     """Returns full leaderboard JSON. Client handles filtering/pagination."""
-    data = get_leaderboard_data(next_path('leaderboard'))
-    if not data:
-        return jsonify(None)
-    return jsonify(data)
+    # The duo list alone runs to 18k pairs: ~1.9MB of JSON that gzips to ~0.2MB.
+    return gzipped_json(get_leaderboard_data(next_path('leaderboard')), 'bns')
 
-# The mapper ladder holds every mapper in the game, so the raw JSON runs to megabytes.
-# gzip cuts it by ~4x; the payload only changes once a month, so compress it once and reuse.
+# Both ladders run to megabytes of JSON - every mapper in the game on one, every pair of
+# nominators on the other. gzip cuts them by 7-9x; they only change when a scan lands, so
+# compress once and reuse.
 GZIP_CACHE = {}
 
 def gzipped_json(payload, cache_key):
@@ -350,11 +354,16 @@ def gzipped_json(payload, cache_key):
         cached = {'version': version, 'raw': body, 'gzip': gzip.compress(body, 6)}
         GZIP_CACHE[cache_key] = cached
 
+    # Held exactly as long as the server-side copy. Someone moving between the boards and
+    # the scan page was pulling the same megabytes down each time. An empty payload is a
+    # Firebase hiccup rather than a result, so that is the one thing no browser keeps.
+    headers = {'Vary': 'Accept-Encoding',
+               'Cache-Control': f'public, max-age={LEADERBOARD_CACHE_TTL}' if payload else 'no-store'}
+
     if 'gzip' not in request.headers.get('Accept-Encoding', ''):
-        return Response(cached['raw'], mimetype='application/json',
-                        headers={'Vary': 'Accept-Encoding'})
+        return Response(cached['raw'], mimetype='application/json', headers=headers)
     return Response(cached['gzip'], mimetype='application/json',
-                    headers={'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding'})
+                    headers={**headers, 'Content-Encoding': 'gzip'})
 
 @app.route('/api/mappers_data')
 @limiter.exempt
