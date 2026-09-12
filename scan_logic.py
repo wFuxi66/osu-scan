@@ -124,7 +124,7 @@ def get_beatmapsets(user_id, token, cancel_event=None):
     headers = {'Authorization': f'Bearer {token}'}
     all_sets = []
     # Qualified sets have no bucket of their own: they sit in 'pending' alongside the wip and
-    # pending ones, which nobody has signed off on and which are filtered back out below.
+    # pending ones, which the status filter below drops.
     set_types = ['ranked', 'loved', 'pending']
     session = requests.Session()
     
@@ -153,7 +153,9 @@ def get_beatmapsets(user_id, token, cancel_event=None):
                     break
                     
                 for s in data:
-                    if s_type == 'pending' and s.get('status') != 'qualified':
+                    # The same rule as everywhere else, rather than a rule per bucket: what
+                    # a bucket is called is the API's business, the status is the answer.
+                    if s.get('status') not in COUNTED_STATUSES:
                         continue
                     s['status_category'] = s.get('status') or s_type
                     all_sets.append(s)
