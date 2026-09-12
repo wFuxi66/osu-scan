@@ -613,6 +613,43 @@ def merge_modes(*dicts):
     return dict(out)
 
 
+# The search endpoint will not report a `total` above this, whatever the real figure is.
+SEARCH_TOTAL_CAP = 10000
+
+
+def corpus_total(session, token):
+    """How many mapsets a full crawl should expect, or None if that cannot be established.
+
+    A page's own `total` is capped at SEARCH_TOTAL_CAP, which made the progress line read
+    "60000/10000" - and, far worse, quietly disabled the completeness guard, since a crawl
+    that died at 15000 sets is not below 10000 * 0.99 either. Asking per status gets the real
+    figures back, because each one is counted separately and comes in under the cap.
+
+    Returns None rather than a guess: the caller treats an unknown total as "no guard", which
+    is what it already did, instead of refusing to publish a scan that is actually complete.
+    """
+    headers = {**HEADERS, 'Authorization': f'Bearer {token}'} if token else dict(HEADERS)
+    url = API_SEARCH_URL if token else SEARCH_URL
+    total = 0
+    for status in ('ranked', 'loved'):
+        try:
+            r = get(session, url, headers, {'s': status, 'nsfw': 'true'})
+        except AuthRejected:
+            return None
+        if r is None:
+            return None
+        n = (r.json() or {}).get('total')
+        # A missing total is unusable; a zero one is an answer. Exactly the cap means the
+        # figure is the cap rather than the count - a per-status total is otherwise reported
+        # in full, well past it (ranked alone is ~57k), so only the exact value is suspect.
+        # A corpus of precisely 10000 reads as unknown, which disables the guard rather than
+        # misfiring it.
+        if n is None or n == SEARCH_TOTAL_CAP:
+            return None
+        total += n
+    return total or None
+
+
 def fetch_page(session, cursor, token):
     """One page of search results.
 
@@ -711,7 +748,13 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         if not page_sets:
             break
         if state['reported_total'] is None:
-            state['reported_total'] = data.get('total')
+            # Deliberately not data['total'], which is capped and would read as the corpus.
+            state['reported_total'] = corpus_total(session, token)
+            if state['reported_total']:
+                progress(f"Expecting about {state['reported_total']} mapsets.")
+            else:
+                progress("Could not establish the corpus size; this pass cannot check itself "
+                         "for completeness and will publish whatever it reaches.")
 
         if state['owners_mode'] is None:
             probe = next((b for b in page_sets if b.get('beatmaps')), None)
