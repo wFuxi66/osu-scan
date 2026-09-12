@@ -74,22 +74,38 @@ def load_from_firebase(path='leaderboard'):
 
 # ---- API Helpers with Rate Limit Resilience ----
 
-def safe_api_get(url, headers, params=None, timeout=15, session=None, max_retries=5):
-    """Executes a GET request with automatic 429 backoff retry and unauthenticated web fallback."""
+class ApiUnavailable(Exception):
+    """The endpoint could not be read at all.
+
+    Distinct from a 404, which is a real answer meaning "nothing here". Conflating the two
+    is how a rate-limited scan ends up looking like a BN who simply nominated nothing.
+    """
+
+
+# osu! answers a burst on these endpoints with a Retry-After measured in half hours. Capping
+# the wait at 15s, as this used to, just spends every attempt inside the window and gives up
+# still throttled - so the scan reported no nominations for whoever it was reading at the
+# time. Waiting the full ask is slower and correct.
+MAX_RETRY_AFTER = int(os.environ.get('BN_MAX_RETRY_AFTER', 1800))
+# Single-threaded, so a plain gap between requests is the whole rate limiter it needs.
+REQUEST_GAP = 60.0 / float(os.environ.get('OSU_RATE_PER_MIN', 60))
+
+
+def safe_api_get(url, headers, params=None, timeout=15, session=None, max_retries=4):
+    """Executes a GET request, waiting out rate limits.
+
+    Returns the response, or None for a 404. Raises ApiUnavailable when the endpoint could
+    not be read, so the caller can refuse to treat an unread page as an empty one.
+    """
     req_func = session.get if session else requests.get
     current_headers = dict(headers)
     for attempt in range(max_retries):
         try:
             r = req_func(url, headers=current_headers, params=params, timeout=timeout)
             if r.status_code == 429:
-                # If OAuth token rate-limited, fallback to web endpoint without token
-                if 'Authorization' in current_headers:
-                    current_headers.pop('Authorization', None)
-                    current_headers['X-Requested-With'] = 'XMLHttpRequest'
-                    time.sleep(1)
-                    continue
-                retry_after = min(int(r.headers.get('Retry-After', 5)), 15)
-                print(f"[Rate Limited 429] Waiting {retry_after}s before retry (attempt {attempt+1}/{max_retries})...", flush=True)
+                retry_after = min(int(r.headers.get('Retry-After', 60) or 60), MAX_RETRY_AFTER)
+                print(f"[Rate Limited 429] waiting {retry_after}s "
+                      f"(attempt {attempt+1}/{max_retries})...", flush=True)
                 time.sleep(retry_after)
                 continue
             if r.status_code == 404:
@@ -98,10 +114,9 @@ def safe_api_get(url, headers, params=None, timeout=15, session=None, max_retrie
             return r
         except requests.exceptions.RequestException as e:
             if attempt == max_retries - 1:
-                print(f"Request failed after {max_retries} attempts for {url}: {e}", flush=True)
-                return None
+                raise ApiUnavailable(f"{url}: {e}") from e
             time.sleep(1 + attempt)
-    return None
+    raise ApiUnavailable(f"{url}: still rate limited after {max_retries} attempts")
 
 def fetch_bn_nominations(osu_id, token, cancel_event=None, session=None):
     """Fetches all nominated sets for a BN via osu! API or web endpoint with rate-limit resilience."""
@@ -123,22 +138,25 @@ def fetch_bn_nominations(osu_id, token, cancel_event=None, session=None):
         params = {'limit': limit, 'offset': offset}
         url = f'https://osu.ppy.sh/users/{osu_id}/beatmapsets/nominated'
         
+        # Lets ApiUnavailable through on purpose. Breaking here instead would hand back the
+        # pages that happened to load as though they were all of them, and a BN throttled
+        # mid-pagination would silently lose the rest of their nominations.
         r = safe_api_get(url, headers=headers, params=params, timeout=15, session=session)
         if not r:
             break
-            
+
         data = r.json()
         if not data:
             break
-        
+
         all_sets.extend(data)
-        
+
         if len(data) < limit:
             break
-        
+
         offset += len(data)
-        time.sleep(0.04)
-    
+        time.sleep(REQUEST_GAP)
+
     return all_sets
 
 def deep_fetch_set(set_id, token, session=None):
@@ -184,6 +202,7 @@ def run_global_scan(progress_callback=None, cancel_event=None):
     # 3. Fetch nominations for every BN with clean, polite pacing
     bn_nomination_sets = {}  # osu_id -> list of set dicts
     all_set_ids = set()
+    unread_bns = []          # BNs the API would not answer for; checked before publishing
     total_bns = len(all_bns)
     
     session_bns = requests.Session()
@@ -200,12 +219,19 @@ def run_global_scan(progress_callback=None, cancel_event=None):
             progress(f"Fetching nominations: {i + 1}/{total_bns} BNs...")
         
         uid = bn['osu_id']
-        sets = fetch_bn_nominations(uid, token, cancel_event, session=session_bns)
+        try:
+            sets = fetch_bn_nominations(uid, token, cancel_event, session=session_bns)
+        except ApiUnavailable as e:
+            # Recorded, not swallowed. A BN whose nominations could not be read is not a BN
+            # with no nominations, and the difference decides whether this pass may publish.
+            unread_bns.append(uid)
+            print(f"Could not read nominations for BN {uid}: {e}", flush=True)
+            continue
         bn_nomination_sets[uid] = sets
         for s in sets:
             all_set_ids.add(s['id'])
-        
-        time.sleep(0.12)
+
+        time.sleep(REQUEST_GAP)
 
         # Refresh token periodically (every 200 BNs) to keep fresh rate limit buckets
         if (i + 1) % 200 == 0:
@@ -319,10 +345,20 @@ def run_global_scan(progress_callback=None, cancel_event=None):
         'duos': duos,
     }
     
-    # 10. Save to Firebase
+    # 10. Save to Firebase, but only a pass worth keeping.
+    #
+    # Every unread BN would publish as one with no nominations, dropping them down the ladder
+    # and taking their duo pairings with them. Overwriting a good leaderboard with a
+    # rate-limited one is worse than serving yesterday's, so a short pass keeps yesterday's.
+    if unread_bns:
+        msg = (f"Incomplete scan: {len(unread_bns)} of {total_bns} BNs could not be read "
+               f"(the API kept refusing). Previous leaderboard kept; re-run to try again.")
+        progress(msg)
+        return {'error': msg, 'unread_bns': len(unread_bns), 'total_bns': total_bns}
+
     progress("Saving results to Firebase...")
     save_to_firebase(result)
-    
+
     progress(f"Scan complete! {len(top_bns)} BNs ranked, {len(duos)} duo pairs found.")
     return result
 
