@@ -92,14 +92,6 @@ jobs:
       run: |
         python run_scan.py bn
 
-    - name: Keep Workflow Alive
-      continue-on-error: true
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git commit --allow-empty -m "chore: keepalive [skip ci]" || true
-        git push || true
-
     - name: Fail the run if the mapper scan never finished
       if: always() && steps.mapper_scan.outcome == 'failure'
       run: exit 1

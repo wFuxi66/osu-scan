@@ -34,6 +34,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
 
+    # Only for the keepalive step at the end, which pushes an empty commit.
+    permissions:
+      contents: write
+
     # Never let two preprod runs write the same prefix at once.
     concurrency:
       group: preprod-scan
@@ -124,6 +128,26 @@ jobs:
       - name: Run BN scan
         if: ${{ (github.event_name == 'workflow_dispatch' && inputs.scans != 'mappers') || github.event_name == 'schedule' }}
         run: python run_scan.py bn
+
+      # GitHub disables a scheduled workflow after 60 days of repository inactivity, and
+      # this is the only scheduled one: the site would simply stop updating, with nothing to
+      # see but a last-scan date getting older. An empty commit resets that clock - but only
+      # when nothing else has, because one every night would bury the history under a problem
+      # that never happened.
+      - name: Keep the schedule alive
+        if: always() && github.event_name == 'schedule'
+        continue-on-error: true
+        run: |
+          quiet_days=$(( ($(date -u +%s) - $(git log -1 --format=%ct)) / 86400 ))
+          echo "Last commit on the default branch: $quiet_days days ago."
+          if [ "$quiet_days" -lt 30 ]; then
+            echo "The repository is active; nothing to keep alive."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: keep the scan schedule alive [skip ci]"
+          git push
 
       - name: Fail the run if the mapper scan never finished
         if: always() && steps.mapper_scan.outcome == 'failure'
