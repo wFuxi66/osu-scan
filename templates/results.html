@@ -1,12 +1,15 @@
 {% extends "base.html" %}
 {% set page = 'scan' %}
+{% set RANKED_AND_LOVED = 'ranked, qualified and loved' %}
+{# Loved sets are not nominated, so in those modes they are not part of what was read. #}
+{% set NOMINATED = 'ranked and qualified' %}
 {% set WORDING = {
-'Guest Difficulties for': ('Who guest-mapped for', 'difficulties'),
-'Guest Difficulties by': ('Whose sets were guest-mapped by', 'difficulties'),
-'Nominated for': ('Who nominated', 'nominations'),
-'Nominated by': ('Most nominated by', 'sets'),
+'Guest Difficulties for': ('Who guest-mapped for', 'difficulties', RANKED_AND_LOVED),
+'Guest Difficulties by': ('Whose sets were guest-mapped by', 'difficulties', RANKED_AND_LOVED),
+'Nominated for': ('Who nominated', 'nominations', NOMINATED),
+'Nominated by': ('Most nominated by', 'sets', NOMINATED),
 } %}
-{% set headline, unit = WORDING.get(title_prefix, (title_prefix or '', 'entries')) %}
+{% set headline, unit, kinds = WORDING.get(title_prefix, (title_prefix or '', 'entries', 'counted')) %}
 
 {% block title %}{% if expired %}Results expired{% else %}{{ headline }} {{ username }}{% endif %} — osu!scan{% endblock %}
 
@@ -52,7 +55,7 @@
 <p class="note" style="margin-top:26px">
     {{ leaderboard|length }} {{ 'person' if leaderboard|length == 1 else 'people' }},
     {{ leaderboard|sum(attribute='total_gds') }} {{ unit }} in total{% if sets_read %},
-    read across {{ sets_read }} ranked, qualified and loved {{ 'set' if sets_read == 1 else 'sets' }}{% endif %}.
+    read across {{ sets_read }} {{ kinds }} {{ 'set' if sets_read == 1 else 'sets' }}{% endif %}.
 </p>
 
 <div class="list">

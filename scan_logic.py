@@ -14,6 +14,9 @@ TOKEN_URL = 'https://osu.ppy.sh/oauth/token'
 # never enters a count, whichever endpoint hands it over.
 COUNTED_STATUSES = ('ranked', 'approved', 'qualified', 'loved')
 SETTLED_STATUSES = ('ranked', 'approved', 'loved')
+# Loved sets are voted in by the Loved Project, not nominated: they have no nominators to
+# find, and counting them would put sets in the denominator that can never be in the total.
+NOMINATED_STATUSES = ('ranked', 'approved', 'qualified')
 
 # User Credentials - MUST be set via environment variables
 # On Render: Set in Dashboard > Environment
@@ -456,7 +459,7 @@ def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=
     all_nominations = []
     unread = 0
     
-    target_sets = [b for b in beatmapsets if b['status'] in COUNTED_STATUSES]
+    target_sets = [b for b in beatmapsets if b['status'] in NOMINATED_STATUSES]
     total = len(target_sets)
     
     msg = f"Scanning {total} sets for Nominators..."
@@ -532,6 +535,7 @@ def generate_nominator_leaderboard_for_user(username_input, progress_callback=No
     # Fetch sets
     if progress_callback: progress_callback(f"Fetching beatmap sets for {username}...")
     sets = get_beatmapsets(user_id, token, cancel_event)
+    sets = [b for b in sets if b.get('status') in NOMINATED_STATUSES]
     
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
@@ -567,7 +571,7 @@ def generate_bn_leaderboard_for_user(username_input, progress_callback=None, can
     # 1. Fetch nominated sets
     if progress_callback: progress_callback(f"Fetching maps nominated by {username}...")
     sets = get_nominated_beatmapsets(user_id, token, cancel_event)
-    sets = [b for b in sets if b.get('status') in COUNTED_STATUSES]
+    sets = [b for b in sets if b.get('status') in NOMINATED_STATUSES]
     
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
