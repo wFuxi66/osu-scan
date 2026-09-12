@@ -214,6 +214,23 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
     session.close()
     return all_sets
 
+def get_set_with_retry(url, headers, session=None):
+    """Reads one set, waiting out a rate limit. None means the read did not happen."""
+    req_func = session.get if session else requests.get
+    for attempt in range(3):
+        try:
+            r = req_func(url, headers=headers, timeout=20)
+        except Exception as e:
+            print(f"Error fetching {url}: {e}")
+            time.sleep(1 + attempt)
+            continue
+        if r.status_code == 429:
+            time.sleep(min(int(r.headers.get('Retry-After', 2 ** attempt)), 30))
+            continue
+        return r if r.status_code == 200 else None
+    return None
+
+
 def process_set(bset, host_id, token=None):
     """Scans a single set and finds unique GDers."""
     gds_in_set = []
@@ -221,16 +238,11 @@ def process_set(bset, host_id, token=None):
     
     beats = bset.get('beatmaps')
     if beats is None and token:
-        headers = {'Authorization': f'Bearer {token}'}
-        try:
-            url = f'{API_BASE}/beatmapsets/{bset["id"]}'
-            r = requests.get(url, headers=headers, timeout=10)
-            if r.status_code == 200:
-                full_set = r.json()
-                beats = full_set.get('beatmaps', [])
-        except Exception as e:
-            print(f"Error fetching deep set {bset['id']}: {e}")
-            beats = []
+        # These buckets carry the difficulties with them, so this is a fallback that rarely
+        # runs - but when it does, losing it drops every guest mapper on the set.
+        r = get_set_with_retry(f'{API_BASE}/beatmapsets/{bset["id"]}',
+                               {'Authorization': f'Bearer {token}'})
+        beats = r.json().get('beatmaps', []) if r else []
 
     if not beats:
         return []
@@ -297,37 +309,20 @@ def process_nominator_set(bset, token, session=None):
     if cached is not None:
         return entries(cached)
 
-    url = f'{API_BASE}/beatmapsets/{sid}'
-    # Eight threads reading a few hundred sets go through the rate limit, and the answer to
-    # that is to wait exactly as long as the API asks. ponytail: a retry per thread is
-    # enough while the cache absorbs the repeat scans; pace the pool if it stops being.
-    for attempt in range(3):
-        try:
-            # Use session if provided, else standard request
-            req_func = session.get if session else requests.get
-            r = req_func(url, headers=headers, timeout=20) # Increased timeout to 20s
-        except Exception as e:
-            print(f"Error fetching set {sid}: {e}")
-            time.sleep(1 + attempt)
-            continue
+    # Eight threads reading a few hundred sets go through the rate limit. ponytail: a retry
+    # per thread is enough while the cache absorbs the repeat scans; pace the pool if not.
+    r = get_set_with_retry(f'{API_BASE}/beatmapsets/{sid}', headers, session)
+    if r is None:
+        # None rather than []: an unread set has unknown nominators, and counting it as a
+        # set with none quietly shortens everybody's total.
+        return None
 
-        if r.status_code == 429:
-            time.sleep(min(int(r.headers.get('Retry-After', 2 ** attempt)), 30))
-            continue
-
-        if r.status_code != 200:
-            break
-
-        ids = [nom['user_id'] for nom in r.json().get('current_nominations', [])]
-        # Who nominated a ranked set is settled history. A qualified one can still be
-        # disqualified and re-nominated by someone else, so it is read again every scan.
-        if bset.get('status') in SETTLED_STATUSES:
-            NOM_CACHE[sid] = ids
-        return entries(ids)
-
-    # Nothing is cached, and None rather than []: an unread set has unknown nominators, and
-    # counting it as a set with none quietly shortens everybody's total.
-    return None
+    ids = [nom['user_id'] for nom in r.json().get('current_nominations', [])]
+    # Who nominated a ranked set is settled history. A qualified one can still be
+    # disqualified and re-nominated by someone else, so it is read again every scan.
+    if bset.get('status') in SETTLED_STATUSES:
+        NOM_CACHE[sid] = ids
+    return entries(ids)
 
             
 # User Cache with persistent file storage
