@@ -1,9 +1,10 @@
 name: Global Monthly Scan
 
+# Writes the UNPREFIXED `leaderboard` and `mappers` paths. The site does not read those -
+# it reads the `preprod/` prefix that Site Scan fills - so this ran monthly for hours and
+# published where nothing was listening. The schedule is gone; keep it manual, for the day
+# the namespace is cut over.
 on:
-  schedule:
-    # Runs at 00:00 UTC on the 1st of every month
-    - cron: '0 0 1 * *'
   workflow_dispatch: # Allows manual triggering from the GitHub Actions tab
 
 jobs:
