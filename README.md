@@ -12,6 +12,7 @@ Analytical tool for osu! mappers to evaluate beatmap and nomination history.
   - Nominator duos, by mapsets nominated together
   - Mappers, by all-time difficulty playcount (loved on/off)
   - Mappers, by mapsets (loved on/off)
+  - Mappers, by favourites on the sets they are credited with (loved on/off)
 - Automated scans feeding the leaderboards: nominators nightly,
   mappers twice a week
 - Multi-threaded processing and result caching

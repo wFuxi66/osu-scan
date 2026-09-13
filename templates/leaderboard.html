@@ -115,6 +115,26 @@
                 + 'always add back up to the figure on "All".'],
             scope: true, loved: true, modes: true,
         },
+        favs: {
+            tab: 'Most favourited',
+            title: 'Most favourited mappers',
+            desc: 'Whose mapsets people keep for themselves.',
+            who: 'Mapper', unit: 'Favourites',
+            note: ['A favourite is given to a mapset, never to one difficulty in it, so everyone '
+                + 'credited with the set is credited with all of its favourites — the host, and '
+                + 'each guest mapper on it. Adding this column up therefore gives more favourites '
+                + 'than the ranked pool has ever received.',
+            'Only ranked and loved sets are counted. A graveyard set can gather thousands of '
+                + 'favourites and not one of them shows up here, so read this as the favourites on a '
+                + 'mapper’s leaderboarded work rather than on everything they have uploaded.',
+            'A profile prints no favourites total, so unlike the mapset board there is no official '
+                + 'figure to match — this is our own sum over the sets we crawled. Each set is '
+                + 'filed under one mode, the one its mapper worked in, so the modes add back up to '
+                + '"All".',
+            'Favourites can be taken back, so a mapper’s total can come out lower than it was '
+                + 'last scan. Plays and mapsets only ever climb; this one does not.'],
+            scope: true, loved: true, modes: true, needs: 'favs',
+        },
     };
 
     const SCOPES = [['all', 'Everything'], ['own', 'As host'], ['guest', 'As guest']];
@@ -122,10 +142,13 @@
     const LOVED = [['1', 'Included'], ['0', 'Excluded']];
 
     let bnData = null, mapperData = null, scopeAvailable = false;
+    // A board whose figures a published scan predates. Assumed present until the data says
+    // otherwise: a tab that appears late is a smaller surprise than one that vanishes.
+    let has = { favs: true };
     let board = 'bns', scope = 'all', mode = 'all', query = '', withLoved = true;
     // The mapset board has no per-mode figures to filter, so it ignores the mode segment.
     let emode = 'all';
-    const pages = { bns: 1, duos: 1, mappers: 1, sets: 1 };
+    const pages = { bns: 1, duos: 1, mappers: 1, sets: 1, favs: 1 };
 
     // A leaderboard is worth linking to and worth sharing, so it lives in the URL.
     const params = new URLSearchParams(location.search);
@@ -228,6 +251,9 @@
         lovedMaps: ['loved_maps', 'loved_maps_by_mode'],
         ownLovedMaps: ['own_loved_maps', 'own_loved_maps_by_mode'],
         sets: ['sets', 'sets_by_mode'], ownSets: ['own_sets', 'own_sets_by_mode'],
+        favs: ['favs', 'favs_by_mode'], ownFavs: ['own_favs', 'own_favs_by_mode'],
+        lovedFavs: ['loved_favs', 'loved_favs_by_mode'],
+        ownLovedFavs: ['own_loved_favs', 'own_loved_favs_by_mode'],
     };
 
     // Only the "own" figures are stored, so a guest figure is the remainder.
@@ -246,6 +272,12 @@
                 allPc -= allLoved; ownPc -= ownLoved;
                 allMaps -= g('lovedMaps'); ownMaps -= g('ownLovedMaps');
             }
+
+            // Favourites come straight from the crawl - there is no official figure to prefer
+            // over them the way the mapset counts below prefer the profile's own.
+            const lFavs = g('lovedFavs'), olFavs = g('ownLovedFavs');
+            let allFavs = g('favs'), ownFavs = g('ownFavs');
+            if (!withLoved) { allFavs -= lFavs; ownFavs -= olFavs; }
 
             // osu! publishes these on every profile and that is the number people check
             // against; our own crawl pages the search index, which runs short of it. The
@@ -267,20 +299,24 @@
                 pc: byScope(allPc, ownPc), maps: byScope(allMaps, ownMaps),
                 loved: withLoved ? byScope(allLoved, ownLoved) : 0,
                 sets: byScope(allSets, ownSets),
+                favs: byScope(allFavs, ownFavs),
+                lovedFavs: withLoved ? byScope(lFavs, olFavs) : 0,
             });
         }
         const ranked = out.filter(m => valueOf(m) > 0);
         ranked.sort((a, b) => valueOf(b) - valueOf(a) || b.pc - a.pc);
         return ranked.map(m => ({
             key: m.name, id: m.id, by_mode: m.by_mode, value: valueOf(m),
-            maps: m.maps, loved: m.loved,
+            maps: m.maps, loved: m.loved, lovedFavs: m.lovedFavs,
         }));
     }
 
     const rowsMappers = () => mapperRows(m => m.pc);
     const rowsSets = () => mapperRows(m => m.sets);
+    const rowsFavs = () => mapperRows(m => m.favs);
 
-    const BUILD = { bns: rowsBns, duos: rowsDuos, mappers: rowsMappers, sets: rowsSets };
+    const BUILD = { bns: rowsBns, duos: rowsDuos, mappers: rowsMappers, sets: rowsSets,
+                    favs: rowsFavs };
 
     // The markup for one entry, built only for the entries a reader can actually see.
     const CELL = {
@@ -296,6 +332,13 @@
                 + (r.loved > 0 ? ` · ${COMPACT.format(r.loved)} loved` : ''),
         }),
         sets: r => ({ who: nameCell(r.id, r.key) + modeIcons(r.by_mode) }),
+        // No mapset count under the total, tempting as it is: the figure above it comes from
+        // the crawl, the one the sets board shows comes from the profile, and the two do not
+        // always agree. Only the loved share, which is the same arithmetic as the total.
+        favs: r => ({
+            who: nameCell(r.id, r.key) + modeIcons(r.by_mode),
+            sub: r.lovedFavs > 0 ? `${COMPACT.format(r.lovedFavs)} on loved sets` : '',
+        }),
     };
 
     // Building a board means walking every mapper, or every pair, and sorting the result. That
@@ -316,6 +359,9 @@
     /* ---------------- render ---------------- */
 
     function render() {
+        // A board the published scan predates has nothing to show, so it is not offered - and
+        // a link straight to one lands on the plays board rather than on an empty list.
+        if (BOARDS[board].needs && !has[BOARDS[board].needs]) board = 'mappers';
         const cfg = BOARDS[board];
         emode = cfg.modes ? mode : 'all';
         $('head-title').textContent = cfg.title;
@@ -331,8 +377,11 @@
         $('q').placeholder = board === 'duos' ? 'Find a nominator' : 'Find yourself, or anyone else';
         $('q-clear').hidden = query === '';
 
-        document.querySelectorAll('#tabs button').forEach(b =>
-            b.setAttribute('aria-selected', String(b.dataset.k === board)));
+        document.querySelectorAll('#tabs button').forEach(b => {
+            const needs = BOARDS[b.dataset.k].needs;
+            b.hidden = !!needs && !has[needs];
+            b.setAttribute('aria-selected', String(b.dataset.k === board));
+        });
         document.querySelectorAll('#scope-seg button').forEach(b =>
             b.setAttribute('aria-pressed', String(b.dataset.k === scope)));
         document.querySelectorAll('#mode-seg button').forEach(b =>
@@ -456,7 +505,7 @@
         const b = e.target.closest('button');
         if (!b) return;
         scope = b.dataset.k;
-        pages.mappers = pages.sets = 1;
+        pages.mappers = pages.sets = pages.favs = 1;
         syncURL(); render();
     };
     $('mode-seg').onclick = e => {
@@ -470,7 +519,7 @@
         const b = e.target.closest('button');
         if (!b) return;
         withLoved = b.dataset.k === '1';
-        pages.mappers = pages.sets = 1;
+        pages.mappers = pages.sets = pages.favs = 1;
         syncURL(); render();
     };
     $('q').oninput = e => {
@@ -492,7 +541,9 @@
 
     fetch('/api/mappers_data').then(r => r.json()).then(d => {
         mapperData = d;
-        scopeAvailable = 'own_playcount' in ((d.mappers || [])[0] || {});
+        const first = (d.mappers || [])[0] || {};
+        scopeAvailable = 'own_playcount' in first;
+        has.favs = 'favs' in first;
         dataVersion++; stats(); render();
     }).catch(() => { });
 </script>
