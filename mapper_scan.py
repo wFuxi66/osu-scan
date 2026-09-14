@@ -1,9 +1,9 @@
 """Global mapper ladders built from every ranked/loved mapset: playcount, mapsets, favourites.
 
 Guest difficulties count for whoever made them, and a collab difficulty counts in full for
-every one of its authors. Favourites belong to the mapset rather than to any difficulty on
-it, so they follow the mapset credit: the host and every guest mapper on a set are credited
-with all of its favourites.
+every one of its authors. Favourites are the exception: they are given to the mapset rather
+than to any difficulty on it, so they go to the host of the set and to nobody else. A guest
+mapper made a difficulty on the set, not the set, so its favourites are not theirs.
 
 The scan is built to survive a bad night: it checkpoints as it goes, so a crash, a
 rate-limit wall or a dead runner costs only the pages since the last checkpoint, and it
@@ -67,7 +67,7 @@ RATE_PER_MIN = float(os.environ.get('OSU_RATE_PER_MIN', 300))
 # the ladder is never saved at all - the crawl's work thrown away for the optional part.
 PROFILE_BUDGET = float(os.environ.get('PROFILE_BUDGET_MIN', 90)) * 60
 # Bumped whenever the checkpoint layout changes, so an old one is discarded, not misread.
-STATE_VERSION = 6
+STATE_VERSION = 7
 
 
 class AuthRejected(Exception):
@@ -212,6 +212,9 @@ BUCKETS = (('ranked', 'own'), ('ranked', 'guest'), ('loved', 'own'), ('loved', '
 
 ROLES = ('own', 'guest')
 
+# Favourites carry no role: a set has one host, and they all go to them.
+FAV_STATES = ('ranked', 'loved')
+
 
 def new_stats():
     """Per-mapper totals, split by map status and by whether the mapper hosted the set."""
@@ -225,12 +228,13 @@ def new_stats():
     # difficulties would otherwise be counted once per status.
     stats['sets'] = {role: {'count': defaultdict(int), 'modes': defaultdict(_int_dd)}
                      for role in ROLES}
-    # Favourites are a property of the mapset, not of any difficulty on it, so they cannot be
-    # bucketed by difficulty status the way playcount is - a hybrid set would then hand its
-    # favourites to both buckets and the loved filter would subtract more than it added. The
-    # set's own status decides, which files each set in exactly one bucket.
-    stats['favs'] = {bucket: {'total': defaultdict(int), 'modes': defaultdict(_int_dd)}
-                     for bucket in BUCKETS}
+    # Favourites are a property of the mapset, not of any difficulty on it, so they are not
+    # split by role the way the rest is: only the host of a set is credited with them. Nor can
+    # they be bucketed by difficulty status the way playcount is - a hybrid set would then
+    # hand its favourites to both buckets and the loved filter would subtract more than it
+    # added. The set's own status decides, which files each set in exactly one bucket.
+    stats['favs'] = {state: {'total': defaultdict(int), 'modes': defaultdict(_int_dd)}
+                     for state in FAV_STATES}
     return stats
 
 
@@ -660,9 +664,10 @@ def aggregate_page(beatmapsets, stats, names, owners_by_diff=None):
         if host and set_modes_all and not set_modes[(host, 'own')]:
             set_modes[(host, 'own')] = Counter(set_modes_all)
 
-        # Whoever is credited with the set is credited with its favourites, in full - the same
-        # rule the mapset count above follows, and the same one a collab's playcount follows.
-        # Nobody favourites a difficulty, so there is nothing here to split between authors.
+        # Only the host is credited with the favourites. Nobody favourites a difficulty, so
+        # there is nothing on a set a guest mapper can hold a share of - handing them the
+        # set's whole count was crediting one set's favourites to as many mappers as worked
+        # on it, which is why the column ran far above what the ranked pool has received.
         favs = bset.get('favourite_count') or 0
         set_state = 'loved' if bset.get('status') == 'loved' else 'ranked'
 
@@ -673,9 +678,11 @@ def aggregate_page(beatmapsets, stats, names, owners_by_diff=None):
             # one mode on a single set - a hybrid mapper ranked one set, not one of each.
             filed_mode = dominant_mode(modes)
             stats['sets'][role]['modes'][uid][filed_mode] += 1
-            f = stats['favs'][(set_state, role)]
-            f['total'][uid] += favs
-            f['modes'][uid][filed_mode] += favs
+            # `own` is the host and only ever the host, so this runs once per set.
+            if role == 'own':
+                f = stats['favs'][set_state]
+                f['total'][uid] += favs
+                f['modes'][uid][filed_mode] += favs
 
 
 def prefer_name(resolved, stored):
@@ -1000,8 +1007,8 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         loved_b = [('loved', 'own'), ('loved', 'guest')]
         pick = lambda bs, key: sum(stats[b][key][uid] for b in bs)
         modes = lambda bs, key: merge_modes(*(stats[b][key][uid] for b in bs))
-        favs = lambda bs: sum(stats['favs'][b]['total'][uid] for b in bs)
-        fav_modes = lambda bs: merge_modes(*(stats['favs'][b]['modes'][uid] for b in bs))
+        favs = lambda ss: sum(stats['favs'][s]['total'][uid] for s in ss)
+        fav_modes = lambda ss: merge_modes(*(stats['favs'][s]['modes'][uid] for s in ss))
         return {
             'osu_id': uid,
             'username': names.get(uid, f'User_{uid}'),
@@ -1025,14 +1032,12 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
             'own_sets': stats['sets']['own']['count'][uid],
             'sets_by_mode': merge_modes(*(stats['sets'][r]['modes'][uid] for r in ROLES)),
             'own_sets_by_mode': dict(stats['sets']['own']['modes'][uid]),
-            'favs': favs(BUCKETS),
-            'favs_by_mode': fav_modes(BUCKETS),
-            'loved_favs': favs(loved_b),
-            'loved_favs_by_mode': fav_modes(loved_b),
-            'own_favs': favs(own),
-            'own_favs_by_mode': fav_modes(own),
-            'own_loved_favs': stats['favs'][('loved', 'own')]['total'][uid],
-            'own_loved_favs_by_mode': dict(stats['favs'][('loved', 'own')]['modes'][uid]),
+            # Hosted-only, hence the prefix the rest of the schema uses for it. There is no
+            # all-scopes counterpart to publish: a set's favourites belong to its host.
+            'own_favs': favs(FAV_STATES),
+            'own_favs_by_mode': fav_modes(FAV_STATES),
+            'own_loved_favs': stats['favs']['loved']['total'][uid],
+            'own_loved_favs_by_mode': dict(stats['favs']['loved']['modes'][uid]),
             **profiles.get(uid, {}),
         }
 
@@ -1151,24 +1156,22 @@ if __name__ == '__main__':
             assert sum(modes[uid].values()) == total, (
                 f"{role} sets for {uid}: columns {dict(modes[uid])} do not sum to {total}")
 
-    # Favourites: the set's own status decides the bucket, and everyone credited with the set
-    # is credited with all of them - the host and each guest mapper alike.
-    favs_own = stats['favs'][('ranked', 'own')]['total']
-    favs_gd = stats['favs'][('ranked', 'guest')]['total']
-    assert dict(favs_own) == {1: 40, 4: 11, 7: 6}, dict(favs_own)
-    assert dict(favs_gd) == {2: 40, 5: 11, 6: 11, 8: 6}, dict(favs_gd)
+    # Favourites: the set's own status decides the bucket, and only its host is credited.
+    # User 2 guest-mapped on sets 1 and 3, and 5 and 6 collabed on set 4: none of them holds
+    # a single favourite here.
+    favs_ranked = stats['favs']['ranked']['total']
+    assert dict(favs_ranked) == {1: 40, 4: 11, 7: 6}, dict(favs_ranked)
     # The loved set's favourites go to the loved bucket whole, including the ranked-status
     # difficulty sitting on it - a set is favourited, a difficulty is not.
-    assert dict(stats['favs'][('loved', 'own')]['total']) == {3: 200}
-    assert dict(stats['favs'][('loved', 'guest')]['total']) == {2: 200}
+    assert dict(stats['favs']['loved']['total']) == {3: 200}
     # Host 7 mapped nothing on their own set, so the favourites follow the credit for it.
-    assert dict(stats['favs'][('ranked', 'own')]['modes'][7]) == {'taiko': 6}
+    assert dict(stats['favs']['ranked']['modes'][7]) == {'taiko': 6}
     # Same invariant as above: the mode columns add back up to the figure shown on "All".
-    for bucket in BUCKETS:
-        totals, modes = stats['favs'][bucket]['total'], stats['favs'][bucket]['modes']
+    for state in FAV_STATES:
+        totals, modes = stats['favs'][state]['total'], stats['favs'][state]['modes']
         for uid, total in totals.items():
             assert sum(modes[uid].values()) == total, (
-                f"{bucket} favs for {uid}: columns {dict(modes[uid])} do not sum to {total}")
+                f"{state} favs for {uid}: columns {dict(modes[uid])} do not sum to {total}")
     # A host who mapped no difficulty anywhere has no playcount to be found by, so the output
     # has to reach them through the sets they hosted. Checked on its own stats: the asserts
     # above read stats[...]['pc'][7], and reading a defaultdict is enough to create the key.
