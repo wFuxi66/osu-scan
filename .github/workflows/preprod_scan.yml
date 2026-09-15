@@ -4,23 +4,29 @@ name: Site Scan
 # historical, from when this prefix was a rehearsal the /next preview pointed at. The
 # unprefixed `leaderboard` and `mappers` paths are empty and nothing serves them.
 #
-# The two scans cost very different amounts, so they run on different clocks: the BN scan
-# is ~4 minutes and runs nightly, while the mapper scan re-reads all ~60k mapsets and runs
-# twice a week. Daily mapper scans would re-crawl the whole corpus to find the ~30 sets that
-# ranked that day, for playcount shifts too small to reorder a ladder whose top entries
-# have millions of plays.
+# Both scans run every night. The mapper scan used to run twice a week, on the grounds that
+# a daily re-crawl of all ~60k mapsets only finds the ~30 sets that ranked that day, for
+# playcount shifts too small to reorder a ladder whose top entries have millions of plays.
+# That part is still true, and it is not what the schedule is for.
 #
-# Twice rather than once because of the profile pass, which is budgeted at 90 minutes and
-# gets through ~1700 mappers of the ~8400 in a run. Two runs read as much as one run with a
-# doubled budget, but each saves its cache on the way out: a runner killed near the 6 hour
-# ceiling loses a pass that was never written down, and the longer the budget, the more of
-# it there is to lose.
+# The profile pass is. It is budgeted at 90 minutes and gets through ~1700 mappers of the
+# ~8400, against ~4200 that fall due each run, so twice a week it never caught up: the
+# 2026-09-14 run still had 2449 mappers whose official counts had never been read at all.
+# Nightly gives it ~12k readings a week against a ladder of 8400, which is the first figure
+# that clears the backlog rather than treading water. The mapping-subscriber board rides
+# entirely on that pass, so its freshness is the pass's freshness.
+#
+# Not one longer run instead: the cache is only written once the pass finishes, so a runner
+# killed near the 6 hour ceiling loses the whole thing. Seven 90-minute passes each written
+# down beat two 240-minute gambles.
+#
+# Frequency is not what caused the 2026-09-11 throttling - the rate was, and OSU_RATE_PER_MIN
+# below fixed it. That rate is per minute and shared by every thread, so it is untouched by
+# how many nights a week the scan runs. Two full mapper scans inside seven hours on
+# 2026-09-14 drew no 429 at all, which is a heavier day than this schedule can produce.
 on:
   schedule:
-    # Every night but Monday and Thursday: BN scan only.
-    - cron: '0 0 * * 0,2,3,5,6'
-    # Mondays and Thursdays: BN scan and the full mapper scan.
-    - cron: '0 0 * * 1,4'
+    - cron: '0 0 * * *'
   workflow_dispatch:
     inputs:
       scans:
@@ -87,7 +93,7 @@ jobs:
       # The mapper scan checkpoints as it goes; carrying that file between runs means a
       # killed runner or a rate-limit wall resumes instead of starting ~60k mapsets over.
       - name: Restore mapper scan checkpoint
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.scans != 'bn') || github.event.schedule == '0 0 * * 1,4' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.scans != 'bn') || github.event_name == 'schedule' }}
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -98,7 +104,7 @@ jobs:
 
       - name: Run mapper scan
         id: mapper_scan
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.scans != 'bn') || github.event.schedule == '0 0 * * 1,4' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.scans != 'bn') || github.event_name == 'schedule' }}
         continue-on-error: true
         run: |
           for attempt in 1 2 3 4; do
@@ -111,7 +117,7 @@ jobs:
           exit 1
 
       - name: Save mapper scan checkpoint
-        if: ${{ always() && ((github.event_name == 'workflow_dispatch' && inputs.scans != 'bn') || github.event.schedule == '0 0 * * 1,4') }}
+        if: ${{ always() && ((github.event_name == 'workflow_dispatch' && inputs.scans != 'bn') || github.event_name == 'schedule') }}
         uses: actions/cache/save@v4
         with:
           path: |

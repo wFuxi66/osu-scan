@@ -15,8 +15,7 @@ Analytical tool for osu! mappers to evaluate beatmap and nomination history.
   - Mappers, by favourites on the sets they hosted (per mode, loved on/off)
   - Mappers, by mapping subscribers — no filters: a subscriber follows the
     mapper, not a map
-- Automated scans feeding the leaderboards: nominators nightly,
-  mappers twice a week
+- Automated scans feeding the leaderboards: nominators and mappers, both nightly
 - Multi-threaded processing and result caching
 
 ## Setup
