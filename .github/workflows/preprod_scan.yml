@@ -24,9 +24,20 @@ name: Site Scan
 # below fixed it. That rate is per minute and shared by every thread, so it is untouched by
 # how many nights a week the scan runs. Two full mapper scans inside seven hours on
 # 2026-09-14 drew no 429 at all, which is a heavier day than this schedule can produce.
+#
+# The second cron below is the catch-up. A board that has just gained a profile field starts
+# empty and fills at the pass's ~1250 mappers a run, so nightly alone takes a week to light
+# it up - the mapping-subscriber board landed on 2026-09-15 with 1259 of 8399 mappers on it.
+# Every three hours clears that in a day. It is not a temporary line to be reverted by hand:
+# the "Decide which scans this run does" step below turns it off again the moment no mapper
+# is missing a figure, so it only ever fires while there is a backlog, and the next new
+# profile field gets the same head start for free.
 on:
   schedule:
     - cron: '0 0 * * *'
+    # Catch-up; skipped when there is no backlog. Off the midnight mark, which the nightly
+    # run above already owns - two crons matching one minute would fire two runs.
+    - cron: '0 3,6,9,12,15,18,21 * * *'
   workflow_dispatch:
     inputs:
       scans:
@@ -90,10 +101,39 @@ jobs:
             exit 1
           fi
 
+      # One place deciding what runs, rather than the same event test copied onto five steps.
+      # A catch-up run earns its place only if the published ladder still has mappers without
+      # a subscriber figure; a failed or unreadable check counts as no backlog, so the quiet
+      # answer is always to skip rather than to crawl 60k mapsets on a bad reading.
+      - name: Decide which scans this run does
+        id: plan
+        run: |
+          mappers=no
+          bn=no
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.scans }}" != "bn" ]; then mappers=yes; fi
+            if [ "${{ inputs.scans }}" != "mappers" ]; then bn=yes; fi
+          elif [ "${{ github.event.schedule }}" = "0 0 * * *" ]; then
+            mappers=yes
+            bn=yes
+          else
+            missing=$(curl -s --compressed --max-time 120 \
+              https://osu-scan.onrender.com/api/mappers_data \
+              | python3 -c "import json,sys; rows = json.load(sys.stdin).get('mappers') or []; print(sum(1 for r in rows if 'profile_mapping_subs' not in r))" 2>/dev/null) || missing=""
+            # Anything that is not a plain count - an error page, a timeout, an empty body -
+            # reads as no backlog, so a bad check costs a skipped catch-up, never a crawl.
+            case "$missing" in ''|*[!0-9]*) missing=0 ;; esac
+            echo "$missing mapper(s) still without a subscriber figure."
+            if [ "$missing" -gt 0 ]; then mappers=yes; fi
+          fi
+          echo "Mapper scan: $mappers. BN scan: $bn."
+          echo "mappers=$mappers" >> "$GITHUB_OUTPUT"
+          echo "bn=$bn" >> "$GITHUB_OUTPUT"
+
       # The mapper scan checkpoints as it goes; carrying that file between runs means a
       # killed runner or a rate-limit wall resumes instead of starting ~60k mapsets over.
       - name: Restore mapper scan checkpoint
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.scans != 'bn') || github.event_name == 'schedule' }}
+        if: ${{ steps.plan.outputs.mappers == 'yes' }}
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -104,7 +144,7 @@ jobs:
 
       - name: Run mapper scan
         id: mapper_scan
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.scans != 'bn') || github.event_name == 'schedule' }}
+        if: ${{ steps.plan.outputs.mappers == 'yes' }}
         continue-on-error: true
         run: |
           for attempt in 1 2 3 4; do
@@ -117,7 +157,7 @@ jobs:
           exit 1
 
       - name: Save mapper scan checkpoint
-        if: ${{ always() && ((github.event_name == 'workflow_dispatch' && inputs.scans != 'bn') || github.event_name == 'schedule') }}
+        if: ${{ always() && steps.plan.outputs.mappers == 'yes' }}
         uses: actions/cache/save@v4
         with:
           path: |
@@ -132,7 +172,7 @@ jobs:
         run: echo "::error::Mapper scan failed after 4 attempts. Its checkpoint is cached; re-run to continue."
 
       - name: Run BN scan
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.scans != 'mappers') || github.event_name == 'schedule' }}
+        if: ${{ steps.plan.outputs.bn == 'yes' }}
         run: python run_scan.py bn
 
       # GitHub disables a scheduled workflow after 60 days of repository inactivity, and
@@ -141,7 +181,7 @@ jobs:
       # when nothing else has, because one every night would bury the history under a problem
       # that never happened.
       - name: Keep the schedule alive
-        if: always() && github.event_name == 'schedule'
+        if: always() && github.event.schedule == '0 0 * * *'
         continue-on-error: true
         run: |
           quiet_days=$(( ($(date -u +%s) - $(git log -1 --format=%ct)) / 86400 ))
