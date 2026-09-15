@@ -7,12 +7,14 @@ Analytical tool for osu! mappers to evaluate beatmap and nomination history.
 ## Features
 - Guest difficulty analysis (for users and hosts)
 - Beatmap Nominator activity and history tracking
-- Leaderboards, all with a per-mode filter:
-  - Nominators, by nominations
-  - Nominator duos, by mapsets nominated together
-  - Mappers, by all-time difficulty playcount (loved on/off)
-  - Mappers, by mapsets (loved on/off)
-  - Mappers, by favourites on the sets they hosted (loved on/off)
+- Leaderboards:
+  - Nominators, by nominations (per mode)
+  - Nominator duos, by mapsets nominated together (per mode)
+  - Mappers, by all-time difficulty playcount (per mode, loved on/off)
+  - Mappers, by mapsets (per mode, loved on/off)
+  - Mappers, by favourites on the sets they hosted (per mode, loved on/off)
+  - Mappers, by mapping subscribers — no filters: a subscriber follows the
+    mapper, not a map
 - Automated scans feeding the leaderboards: nominators nightly,
   mappers twice a week
 - Multi-threaded processing and result caching

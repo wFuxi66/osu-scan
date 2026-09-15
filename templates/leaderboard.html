@@ -135,6 +135,24 @@
                 + 'last scan. Plays and mapsets only ever climb; this one does not.'],
             scope: false, loved: true, modes: true, needs: 'favs',
         },
+        subs: {
+            tab: 'Most subscribed',
+            title: 'Most subscribed mappers',
+            desc: 'Who people follow to hear about the next map.',
+            who: 'Mapper', unit: 'Subscribers',
+            note: ['osu!’s own figure: the mapping subscribers shown on a profile. Somebody '
+                + 'subscribes to a mapper, not to a map — there is nothing here to split by '
+                + 'mode, by host or guest, or by loved, which is why this board carries no '
+                + 'filters at all.',
+            'Subscribers are read during the scan’s profile pass, which works through the '
+                + 'ladder across several runs rather than reading every mapper every time. A '
+                + 'figure can therefore be a scan or two behind, and a mapper the pass has not '
+                + 'reached yet is missing from this board rather than sitting at zero.',
+            'Only mappers with a ranked or loved set are on the ladder in the first place, so a '
+                + 'subscribed mapper who has never had one ranked will not appear — however '
+                + 'many people follow them.'],
+            scope: false, loved: false, modes: false, needs: 'subs',
+        },
     };
 
     const SCOPES = [['all', 'Everything'], ['own', 'As host'], ['guest', 'As guest']];
@@ -144,11 +162,11 @@
     let bnData = null, mapperData = null, scopeAvailable = false;
     // A board whose figures a published scan predates. Assumed present until the data says
     // otherwise: a tab that appears late is a smaller surprise than one that vanishes.
-    let has = { favs: true };
+    let has = { favs: true, subs: true };
     let board = 'bns', scope = 'all', mode = 'all', query = '', withLoved = true;
     // The mapset board has no per-mode figures to filter, so it ignores the mode segment.
     let emode = 'all';
-    const pages = { bns: 1, duos: 1, mappers: 1, sets: 1, favs: 1 };
+    const pages = { bns: 1, duos: 1, mappers: 1, sets: 1, favs: 1, subs: 1 };
 
     // A leaderboard is worth linking to and worth sharing, so it lives in the URL.
     const params = new URLSearchParams(location.search);
@@ -301,6 +319,10 @@
                 loved: withLoved ? byScope(allLoved, ownLoved) : 0,
                 sets: byScope(allSets, ownSets),
                 favs, lovedFavs,
+                // A subscriber follows the mapper, so there is no scope to take a share of,
+                // no mode to file it under and no loved half to subtract: the profile's
+                // figure is the whole of it.
+                subs: m.profile_mapping_subs || 0,
             });
         }
         const ranked = out.filter(m => valueOf(m) > 0);
@@ -314,9 +336,10 @@
     const rowsMappers = () => mapperRows(m => m.pc);
     const rowsSets = () => mapperRows(m => m.sets);
     const rowsFavs = () => mapperRows(m => m.favs);
+    const rowsSubs = () => mapperRows(m => m.subs);
 
     const BUILD = { bns: rowsBns, duos: rowsDuos, mappers: rowsMappers, sets: rowsSets,
-                    favs: rowsFavs };
+                    favs: rowsFavs, subs: rowsSubs };
 
     // The markup for one entry, built only for the entries a reader can actually see.
     const CELL = {
@@ -339,6 +362,11 @@
             who: nameCell(r.id, r.key) + modeIcons(r.by_mode),
             sub: r.lovedFavs > 0 ? `${COMPACT.format(r.lovedFavs)} on loved sets` : '',
         }),
+        // One number and nothing under it. Every figure that could go there - mapsets,
+        // plays, favourites - answers a different question from the one this board asks,
+        // and the mapset count would quietly follow the loved switch on a board that
+        // deliberately shows no loved switch.
+        subs: r => ({ who: nameCell(r.id, r.key) + modeIcons(r.by_mode) }),
     };
 
     // Building a board means walking every mapper, or every pair, and sorting the result. That
@@ -544,6 +572,9 @@
         const first = (d.mappers || [])[0] || {};
         scopeAvailable = 'own_playcount' in first;
         has.favs = 'own_favs' in first;
+        // Not read off a row: a zero there is a mapper nobody subscribes to, which is a
+        // fact, and absent figures for the whole scan are not.
+        has.subs = d.profile_subs === true;
         dataVersion++; stats(); render();
     }).catch(() => { });
 </script>

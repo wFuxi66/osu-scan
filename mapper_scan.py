@@ -565,7 +565,11 @@ def fetch_profile_counts(session, uids, token, progress=None, budget=None,
         if r is None:
             return uid, None, None
         data = r.json()
-        row = {}
+        # Mapping subscribers, free of charge: the profile this pass is already fetching for
+        # the counts carries them. There is no cheaper route - /users?ids[] reads 50 mappers
+        # in one call but omits the field - so a board of its own would cost a request per
+        # mapper on top of this pass, for a figure already in hand.
+        row = {'profile_mapping_subs': data.get('mapping_follower_count') or 0}
         # Filled by the worker, merged by the collector below: three threads sharing one
         # harvest dict would be one more thing to get right for nothing.
         found = {} if harvest is not None and seen is not None else None
@@ -962,6 +966,12 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         basis = cache['profile_basis']
         stale = [uid for uid in top_ids
                  if uid not in cached_rows
+                 # A row written before subscribers were read holds every other figure
+                 # correctly, so it stays usable; it is queued for a re-read rather than
+                 # thrown away. Bumping CACHE_VERSION would have been the blunt way to say
+                 # this and would have taken the owners map - 225k entries, the expensive
+                 # half of the scan - down with it for one new field.
+                 or 'profile_mapping_subs' not in cached_rows[uid]
                  or basis.get(uid) != crawled_sets.get(uid)
                  or due_for_recheck(uid, run_no, PROFILE_ROTATION)]
 
@@ -1055,6 +1065,11 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         # Firebase stores an empty object as nothing, so a mapper with an empty category
         # loses its split. One flag for the scan says the split was read, per row or not.
         'profile_modes': bool(profiles),
+        # Whether this scan has subscriber figures at all. A mapper with none reads as zero
+        # and drops off the subscriber board, which is right for a mapper with no
+        # subscribers and wrong for a whole scan that never read any - so the board is
+        # offered on the strength of this flag rather than on one row happening to carry it.
+        'profile_subs': any('profile_mapping_subs' in r for r in profiles.values()),
         # What this pass actually re-read. Playcounts are always 100% fresh - they ride in
         # on the search pages - so these say how much of the *static* half was trusted from
         # cache, which is the only thing that can go stale.
