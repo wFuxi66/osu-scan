@@ -112,7 +112,12 @@ def run_scan_job(job_id, username, mode, cancel_event):
             
     try:
         if mode == 'nominators':
-            result = scan_logic.generate_nominator_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
+            result = scan_logic.generate_nominator_leaderboard_for_user(
+                username,
+                progress_callback=update_progress,
+                cancel_event=cancel_event,
+                nomination_index=get_leaderboard_data(next_path('nomination_index')),
+            )
             title_prefix = "Nominated for"
         elif mode == 'bn':
             result = scan_logic.generate_bn_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)

@@ -309,8 +309,27 @@ def analyze_sets(beatmapsets, host_id, token=None, progress_callback=None, cance
                 
     return all_gds
 
-def process_nominator_set(bset, token, session=None):
-    """Finds a set's nominators, from the cache when the set is done moving."""
+
+def indexed_nominator_ids(bset, nomination_index):
+    """Return validated indexed nominators, or None when the set needs a live read."""
+    if bset.get('status') not in SETTLED_STATUSES or not isinstance(nomination_index, dict):
+        return None
+
+    sets = nomination_index.get('sets')
+    if not isinstance(sets, dict):
+        return None
+
+    ids = sets.get(str(bset['id']))
+    expected = bset.get('nominations_summary', {}).get('current')
+    if not isinstance(ids, list) or type(expected) is not int or len(ids) != expected:
+        return None
+    if any(type(uid) is not int for uid in ids) or len(set(ids)) != len(ids):
+        return None
+    return ids
+
+
+def process_nominator_set(bset, token, session=None, nomination_index=None):
+    """Find a set's nominators from settled data, falling back to a live read."""
     headers = {'Authorization': f'Bearer {token}'}
     sid = bset['id']
     # Both dates can be absent on a set that is still in qualification.
@@ -320,9 +339,17 @@ def process_nominator_set(bset, token, session=None):
     def entries(ids):
         return [{'nominator_id': uid, 'set_title': title, 'date': date} for uid in ids]
 
-    cached = NOM_CACHE.get(sid)
-    if cached is not None:
-        return entries(cached)
+    indexed = indexed_nominator_ids(bset, nomination_index)
+    if indexed is not None:
+        return entries(indexed)
+
+    # With a published index, rejecting its entry is a request for fresh truth: do not let
+    # the older process-local cache turn a qualified, missing or mismatched entry back into
+    # a cache hit. The legacy cache remains useful while no index has been published yet.
+    if nomination_index is None:
+        cached = NOM_CACHE.get(sid)
+        if cached is not None:
+            return entries(cached)
 
     # Eight threads reading a few hundred sets go through the rate limit. ponytail: a retry
     # per thread is enough while the cache absorbs the repeat scans; pace the pool if not.
@@ -475,7 +502,8 @@ def resolve_users_parallel(user_ids, token, progress_callback=None, refresh=Fals
     return {uid: USER_CACHE.get(uid, f"User_{uid}") for uid in user_ids if uid != 0}
 
 
-def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=None):
+def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=None,
+                       nomination_index=None):
     """Fetches nominators for the provided sets, and reports how many it could not read."""
     all_nominations = []
     unread = 0
@@ -494,7 +522,10 @@ def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=
     known = len(NOM_CACHE)
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-        future_to_set = {executor.submit(process_nominator_set, bset, token, session): bset for bset in target_sets}
+        future_to_set = {
+            executor.submit(process_nominator_set, bset, token, session, nomination_index): bset
+            for bset in target_sets
+        }
         
         completed = 0
         for future in concurrent.futures.as_completed(future_to_set):
@@ -546,7 +577,8 @@ def resolve_and_aggregate_nominators(noms, token, progress_callback=None):
     leaderboard.sort(key=lambda x: (-x['total_gds'], x['mapper_name']))
     return leaderboard
 
-def generate_nominator_leaderboard_for_user(username_input, progress_callback=None, cancel_event=None):
+def generate_nominator_leaderboard_for_user(username_input, progress_callback=None, cancel_event=None,
+                                             nomination_index=None):
     token = get_token()
     if not token:
         return {'error': 'Authentication failed'}
@@ -563,7 +595,13 @@ def generate_nominator_leaderboard_for_user(username_input, progress_callback=No
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     # Analyze
-    noms, unread = analyze_nominators(sets, token, progress_callback, cancel_event)
+    noms, unread = analyze_nominators(
+        sets,
+        token,
+        progress_callback,
+        cancel_event,
+        nomination_index=nomination_index,
+    )
     
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     

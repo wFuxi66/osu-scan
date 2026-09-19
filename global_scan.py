@@ -4,7 +4,7 @@ import os
 import json
 import concurrent.futures
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 import bn_data
 import scan_logic
@@ -72,6 +72,13 @@ def load_from_firebase(path='leaderboard'):
         print(f"Error loading from Firebase: {e}")
         return None
 
+
+def publish_scan_results(result, nomination_index):
+    """Publish the lookup separately so leaderboard downloads stay small."""
+    if not save_to_firebase(nomination_index, path='nomination_index'):
+        return False
+    return save_to_firebase(result)
+
 # ---- API Helpers with Rate Limit Resilience ----
 
 def list_looks_truncated(found, known, floor=0.9):
@@ -82,6 +89,22 @@ def list_looks_truncated(found, known, floor=0.9):
     disabled entirely when there is nothing to measure against - a first run has to publish.
     """
     return bool(known) and found < known * floor
+
+
+def build_nomination_index(nominations_by_bn, scanned_at):
+    """Build a compact, deterministic mapset-to-nominators lookup."""
+    nominators_by_set = defaultdict(set)
+    for bn_id, sets in nominations_by_bn.items():
+        for bset in sets:
+            nominators_by_set[bset['id']].add(bn_id)
+
+    return {
+        'last_scan': scanned_at,
+        'sets': {
+            str(set_id): sorted(nominator_ids)
+            for set_id, nominator_ids in sorted(nominators_by_set.items())
+        },
+    }
 
 
 class ApiUnavailable(Exception):
@@ -360,13 +383,15 @@ def run_global_scan(progress_callback=None, cancel_event=None):
     
     duos.sort(key=lambda x: -x['count'])
     
+    scanned_at = datetime.now(timezone.utc).isoformat()
     result = {
-        'last_scan': datetime.utcnow().isoformat(),
+        'last_scan': scanned_at,
         'total_bns_scanned': len(all_bns),
         'total_sets_scanned': len(all_set_ids),
         'top_bns': top_bns,
         'duos': duos,
     }
+    nomination_index = build_nomination_index(bn_nomination_sets, scanned_at)
     
     # 10. Save to Firebase, but only a pass worth keeping.
     #
@@ -380,11 +405,11 @@ def run_global_scan(progress_callback=None, cancel_event=None):
         return {'error': msg, 'unread_bns': len(unread_bns), 'total_bns': total_bns}
 
     progress("Saving results to Firebase...")
-    if not save_to_firebase(result):
+    if not publish_scan_results(result, nomination_index):
         # The fallback file lands on whatever machine ran the scan, and on a CI runner that
         # machine is about to be deleted. Saying "complete" here is how two hours of work
         # disappear behind a green tick.
-        msg = "Scan finished but could not be published to Firebase; nothing was updated."
+        msg = "Scan finished but its leaderboard and nomination index could not both be published."
         progress(msg)
         return {'error': msg}
 
