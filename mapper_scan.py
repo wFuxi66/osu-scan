@@ -20,7 +20,7 @@ from datetime import datetime
 import requests
 
 import scan_logic
-from global_scan import save_to_firebase
+from global_scan import load_from_firebase, save_to_firebase
 
 # Two ways to page the same corpus of leaderboarded maps (ranked + loved).
 # The API takes a token and gets a far higher rate limit; the public search needs nothing
@@ -700,6 +700,20 @@ def prefer_name(resolved, stored):
     return stored or resolved
 
 
+def carry_forward_names(previous, names):
+    """Keep the names the last published board already knew.
+
+    A mapper osu! later restricts is hidden from every lookup, so a fresh scan would name
+    them from nothing and put a placeholder back on the board. Their name was already public
+    the day we first read it, so re-seeding it means a restriction cannot erase it. Names are
+    only ever added, never overwritten: the crawl and the API refresh always win.
+    """
+    for row in (previous or {}).get('mappers') or []:
+        uid, name = row.get('osu_id'), row.get('username')
+        if uid and name and not name.startswith(('User_', 'ID:', 'Unknown_')):
+            names.setdefault(uid, name)
+
+
 def merge_modes(*dicts):
     """Sums several {mode: count} dicts into one."""
     out = defaultdict(int)
@@ -939,6 +953,11 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
     top_ids = sorted(all_ids, key=lambda uid: -total_pc(uid))
     if TOP_N:
         top_ids = top_ids[:TOP_N]
+
+    # A previous board's names are the only source a restricted, guest-only mapper has, since
+    # osu! hides the account and no mapset of theirs carries a `creator`. Seeded before the
+    # refresh, which overwrites them wherever the API can still answer.
+    carry_forward_names(load_from_firebase('mappers'), names)
 
     # A mapset carries the name its host had when it ranked, so `creator` goes stale on every
     # rename. Re-resolve every mapper against the API; the stored name is only a fallback.
@@ -1211,6 +1230,20 @@ if __name__ == '__main__':
     assert prefer_name('User_33599', 'osuplayer111') == 'osuplayer111', "a failed lookup must not erase a real name"
     assert prefer_name('User_33599', None) == 'User_33599'
     assert prefer_name(None, 'osuplayer111') == 'osuplayer111'
+    assert prefer_name('Unknown_33599', 'osuplayer111') == 'osuplayer111', \
+        "an unread id must not erase a real name either"
+
+    # A restricted, guest-only mapper has no mapset name, so the last board's name is theirs
+    # to keep - but a placeholder is never carried forward and a live name is never erased.
+    kept = {33599: 'osuplayer111'}
+    carry_forward_names({'mappers': [
+        {'osu_id': 33599, 'username': 'Andrea'},       # already known: crawl/API wins
+        {'osu_id': 42, 'username': 'Cookiezi'},        # restricted since: keep the name
+        {'osu_id': 43, 'username': 'User_43'},         # a placeholder is not a name
+        {'osu_id': 44, 'username': 'Unknown_44'},      # nor is an unread marker
+        {'osu_id': None, 'username': 'Nameless'},
+    ]}, kept)
+    assert kept == {33599: 'osuplayer111', 42: 'Cookiezi'}, kept
 
     # A checkpoint must come back with its counters and totals intact.
     probe = 'mapper_scan_state.selfcheck'
