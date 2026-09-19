@@ -1314,9 +1314,10 @@ if __name__ == '__main__':
                     {'beatmaps': [{'id': 9, 'mode': 'osu', 'user_id': 7}]},
                 ]
             return {'ranked_beatmapset_count': 3, 'loved_beatmapset_count': 1,
-                    'guest_beatmapset_count': 2}
+                    'guest_beatmapset_count': 2, 'mapping_follower_count': 1234}
     got = fetch_profile_counts(Profiles(), [ME], 'token')
     assert got == {ME: {
+        'profile_mapping_subs': 1234,
         'profile_ranked_sets': 3, 'profile_ranked_by_mode': {'osu': 1, 'mania': 2},
         'profile_loved_sets': 1, 'profile_loved_by_mode': {'catch': 1},
         'profile_guest_sets': 2, 'profile_guest_by_mode': {'taiko': 1, 'osu': 1},
