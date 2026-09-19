@@ -430,6 +430,38 @@ USER_BATCH = 50
 # token bucket only if a scan ever has to share the budget with something else.
 BATCH_PAUSE = 0.5
 
+# What fetch_user_name returns for an account the API says is gone. An object, not a string,
+# so it can never be mistaken for a username the caller should cache.
+RESTRICTED = object()
+
+
+def fetch_user_name(session, uid, headers, max_retries=4):
+    """Read one username from the single-user endpoint, to tell a live account from a gone one.
+
+    The bulk endpoint drops accounts it should return - a real, active mapper can simply be
+    absent from a 200 - so a missing id there is not an answer. This endpoint is the
+    authority: a 200 carries the name, a 404 is a restricted or deleted account.
+
+    Returns RESTRICTED for a confirmed-gone account, a username otherwise, and None when the
+    request never landed. None must stay unresolved rather than be published as restricted.
+    """
+    for attempt in range(max_retries):
+        try:
+            r = session.get(f'{API_BASE}/users/{uid}', headers=headers,
+                            params={'key': 'id'}, timeout=20)
+        except Exception:
+            time.sleep(1 + attempt)
+            continue
+        if r.status_code == 429:
+            time.sleep(min(int(r.headers.get('Retry-After', 2 ** attempt)), 30))
+            continue
+        if r.status_code == 404:
+            return RESTRICTED
+        if r.status_code != 200:
+            return None
+        return (r.json() or {}).get('username') or RESTRICTED
+    return None
+
 
 def fetch_users_batch(session, uids, headers, max_retries=6):
     """Read up to USER_BATCH usernames in one request.
@@ -488,9 +520,19 @@ def resolve_users_parallel(user_ids, token, progress_callback=None, refresh=Fals
             if found is None:
                 continue  # rate-limited or timed out: leave the batch for the next scan
             for uid in batch:
-                # A user the endpoint does not return is restricted or deleted, which is an
-                # answer worth caching, exactly as a 404 is on the single-user endpoint.
-                USER_CACHE[uid] = found.get(uid) or f'User_{uid}'
+                name = found.get(uid)
+                if name:
+                    USER_CACHE[uid] = name
+                    continue
+                # A 200 from the bulk endpoint can still omit an active account, so a missing
+                # id is not proof of restriction. Confirm it directly: only a 404 writes the
+                # placeholder, and a request that never lands leaves the id for the next scan.
+                time.sleep(BATCH_PAUSE)
+                answer = fetch_user_name(session, uid, headers)
+                if answer is RESTRICTED:
+                    USER_CACHE[uid] = f'User_{uid}'
+                elif answer:
+                    USER_CACHE[uid] = answer
             new_entries = True
 
         session.close()
@@ -498,8 +540,10 @@ def resolve_users_parallel(user_ids, token, progress_callback=None, refresh=Fals
         if new_entries:
             save_user_cache()
 
-    # Build result from cache
-    return {uid: USER_CACHE.get(uid, f"User_{uid}") for uid in user_ids if uid != 0}
+    # Only a confirmed 404 is cached as User_<id>. An id that could not be read at all comes
+    # back under a different marker, so a board can leave it unnamed instead of calling a
+    # live account restricted.
+    return {uid: USER_CACHE.get(uid, f"Unknown_{uid}") for uid in user_ids if uid != 0}
 
 
 def analyze_nominators(beatmapsets, token, progress_callback=None, cancel_event=None,
@@ -897,6 +941,13 @@ if __name__ == '__main__':
     assert fetch_users_batch(FakeSession(*[FakeResp(429)] * 4), [1], {}) is None, \
         'a batch that never lands must stay unresolved'
 
+    # fetch_user_name is the authority on a bulk omission: a 200 names a live account, a 404
+    # marks a gone one, and anything unread stays unresolved.
+    assert fetch_user_name(FakeSession(FakeResp(200, {'username': 'Kecco'})), 1, {}) == 'Kecco'
+    assert fetch_user_name(FakeSession(FakeResp(404)), 1, {}) is RESTRICTED
+    assert fetch_user_name(FakeSession(*[FakeResp(429)] * 4), 1, {}) is None, \
+        'a user that could not be read stays unresolved'
+
     USER_CACHE.clear()
     USER_CACHE[9] = 'stale'
     import unittest.mock
@@ -905,12 +956,26 @@ if __name__ == '__main__':
         resolve_users_parallel([9], 'tok', refresh=True)
     assert USER_CACHE[9] == 'stale', 'a failed batch must not overwrite a known name'
 
+    # A user the bulk endpoint omits is not necessarily restricted. The single-user lookup
+    # decides: a live account keeps its name, and only a 404 writes the User_<id> placeholder.
     USER_CACHE.clear()
     with unittest.mock.patch(__name__ + '.fetch_users_batch', return_value={1: 'Kecco'}), \
+         unittest.mock.patch(__name__ + '.fetch_user_name',
+                             side_effect=lambda s, uid, h: 'Cookiezi' if uid == 2 else RESTRICTED), \
          unittest.mock.patch(__name__ + '.save_user_cache'):
-        out = resolve_users_parallel([1, 2], 'tok')
-    assert out == {1: 'Kecco', 2: 'User_2'}, 'a user the endpoint omits is restricted'
-    assert USER_CACHE[2] == 'User_2'
+        out = resolve_users_parallel([1, 2, 3], 'tok')
+    assert out == {1: 'Kecco', 2: 'Cookiezi', 3: 'User_3'}, \
+        'an active account the bulk omitted must keep its name; only a 404 is restricted'
+    assert USER_CACHE[2] == 'Cookiezi' and USER_CACHE[3] == 'User_3'
+
+    # A confirmation that never lands leaves the id unnamed, not restricted.
+    USER_CACHE.clear()
+    with unittest.mock.patch(__name__ + '.fetch_users_batch', return_value={}), \
+         unittest.mock.patch(__name__ + '.fetch_user_name', return_value=None), \
+         unittest.mock.patch(__name__ + '.save_user_cache'):
+        out = resolve_users_parallel([4], 'tok')
+    assert out == {4: 'Unknown_4'}, 'an unread id must not be published as restricted'
+    assert 4 not in USER_CACHE
 
     # A listing that gives up mid-way must say so. Reporting the sets that did arrive as if
     # they were all of them is what turns a throttled scan into a confident, wrong report.

@@ -75,14 +75,18 @@
     </div>
     {% for entry in leaderboard %}
     {% set gone = entry.mapper_name.startswith('User_') or entry.mapper_name.startswith('ID:') %}
+    {% set unknown = entry.mapper_name.startswith('Unknown_') %}
     <div class="row {% if loop.index <= 3 %}top r{{ loop.index }}{% endif %}">
         <span class="rank">{{ loop.index }}</span>
-        <span class="face">{{ '?' if gone else entry.mapper_name[:1]|upper }}{% if entry.mapper_id %}<img
+        <span class="face">{{ '?' if gone or unknown else entry.mapper_name[:1]|upper }}{% if entry.mapper_id %}<img
                 src="https://a.ppy.sh/{{ entry.mapper_id }}" alt="" loading="lazy"
                 onerror="this.remove()">{% endif %}</span>
         <span class="who">
             {% if gone %}
             <a class="gone">Restricted account</a>
+            {% elif unknown and entry.mapper_id %}
+            <a href="https://osu.ppy.sh/users/{{ entry.mapper_id }}" target="_blank"
+                rel="noopener">unknown mapper</a>
             {% elif entry.mapper_id %}
             <a href="https://osu.ppy.sh/users/{{ entry.mapper_id }}" target="_blank"
                 rel="noopener">{{ entry.mapper_name }}</a>

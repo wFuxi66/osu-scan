@@ -692,10 +692,10 @@ def aggregate_page(beatmapsets, stats, names, owners_by_diff=None):
 def prefer_name(resolved, stored):
     """The API's current username wins, except when the lookup failed.
 
-    A failed lookup comes back as the placeholder User_<id>, which is worse than the
-    possibly-outdated name the mapset carries.
+    A failed lookup comes back as the placeholder User_<id> (confirmed restricted) or
+    Unknown_<id> (never read), both worse than the possibly-outdated name the mapset carries.
     """
-    if resolved and not resolved.startswith('User_'):
+    if resolved and not resolved.startswith(('User_', 'Unknown_')):
         return resolved
     return stored or resolved
 
@@ -1021,7 +1021,9 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         fav_modes = lambda ss: merge_modes(*(stats['favs'][s]['modes'][uid] for s in ss))
         return {
             'osu_id': uid,
-            'username': names.get(uid, f'User_{uid}'),
+            # A mapper never resolved in this pass (new to the ladder after the name pass) is
+            # unknown, not restricted: only a confirmed 404 writes a User_<id> placeholder.
+            'username': names.get(uid, f'Unknown_{uid}'),
             'playcount': pick(BUCKETS, 'pc'),
             'maps': pick(BUCKETS, 'maps'),
             'by_mode': modes(BUCKETS, 'mode_pc'),

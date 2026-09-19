@@ -192,8 +192,12 @@
 
     // A restricted or deleted account comes back as a placeholder; there is no profile to link to.
     const GONE = /^(User_\d+|ID:\d+)$/;
+    // A name the scan never managed to read. That is not a restriction, so it keeps its link.
+    const UNKNOWN = /^Unknown_\d+$/;
     const nameCell = (id, name) => GONE.test(name)
         ? '<a class="gone">Restricted account</a>'
+        : UNKNOWN.test(name)
+        ? `<a href="https://osu.ppy.sh/users/${id}" target="_blank" rel="noopener">unknown mapper</a>`
         : `<a href="https://osu.ppy.sh/users/${id}" target="_blank" rel="noopener">${esc(name)}</a>`;
 
     const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
@@ -203,7 +207,7 @@
 
     // The initial sits underneath, so a missing avatar degrades to a letter, not an empty tile.
     const face = (id, name, cls) =>
-        `<span class="${cls}">${GONE.test(name) ? '?' : esc((name || '?').trim().charAt(0).toUpperCase())}`
+        `<span class="${cls}">${GONE.test(name) || UNKNOWN.test(name) ? '?' : esc((name || '?').trim().charAt(0).toUpperCase())}`
         + `<img src="https://a.ppy.sh/${id}" alt="" loading="lazy" decoding="async"`
         + ` onerror="this.remove()"></span>`;
 
