@@ -114,6 +114,57 @@ class NominationIndexConsumerTests(unittest.TestCase):
 
         self.assertEqual(scan_logic.indexed_nominator_ids(bset, index), [10, 20])
 
+    def test_ranked_set_uses_index_when_summary_is_stale_zero(self):
+        # Old ranked sets carry current=0 while current_nominations still lists the pair;
+        # an equality check would deep-fetch every one of them.
+        bset = {
+            'id': 100,
+            'status': 'ranked',
+            'nominations_summary': {'current': 0},
+        }
+        index = {'sets': {'100': [10, 20]}}
+
+        self.assertEqual(scan_logic.indexed_nominator_ids(bset, index), [10, 20])
+
+    def test_ranked_set_uses_index_when_it_holds_more_than_summary(self):
+        # A disqualification and re-nomination leaves the whole historical list on the set
+        # while the summary counts only the final pair.
+        bset = {
+            'id': 100,
+            'status': 'ranked',
+            'nominations_summary': {'current': 2},
+        }
+        index = {'sets': {'100': [10, 20, 30]}}
+
+        self.assertEqual(scan_logic.indexed_nominator_ids(bset, index), [10, 20, 30])
+
+    def test_process_ranked_set_serves_persistent_cache_before_a_short_index(self):
+        class NoNetworkSession:
+            def get(self, *args, **kwargs):
+                raise AssertionError('a cached settled set must not make an API request')
+
+        bset = {
+            'id': 100,
+            'status': 'ranked',
+            'artist': 'Artist',
+            'title': 'Title',
+            'ranked_date': '2026-09-19T12:00:00Z',
+            'nominations_summary': {'current': 2},
+        }
+
+        with mock.patch.dict(scan_logic.NOM_CACHE, {100: [10, 20]}, clear=True):
+            entries = scan_logic.process_nominator_set(
+                bset,
+                'token',
+                session=NoNetworkSession(),
+                nomination_index={'sets': {'100': [10]}},
+            )
+
+        self.assertEqual(entries, [
+            {'nominator_id': 10, 'set_title': 'Artist - Title', 'date': '2026-09-19'},
+            {'nominator_id': 20, 'set_title': 'Artist - Title', 'date': '2026-09-19'},
+        ])
+
     def test_qualified_set_ignores_index(self):
         bset = {
             'id': 100,

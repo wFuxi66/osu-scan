@@ -320,10 +320,19 @@ def indexed_nominator_ids(bset, nomination_index):
         return None
 
     ids = sets.get(str(bset['id']))
-    expected = bset.get('nominations_summary', {}).get('current')
-    if not isinstance(ids, list) or type(expected) is not int or len(ids) != expected:
+    if not isinstance(ids, list) or not ids:
         return None
     if any(type(uid) is not int for uid in ids) or len(set(ids)) != len(ids):
+        return None
+
+    # `nominations_summary.current` is not maintained on older ranked sets: it reads 0 where
+    # the set still has its nominators on record, and a disqualified-then-re-nominated set
+    # keeps the whole historical list in current_nominations while the summary counts only the
+    # final pair. So it is a floor, not an equality. An entry below it is an index that dropped
+    # a nominator and needs a live read; anything at or above it is the same list the live read
+    # would return, and taking it spares one request per set against a very small rate budget.
+    expected = bset.get('nominations_summary', {}).get('current')
+    if type(expected) is int and expected > 0 and len(ids) < expected:
         return None
     return ids
 
@@ -339,17 +348,19 @@ def process_nominator_set(bset, token, session=None, nomination_index=None):
     def entries(ids):
         return [{'nominator_id': uid, 'set_title': title, 'date': date} for uid in ids]
 
-    indexed = indexed_nominator_ids(bset, nomination_index)
-    if indexed is not None:
-        return entries(indexed)
-
-    # With a published index, rejecting its entry is a request for fresh truth: do not let
-    # the older process-local cache turn a qualified, missing or mismatched entry back into
-    # a cache hit. The legacy cache remains useful while no index has been published yet.
-    if nomination_index is None:
+    settled = bset.get('status') in SETTLED_STATUSES
+    if settled:
+        # Who nominated a settled set is settled history, so a live read of one is as good as
+        # the published index and worth keeping: it is reused by every later scan, including
+        # when an index entry is judged short. A qualified set is never written here, which is
+        # what keeps a re-nomination from being served out of this cache.
         cached = NOM_CACHE.get(sid)
         if cached is not None:
             return entries(cached)
+
+    indexed = indexed_nominator_ids(bset, nomination_index)
+    if indexed is not None:
+        return entries(indexed)
 
     # Eight threads reading a few hundred sets go through the rate limit. ponytail: a retry
     # per thread is enough while the cache absorbs the repeat scans; pace the pool if not.
@@ -360,9 +371,7 @@ def process_nominator_set(bset, token, session=None, nomination_index=None):
         return None
 
     ids = [nom['user_id'] for nom in r.json().get('current_nominations', [])]
-    # Who nominated a ranked set is settled history. A qualified one can still be
-    # disqualified and re-nominated by someone else, so it is read again every scan.
-    if bset.get('status') in SETTLED_STATUSES:
+    if settled:
         NOM_CACHE[sid] = ids
     return entries(ids)
 
