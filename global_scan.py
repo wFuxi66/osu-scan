@@ -154,7 +154,6 @@ def safe_api_get(url, headers, params=None, timeout=15, session=None, max_retrie
 def fetch_bn_nominations(osu_id, token, cancel_event=None, session=None):
     """Fetches all nominated sets for a BN via osu! API or web endpoint with rate-limit resilience."""
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'X-Requested-With': 'XMLHttpRequest'
     }
     if token:

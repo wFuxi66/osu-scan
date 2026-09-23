@@ -31,7 +31,6 @@ API_BEATMAPSET_URL = 'https://osu.ppy.sh/api/v2/beatmapsets'
 API_USER_URL = 'https://osu.ppy.sh/api/v2/users'
 SEARCH_URL = 'https://osu.ppy.sh/beatmapsets/search'
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'X-Requested-With': 'XMLHttpRequest',
 }
 TOP_N = None  # keep every mapper: the whole ladder is ~8k entries
