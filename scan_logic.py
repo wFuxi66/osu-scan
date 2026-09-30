@@ -252,12 +252,16 @@ def process_set(bset, host_id, token=None):
     loved = bset.get('status') == 'loved'
     
     beats = bset.get('beatmaps')
-    if beats is None and token:
-        # These buckets carry the difficulties with them, so this is a fallback that rarely
-        # runs - but when it does, losing it drops every guest mapper on the set.
+    if token and (beats is None or any('owners' not in b for b in beats)):
+        # Profile listings include difficulties but omit their collaboration authors.
+        # A stored user_id alone cannot tell us everyone who contributed.
         r = get_set_with_retry(f'{API_BASE}/beatmapsets/{bset["id"]}',
                                {'Authorization': f'Bearer {token}'})
-        beats = r.json().get('beatmaps', []) if r else []
+        if r is None:
+            return None
+        beats = r.json().get('beatmaps')
+        if beats is None or any('owners' not in b for b in beats):
+            return None
 
     if not beats:
         return []
@@ -267,7 +271,7 @@ def process_set(bset, host_id, token=None):
     seen_mappers_in_set = set()
 
     for beatmap in beats:
-        owners = beatmap.get('owners', [])
+        owners = beatmap.get('owners') or []
         
         if owners:
             for owner in owners:
@@ -295,19 +299,49 @@ def process_set(bset, host_id, token=None):
     return gds_in_set
 
 def analyze_sets(beatmapsets, host_id, token=None, progress_callback=None, cancel_event=None):
-    """Finds GDs in the provided beatmap sets directly from memory (instant)."""
+    """Count each guest once per set, resolving omitted collaboration authors first."""
+    beatmapsets = list({b['id']: b for b in beatmapsets}.values())
     all_gds = []
+    unread = 0
     total = len(beatmapsets)
     if progress_callback: progress_callback(f"Analyzing {total} sets...")
     
-    if cancel_event and cancel_event.is_set(): return []
+    if cancel_event and cancel_event.is_set(): return [], 0
+
+    # The bulk endpoint exposes full owners for up to 50 difficulties per request.
+    # Populate the listing in memory so process_set usually needs no per-set request.
+    missing = {b['id']: b for s in beatmapsets for b in s.get('beatmaps') or []
+               if 'owners' not in b}
+    if token and missing:
+        if progress_callback: progress_callback("Reading difficulty authors...")
+        ids = list(missing)
+        session = requests.Session()
+        try:
+            for offset in range(0, len(ids), 50):
+                if cancel_event and cancel_event.is_set(): return [], 0
+                batch = ids[offset:offset + 50]
+                if progress_callback:
+                    progress_callback(f"Reading difficulty authors: {min(offset + 50, len(ids))}/{len(ids)}...")
+                params = requests.compat.urlencode([('ids[]', bid) for bid in batch])
+                r = get_set_with_retry(f'{API_BASE}/beatmaps?{params}',
+                                       {'Authorization': f'Bearer {token}'}, session)
+                if r is None:
+                    continue  # process_set retries unresolved authors through the set endpoint.
+                for beatmap in r.json().get('beatmaps') or []:
+                    if beatmap.get('id') in missing and 'owners' in beatmap:
+                        missing[beatmap['id']]['owners'] = beatmap['owners']
+        finally:
+            session.close()
     
     for bset in beatmapsets:
-        if cancel_event and cancel_event.is_set(): return []
+        if cancel_event and cancel_event.is_set(): return [], 0
         results = process_set(bset, host_id, token)
-        all_gds.extend(results)
+        if results is None:
+            unread += 1
+        else:
+            all_gds.extend(results)
                 
-    return all_gds
+    return all_gds, unread
 
 
 def indexed_nominator_ids(bset, nomination_index):
@@ -905,12 +939,13 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
     
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
-    gds = analyze_sets(sets, user_id, token, progress_callback, cancel_event)
+    gds, unread = analyze_sets(sets, user_id, token, progress_callback, cancel_event)
     
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
     if not gds:
         return {'username': username, 'user_id': user_id, 'leaderboard': [],
+                'unread_sets': unread,
                 'listing_truncated': truncated}
         
     leaderboard = resolve_and_aggregate(gds, token, progress_callback)
@@ -920,6 +955,7 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
         'user_id': user_id,
         'leaderboard': leaderboard,
         'sets_read': len(sets),
+        'unread_sets': unread,
         'listing_truncated': truncated
     }
 
