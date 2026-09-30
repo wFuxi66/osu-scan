@@ -4,6 +4,7 @@ import os
 import json
 import concurrent.futures
 import threading
+from email.utils import parsedate_to_datetime
 from collections import defaultdict
 
 # Configuration constants
@@ -37,6 +38,95 @@ TOKEN_CACHE_FILE = 'token_cache.json'
 # indistinguishable, and a scan that guesses wrong either gives up on a door that was about
 # to open, or hammers one that is never going to.
 token_retry_after = None
+
+
+class APIPacer:
+    """Share request starts and server cooldowns across this service's scan threads."""
+    def __init__(self, interval=1.0):
+        self.interval = interval
+        self.next_request = 0.0
+        self.lock = threading.Lock()
+
+    def wait(self):
+        while True:
+            with self.lock:
+                now = time.monotonic()
+                delay = self.next_request - now
+                if delay <= 0:
+                    self.next_request = now + self.interval
+                    return
+            # Recheck after waking: another request may have extended a 429 cooldown.
+            time.sleep(min(delay, 1.0))
+
+    def cooldown(self, seconds):
+        with self.lock:
+            self.next_request = max(self.next_request, time.monotonic() + seconds)
+
+
+API_PACER = APIPacer()
+
+
+def retry_after_seconds(value, default=60):
+    try:
+        return max(0.0, float(value))
+    except (ValueError, TypeError):
+        try:
+            return max(0.0, parsedate_to_datetime(value).timestamp() - time.time())
+        except (ValueError, TypeError, OverflowError):
+            return float(default)
+
+
+def api_get(url, session=None, **kwargs):
+    """Pace every manual-scan GET and share the full Retry-After on a 429."""
+    get = session.get if session is not None else requests.get
+    for _ in range(3):
+        API_PACER.wait()
+        response = get(url, **kwargs)
+        if response.status_code != 429:
+            return response
+        delay = retry_after_seconds(response.headers.get('Retry-After'))
+        API_PACER.cooldown(delay)
+        print(f"osu! API rate limited: pausing scan requests for {delay:.0f} seconds.")
+    return response
+
+# Bound author requests across simultaneous manual scans, too.
+AUTHOR_WORKERS = 6
+AUTHOR_REQUEST_LIMIT = threading.BoundedSemaphore(AUTHOR_WORKERS)
+AUTHOR_CACHE_FILE = 'difficulty_authors_cache.json'
+AUTHOR_CACHE_TTL = 7 * 24 * 3600
+QUALIFIED_AUTHOR_CACHE_TTL = 5 * 60
+AUTHOR_CACHE_LOCK = threading.Lock()
+try:
+    with open(AUTHOR_CACHE_FILE) as f:
+        AUTHOR_CACHE = json.load(f)
+    if not isinstance(AUTHOR_CACHE, dict):
+        AUTHOR_CACHE = {}
+except (OSError, ValueError):
+    AUTHOR_CACHE = {}
+
+
+def author_basis(beatmap):
+    return [beatmap.get('last_updated'), beatmap.get('user_id')]
+
+
+def remember_authors(beatmap, status):
+    ttl = AUTHOR_CACHE_TTL if status in SETTLED_STATUSES else QUALIFIED_AUTHOR_CACHE_TTL
+    with AUTHOR_CACHE_LOCK:
+        AUTHOR_CACHE[str(beatmap['id'])] = {
+            'basis': author_basis(beatmap), 'owners': beatmap['owners'],
+            'status': status, 'expires_at': time.time() + ttl,
+        }
+
+
+def fetch_author_batch(batch, token, cancel_event):
+    with AUTHOR_REQUEST_LIMIT:
+        if cancel_event and cancel_event.is_set():
+            return []
+        params = requests.compat.urlencode([('ids[]', bid) for bid in batch])
+        with requests.Session() as session:
+            r = get_set_with_retry(f'{API_BASE}/beatmaps?{params}',
+                                   {'Authorization': f'Bearer {token}'}, session)
+            return (r.json().get('beatmaps') or []) if r is not None else []
 
 
 def get_token():
@@ -104,7 +194,7 @@ def get_user_id(username_or_id, token):
     url = f'{API_BASE}/users/{username_or_id}/osu'
     
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=5)
+        response = api_get(url, headers=headers, params=params, timeout=5)
         if response.status_code == 200:
             data = response.json()
             return data['id'], data['username']
@@ -115,7 +205,7 @@ def get_user_id(username_or_id, token):
     if str(username_or_id).isdigit():
         url = f'{API_BASE}/users/{username_or_id}'
         try:
-            response = requests.get(url, headers=headers, timeout=5)
+            response = api_get(url, headers=headers, timeout=5)
             if response.status_code == 200:
                 data = response.json()
                 return data['id'], data['username']
@@ -154,7 +244,7 @@ def get_beatmapsets(user_id, token, cancel_event=None):
             url = f'{API_BASE}/users/{user_id}/beatmapsets/{s_type}'
             
             try:
-                response = session.get(url, headers=headers, params=params, timeout=10)
+                response = api_get(url, session=session, headers=headers, params=params, timeout=10)
                 if response.status_code == 404:
                     break 
                 
@@ -207,7 +297,7 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
         url = f'{API_BASE}/users/{user_id}/beatmapsets/nominated'
         
         try:
-            response = session.get(url, headers=headers, params=params, timeout=10)
+            response = api_get(url, session=session, headers=headers, params=params, timeout=10)
             if response.status_code == 404: break
             
             response.raise_for_status()
@@ -231,16 +321,12 @@ def get_nominated_beatmapsets(user_id, token, cancel_event=None):
 
 def get_set_with_retry(url, headers, session=None):
     """Reads one set, waiting out a rate limit. None means the read did not happen."""
-    req_func = session.get if session else requests.get
     for attempt in range(3):
         try:
-            r = req_func(url, headers=headers, timeout=20)
+            r = api_get(url, session=session, headers=headers, timeout=20)
         except Exception as e:
             print(f"Error fetching {url}: {e}")
             time.sleep(1 + attempt)
-            continue
-        if r.status_code == 429:
-            time.sleep(min(int(r.headers.get('Retry-After', 2 ** attempt)), 30))
             continue
         return r if r.status_code == 200 else None
     return None
@@ -255,13 +341,16 @@ def process_set(bset, host_id, token=None):
     if token and (beats is None or any('owners' not in b for b in beats)):
         # Profile listings include difficulties but omit their collaboration authors.
         # A stored user_id alone cannot tell us everyone who contributed.
-        r = get_set_with_retry(f'{API_BASE}/beatmapsets/{bset["id"]}',
-                               {'Authorization': f'Bearer {token}'})
+        with AUTHOR_REQUEST_LIMIT:
+            r = get_set_with_retry(f'{API_BASE}/beatmapsets/{bset["id"]}',
+                                   {'Authorization': f'Bearer {token}'})
         if r is None:
             return None
         beats = r.json().get('beatmaps')
         if beats is None or any('owners' not in b for b in beats):
             return None
+        for beatmap in beats:
+            remember_authors(beatmap, bset.get('status'))
 
     if not beats:
         return []
@@ -312,34 +401,64 @@ def analyze_sets(beatmapsets, host_id, token=None, progress_callback=None, cance
     # Populate the listing in memory so process_set usually needs no per-set request.
     missing = {b['id']: b for s in beatmapsets for b in s.get('beatmaps') or []
                if 'owners' not in b}
+    statuses = {b['id']: s.get('status') for s in beatmapsets for b in s.get('beatmaps') or []}
+    now = time.time()
+    with AUTHOR_CACHE_LOCK:
+        for bid, beatmap in list(missing.items()):
+            entry = AUTHOR_CACHE.get(str(bid))
+            if (isinstance(entry, dict) and entry.get('expires_at', 0) > now
+                    and entry.get('basis') == author_basis(beatmap)
+                    and entry.get('status') == statuses[bid]
+                    and isinstance(entry.get('owners'), list)):
+                beatmap['owners'] = entry['owners']
+                del missing[bid]
     if token and missing:
         if progress_callback: progress_callback("Reading difficulty authors...")
         ids = list(missing)
-        session = requests.Session()
-        try:
-            for offset in range(0, len(ids), 50):
+        batches = [ids[offset:offset + 50] for offset in range(0, len(ids), 50)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=AUTHOR_WORKERS) as executor:
+            futures = {executor.submit(fetch_author_batch, batch, token, cancel_event): len(batch)
+                       for batch in batches}
+            completed = 0
+            for future in concurrent.futures.as_completed(futures):
                 if cancel_event and cancel_event.is_set(): return [], 0
-                batch = ids[offset:offset + 50]
+                completed += futures[future]
                 if progress_callback:
-                    progress_callback(f"Reading difficulty authors: {min(offset + 50, len(ids))}/{len(ids)}...")
-                params = requests.compat.urlencode([('ids[]', bid) for bid in batch])
-                r = get_set_with_retry(f'{API_BASE}/beatmaps?{params}',
-                                       {'Authorization': f'Bearer {token}'}, session)
-                if r is None:
-                    continue  # process_set retries unresolved authors through the set endpoint.
-                for beatmap in r.json().get('beatmaps') or []:
+                    progress_callback(f"Reading difficulty authors: {completed}/{len(ids)}...")
+                try:
+                    authors = future.result()
+                except Exception as e:
+                    print(f"Error reading difficulty authors: {e}")
+                    continue  # Retry unresolved authors through the set endpoint.
+                for beatmap in authors:
                     if beatmap.get('id') in missing and 'owners' in beatmap:
-                        missing[beatmap['id']]['owners'] = beatmap['owners']
-        finally:
-            session.close()
+                        listed = missing[beatmap['id']]
+                        listed['owners'] = beatmap['owners']
+                        remember_authors(listed, statuses[listed['id']])
     
-    for bset in beatmapsets:
-        if cancel_event and cancel_event.is_set(): return [], 0
-        results = process_set(bset, host_id, token)
-        if results is None:
-            unread += 1
-        else:
-            all_gds.extend(results)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=AUTHOR_WORKERS) as executor:
+        futures = [executor.submit(process_set, bset, host_id, token) for bset in beatmapsets]
+        for future in concurrent.futures.as_completed(futures):
+            if cancel_event and cancel_event.is_set(): return [], 0
+            try:
+                results = future.result()
+            except Exception as e:
+                print(f"Error reading guest mappers: {e}")
+                results = None
+            if results is None:
+                unread += 1
+            else:
+                all_gds.extend(results)
+
+    if token:
+        with AUTHOR_CACHE_LOCK:
+            # Keep the disk cache bounded to authors still eligible for reuse.
+            for bid in list(AUTHOR_CACHE):
+                entry = AUTHOR_CACHE[bid]
+                if not isinstance(entry, dict) or entry.get('expires_at', 0) <= time.time():
+                    del AUTHOR_CACHE[bid]
+            snapshot = dict(AUTHOR_CACHE)
+        _save_json_atomic(AUTHOR_CACHE_FILE, snapshot, 'difficulty author cache')
                 
     return all_gds, unread
 
@@ -469,9 +588,6 @@ load_nom_cache()
 
 # The bulk endpoint takes 50 ids per request, turning 8000 lookups into 160.
 USER_BATCH = 50
-# ponytail: a flat pause is enough to stay under the API's sustained rate; swap in a proper
-# token bucket only if a scan ever has to share the budget with something else.
-BATCH_PAUSE = 0.5
 
 # What fetch_user_name returns for an account the API says is gone. An object, not a string,
 # so it can never be mistaken for a username the caller should cache.
@@ -490,13 +606,10 @@ def fetch_user_name(session, uid, headers, max_retries=4):
     """
     for attempt in range(max_retries):
         try:
-            r = session.get(f'{API_BASE}/users/{uid}', headers=headers,
+            r = api_get(f'{API_BASE}/users/{uid}', session=session, headers=headers,
                             params={'key': 'id'}, timeout=20)
         except Exception:
             time.sleep(1 + attempt)
-            continue
-        if r.status_code == 429:
-            time.sleep(min(int(r.headers.get('Retry-After', 2 ** attempt)), 30))
             continue
         if r.status_code == 404:
             return RESTRICTED
@@ -515,12 +628,9 @@ def fetch_users_batch(session, uids, headers, max_retries=6):
     params = [('ids[]', uid) for uid in uids]
     for attempt in range(max_retries):
         try:
-            r = session.get(f'{API_BASE}/users', headers=headers, params=params, timeout=20)
+            r = api_get(f'{API_BASE}/users', session=session, headers=headers, params=params, timeout=20)
         except Exception:
             time.sleep(1 + attempt)
-            continue
-        if r.status_code == 429:
-            time.sleep(min(int(r.headers.get('Retry-After', 2 ** attempt)), 30))
             continue
         if r.status_code != 200:
             return None
@@ -553,8 +663,6 @@ def resolve_users_parallel(user_ids, token, progress_callback=None, refresh=Fals
         done = 0
 
         for i in range(0, total_missing, USER_BATCH):
-            if i:
-                time.sleep(BATCH_PAUSE)  # fired back to back, the batches earn a 429 of their own
             batch = missing_ids[i:i + USER_BATCH]
             found = fetch_users_batch(session, batch, headers)
             done += len(batch)
@@ -570,7 +678,6 @@ def resolve_users_parallel(user_ids, token, progress_callback=None, refresh=Fals
                 # A 200 from the bulk endpoint can still omit an active account, so a missing
                 # id is not proof of restriction. Confirm it directly: only a 404 writes the
                 # placeholder, and a request that never lands leaves the id for the next scan.
-                time.sleep(BATCH_PAUSE)
                 answer = fetch_user_name(session, uid, headers)
                 if answer is RESTRICTED:
                     USER_CACHE[uid] = f'User_{uid}'
@@ -794,7 +901,7 @@ def get_guest_beatmapsets(user_id, token, cancel_event=None):
         url = f'{API_BASE}/users/{user_id}/beatmapsets/guest'
         
         try:
-            response = session.get(url, headers=headers, params=params, timeout=10)
+            response = api_get(url, session=session, headers=headers, params=params, timeout=10)
             if response.status_code == 404: break
             
             response.raise_for_status()

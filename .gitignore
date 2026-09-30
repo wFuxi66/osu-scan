@@ -24,6 +24,8 @@ leaderboard_*.html
 # Cache
 user_cache.json
 nominations_cache.json
+difficulty_authors_cache.json
+difficulty_authors_cache.json.tmp
 nomination_index_cache.json
 leaderboard_cache.json
 mappers_cache.json
