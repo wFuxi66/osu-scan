@@ -126,7 +126,10 @@ def run_scan_job(job_id, username, mode, cancel_event):
             result = scan_logic.generate_gd_hosts_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
             title_prefix = "Guest Difficulties by"
         else:
-            result = scan_logic.generate_leaderboard_for_user(username, progress_callback=update_progress, cancel_event=cancel_event)
+            result = scan_logic.generate_leaderboard_for_user(
+                username, progress_callback=update_progress, cancel_event=cancel_event,
+                author_index_loader=lambda uid: get_leaderboard_data(next_path(f'gd_author_index/hosts/{uid}')),
+            )
             title_prefix = "Guest Difficulties for"
             
         if cancel_event.is_set():

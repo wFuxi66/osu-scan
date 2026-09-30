@@ -26,6 +26,7 @@ user_cache.json
 nominations_cache.json
 difficulty_authors_cache.json
 difficulty_authors_cache.json.tmp
+gd_author_index_cache.json
 nomination_index_cache.json
 leaderboard_cache.json
 mappers_cache.json

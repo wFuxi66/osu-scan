@@ -54,11 +54,18 @@ def save_to_firebase(data, path='leaderboard'):
 def load_from_firebase(path='leaderboard'):
     """Loads data from Firebase Realtime Database."""
     if not FIREBASE_URL:
-        try:
-            with open(local_path(path), 'r') as f:
-                return json.load(f)
-        except FileNotFoundError:
-            return None
+        # Nested Firebase reads also work against the published offline JSON snapshot.
+        parts = path.strip('/').split('/')
+        for end in range(len(parts), 0, -1):
+            try:
+                with open(local_path('/'.join(parts[:end])), 'r') as f:
+                    data = json.load(f)
+                for key in parts[end:]:
+                    data = data[key]
+                return data
+            except (FileNotFoundError, KeyError, TypeError):
+                continue
+        return None
 
     # Use secret for reading too if available
     auth_suffix = f'?auth={FIREBASE_SECRET}' if FIREBASE_SECRET else ''

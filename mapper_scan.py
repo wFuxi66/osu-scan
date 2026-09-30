@@ -307,7 +307,8 @@ PROFILE_ROTATION = int(os.environ.get('PROFILE_ROTATION', 30))
 
 def new_cache():
     return {'version': CACHE_VERSION, 'runs': 0,
-            'owners': {}, 'profiles': {}, 'profile_basis': {}}
+            'owners': {}, 'profiles': {}, 'profile_basis': {},
+            'owners_basis': {}, 'author_sets': {}}
 
 
 def load_cache(path=None):
@@ -328,7 +329,49 @@ def load_cache(path=None):
     # A cache missing a key it should have is a cache we do not understand.
     if not all(k in cache for k in ('runs', 'owners', 'profiles', 'profile_basis')):
         return new_cache()
+    # Extend existing caches without discarding paid-for author lookups or checkpoints.
+    cache.setdefault('owners_basis', {})
+    cache.setdefault('author_sets', {})
     return cache
+
+
+def record_author_sets(cache, beatmapsets, owners):
+    """Keep the author data and difficulty metadata already read by this pass."""
+    for bset in beatmapsets:
+        beats = bset.get('beatmaps') or []
+        if (bset.get('status') not in scan_logic.SETTLED_STATUSES or not beats
+                or any(b['id'] not in owners for b in beats)):
+            cache['author_sets'].pop(bset['id'], None)
+            continue
+        cache['author_sets'][bset['id']] = {
+            'host_id': bset['user_id'], 'status': bset['status'],
+            'beatmaps': {str(b['id']): [b.get('last_updated'), b.get('user_id'), diff_owners(b, owners)]
+                         for b in beats},
+        }
+
+
+def build_author_index(cache, seen_sets, names, scanned_at):
+    """Publish small per-host lookups; a manual scan downloads only its host's shard."""
+    hosts = {}
+    for sid, entry in cache['author_sets'].items():
+        if sid not in seen_sets:
+            continue
+        host = hosts.setdefault(str(entry['host_id']), {
+            'version': 1, 'last_scan': scanned_at, 'sets': {}, 'names': {},
+        })
+        host['sets'][str(sid)] = {'status': entry['status'], 'beatmaps': entry['beatmaps']}
+        for _, _, owners in entry['beatmaps'].values():
+            for uid in owners:
+                if uid in names:
+                    host['names'][str(uid)] = names[uid]
+    return {'version': 1, 'last_scan': scanned_at, 'owners_rotation': OWNERS_ROTATION,
+            'hosts': hosts}
+
+
+def publish_mapper_results(result, author_index):
+    if author_index is not None and not save_to_firebase(author_index, path='gd_author_index'):
+        return False
+    return save_to_firebase(result, path='mappers')
 
 
 def save_cache(cache, path=None):
@@ -820,7 +863,8 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
     # Every difficulty this crawl actually saw. Used only to prune the cache at the end, and
     # only on a complete pass - pruning against a partial one would throw away good entries
     # for every set the crawl never reached.
-    seen_diffs = set()
+    seen_diffs = {int(d) for sid, entry in cache['author_sets'].items() if sid in state['seen']
+                  for d in entry['beatmaps']}
     owners_from_cache = owners_read = 0
 
     if state['owners_mode'] not in (None, 'none') and not token:
@@ -894,7 +938,9 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         # Search order is ranked_asc, so page boundaries are stable between runs and every
         # page comes up exactly once per rotation.
         page_due = due_for_recheck(state['pages'], run_no, OWNERS_ROTATION)
-        need = {d for d in page_diffs if page_due or d not in known}
+        bases = {b['id']: scan_logic.author_basis(b) for s in fresh for b in s.get('beatmaps') or []}
+        need = {d for d in page_diffs if page_due or d not in known
+                or (d in cache['owners_basis'] and cache['owners_basis'][d] != bases[d])}
 
         looked_up = resolve_owners(session, fresh, token, state['owners_mode'], need=need)
         if looked_up is None:
@@ -907,6 +953,8 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         owners_read += len(looked_up)
         if use_owners_cache:
             cache['owners'].update(looked_up)
+            cache['owners_basis'].update({d: bases[d] for d in owners if d in bases})
+            record_author_sets(cache, fresh, owners)
 
         aggregate_page(fresh, stats, names, owners)
         state['seen'].update(b['id'] for b in page_sets)
@@ -1100,7 +1148,9 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
     }
 
     progress("Saving mapper leaderboard to Firebase...")
-    if not save_to_firebase(result, path='mappers'):
+    author_index = (build_author_index(cache, state['seen'], names, result['last_scan'])
+                    if state['owners_mode'] in ('bulk', 'set') else None)
+    if not publish_mapper_results(result, author_index):
         # Everything below this line throws away the work that would let a retry be cheap: the
         # checkpoint that holds the finished crawl, and the owners paid for along the way. A
         # publish that did not happen is not a finished scan, so none of it runs.
@@ -1114,6 +1164,8 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
     # quietly bill the next run for work already paid for, and on a run that died early it
     # would throw away most of the cache.
     cache['owners'] = {d: o for d, o in cache['owners'].items() if d in seen_diffs}
+    cache['owners_basis'] = {d: b for d, b in cache['owners_basis'].items() if d in seen_diffs}
+    cache['author_sets'] = {s: e for s, e in cache['author_sets'].items() if s in state['seen']}
     live = set(top_ids)
     cache['profiles'] = {u: r for u, r in cache['profiles'].items() if u in live}
     cache['profile_basis'] = {u: b for u, b in cache['profile_basis'].items() if u in live}

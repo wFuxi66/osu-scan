@@ -5,6 +5,7 @@ import json
 import concurrent.futures
 import threading
 from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 
 # Configuration constants
@@ -95,6 +96,7 @@ AUTHOR_REQUEST_LIMIT = threading.BoundedSemaphore(AUTHOR_WORKERS)
 AUTHOR_CACHE_FILE = 'difficulty_authors_cache.json'
 AUTHOR_CACHE_TTL = 7 * 24 * 3600
 QUALIFIED_AUTHOR_CACHE_TTL = 5 * 60
+AUTHOR_INDEX_TTL = 48 * 3600
 AUTHOR_CACHE_LOCK = threading.Lock()
 try:
     with open(AUTHOR_CACHE_FILE) as f:
@@ -387,7 +389,38 @@ def process_set(bset, host_id, token=None):
                 
     return gds_in_set
 
-def analyze_sets(beatmapsets, host_id, token=None, progress_callback=None, cancel_event=None):
+def indexed_authors(bset, beatmap, author_index):
+    """Use a recent nightly snapshot only while status and difficulty metadata agree."""
+    if (bset.get('status') not in SETTLED_STATUSES or not isinstance(author_index, dict)
+            or author_index.get('version') != 1):
+        return None
+    try:
+        scanned = datetime.fromisoformat(author_index['last_scan'])
+        if scanned.tzinfo is None:
+            scanned = scanned.replace(tzinfo=timezone.utc)
+        age = time.time() - scanned.timestamp()
+        if age < -300 or age > AUTHOR_INDEX_TTL:
+            return None
+        entry = author_index['sets'][str(bset['id'])]
+        if entry['status'] != bset['status']:
+            return None
+        data = entry['beatmaps'][str(beatmap['id'])]
+        if not isinstance(data, list) or len(data) != 3 or data[:2] != author_basis(beatmap):
+            return None
+        ids = data[2]
+        if not isinstance(ids, list) or not ids or any(type(uid) is not int or uid <= 0 for uid in ids):
+            return None
+        if len(set(ids)) != len(ids):
+            return None
+        names = author_index.get('names') or {}
+        return [{'id': uid, 'username': names.get(str(uid)) if isinstance(names.get(str(uid)), str) else None}
+                for uid in ids]
+    except (KeyError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def analyze_sets(beatmapsets, host_id, token=None, progress_callback=None, cancel_event=None,
+                 author_index=None):
     """Count each guest once per set, resolving omitted collaboration authors first."""
     beatmapsets = list({b['id']: b for b in beatmapsets}.values())
     all_gds = []
@@ -401,6 +434,13 @@ def analyze_sets(beatmapsets, host_id, token=None, progress_callback=None, cance
     # Populate the listing in memory so process_set usually needs no per-set request.
     missing = {b['id']: b for s in beatmapsets for b in s.get('beatmaps') or []
                if 'owners' not in b}
+    for bset in beatmapsets:
+        for beatmap in bset.get('beatmaps') or []:
+            if beatmap['id'] in missing:
+                owners = indexed_authors(bset, beatmap, author_index)
+                if owners is not None:
+                    beatmap['owners'] = owners
+                    del missing[beatmap['id']]
     statuses = {b['id']: s.get('status') for s in beatmapsets for b in s.get('beatmaps') or []}
     now = time.time()
     with AUTHOR_CACHE_LOCK:
@@ -1030,7 +1070,8 @@ def resolve_and_aggregate(gds, token, progress_callback=None):
     leaderboard.sort(key=lambda x: (-x['total_gds'], x['mapper_name']))
     return leaderboard
 
-def generate_leaderboard_for_user(username_input, progress_callback=None, cancel_event=None):
+def generate_leaderboard_for_user(username_input, progress_callback=None, cancel_event=None,
+                                  author_index_loader=None):
     """Main entry point for the scan engine."""
     token = get_token()
     if not token:
@@ -1046,7 +1087,15 @@ def generate_leaderboard_for_user(username_input, progress_callback=None, cancel
     
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
-    gds, unread = analyze_sets(sets, user_id, token, progress_callback, cancel_event)
+    author_index = None
+    if author_index_loader is not None:
+        if progress_callback: progress_callback("Loading nightly difficulty authors...")
+        try:
+            author_index = author_index_loader(user_id)
+        except Exception as e:
+            print(f"Nightly authors unavailable; using live lookups: {e}")
+    gds, unread = analyze_sets(sets, user_id, token, progress_callback, cancel_event,
+                             author_index=author_index)
     
     if cancel_event and cancel_event.is_set(): return {'error': 'Cancelled'}
     
