@@ -15,8 +15,8 @@ Analytical tool for osu! mappers to evaluate beatmap and nomination history.
   - Mappers, by favourites on the sets they hosted (per mode, loved on/off)
   - Mappers, by mapping subscribers — no filters: a subscriber follows the
     mapper, not a map
-- Automated scans feeding the leaderboards: nominators and mappers, both nightly
-- Multi-threaded processing and result caching
+- Automated scheduled scans feeding the leaderboards: every 3 hours with dynamic backlog catch-up, plus daily maintenance
+- Multi-threaded processing, rate-limiting pacing, and shared result caching
 
 ## Setup
 1. Install dependencies: `pip install -r requirements.txt`
