@@ -30,6 +30,15 @@
     </div>
 </div>
 
+<form class="exclude" id="exclude" autocomplete="off" hidden>
+    <label for="exclude-in">Leave out a host</label>
+    <span class="chips" id="exclude-chips"></span>
+    <input type="text" id="exclude-in" list="exclude-hosts" spellcheck="false"
+        placeholder="Type a host’s name">
+    <datalist id="exclude-hosts"></datalist>
+    <p class="exclude-msg" id="exclude-msg" role="status"></p>
+</form>
+
 <div id="podium-slot"></div>
 
 <div class="list" id="list">
@@ -60,6 +69,14 @@
 {% block scripts %}
 <script>
     const PER_PAGE = 50;
+
+    const LEAVE_OUT_NOTE = 'Leaving a host out takes the guest difficulties made on their sets out '
+        + 'of every guest mapper’s figures, so you can see who stands without them. The host '
+        + 'keeps their own figures, and so does anyone they guest-mapped for.';
+    // Every host left out costs one request, and the board is meant to be read, not emptied.
+    const MAX_EXCLUDED = 10;
+    // Positions in a guest's per-host entry, as mapper_scan publishes it.
+    const HG = { pc: 0, maps: 1, sets: 2, lovedPc: 3, lovedMaps: 4 };
 
     const BOARDS = {
         bns: {
@@ -94,8 +111,9 @@
                 + 'compare ranked plays alone.',
             'A set taken down for copyright still counts: osu! drops it from search, but it stays '
                 + 'ranked, stays played, and stays on its mapper\u2019s profile. Qualified sets do not '
-                + 'count \u2014 they have not ranked yet.'],
-            scope: true, loved: true, modes: true,
+                + 'count \u2014 they have not ranked yet.',
+            LEAVE_OUT_NOTE],
+            scope: true, loved: true, modes: true, exclude: true,
         },
         sets: {
             tab: 'Most ranked sets',
@@ -112,8 +130,10 @@
                 + 'the mode its mapper worked in \u2014 the one they put the most difficulties in, if '
                 + 'they did several. A set counts once and only once: a std set carrying a guest taiko '
                 + 'difficulty is one std set for its host and one taiko set for that guest, so the modes '
-                + 'always add back up to the figure on "All".'],
-            scope: true, loved: true, modes: true,
+                + 'always add back up to the figure on "All".',
+            LEAVE_OUT_NOTE + ' Here that comes out of osu!’s own guest figure, so a set of '
+                + 'theirs still in qualified, which the scan never reads, stays in it.'],
+            scope: true, loved: true, modes: true, exclude: true,
         },
         favs: {
             tab: 'Most favourited',
@@ -168,12 +188,26 @@
     let emode = 'all';
     const pages = { bns: 1, duos: 1, mappers: 1, sets: 1, favs: 1, subs: 1 };
 
+    // Hosts left out, in the order they were picked: [{ id, name }]. A name is only known once
+    // the ladder arrives, so a link's ids wait in pendingExcluded until then.
+    let excluded = [], pendingExcluded = [];
+    // host id -> { guest id: { mode: [plays, diffs, sets, loved plays, loved diffs] } }
+    const shards = {};
+    // Every left-out host whose figures have arrived, summed per guest. Null when nothing is.
+    let exGuests = null, exVersion = 0;
+
     // A leaderboard is worth linking to and worth sharing, so it lives in the URL.
     const params = new URLSearchParams(location.search);
     if (BOARDS[params.get('board')]) board = params.get('board');
     if (['all', 'own', 'guest'].includes(params.get('scope'))) scope = params.get('scope');
     if (MODES.some(([k]) => k === params.get('mode'))) mode = params.get('mode');
     if (params.get('loved') === '0') withLoved = false;
+    pendingExcluded = [...new Set((params.get('exclude') || '').split(',')
+        .filter(s => /^\d+$/.test(s)).map(Number))].slice(0, MAX_EXCLUDED);
+
+    // Leaving a host out only touches guest figures, so the "As host" view has nothing to show for it.
+    const excludeApplies = () => !!BOARDS[board].exclude && scope !== 'own' && scopeAvailable
+        && mapperData?.host_guests === true;
 
     function syncURL() {
         const p = new URLSearchParams();
@@ -182,6 +216,8 @@
         if (scope !== 'all' && BOARDS[board].scope) p.set('scope', scope);
         if (mode !== 'all' && BOARDS[board].modes) p.set('mode', mode);
         if (!withLoved) p.set('loved', '0');
+        const ids = excluded.length ? excluded.map(h => h.id) : pendingExcluded;
+        if (ids.length && BOARDS[board].exclude && scope !== 'own') p.set('exclude', ids.join(','));
         const qs = p.toString();
         history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
     }
@@ -277,21 +313,39 @@
         lovedFavs: ['own_loved_favs', 'own_loved_favs_by_mode'],
     };
 
-    // Only the "own" figures are stored, so a guest figure is the remainder.
-    const byScope = (all, own) => scope === 'own' ? own : scope === 'guest' ? all - own : all;
+    // Only the "own" figures are stored, so a guest figure is the remainder. Floored so the
+    // remainder never goes negative: a left-out host's shard can be a scan newer than the
+    // ladder, and taking out a few plays too many must not leave a guest figure below nothing.
+    const byScope = (all, own) => scope === 'own' ? own
+        : scope === 'guest' ? Math.max(0, all - own) : Math.max(own, all);
+
+    // What a mapper made on the left-out hosts' sets, in the mode on screen. The scan files
+    // catch under 'catch' alone, so there is no 'fruits' to fold in the way pick() does.
+    function leftOut(ex, i) {
+        if (!ex) return 0;
+        if (emode !== 'all') return ex[emode]?.[i] || 0;
+        let n = 0;
+        for (const k in ex) n += ex[k]?.[i] || 0;
+        return n;
+    }
 
     function mapperRows(valueOf) {
         const out = [];
+        const leaving = excludeApplies() && exGuests;
         for (const m of (mapperData?.mappers || [])) {
             const g = k => {
                 const [flat, perMode] = FIELDS[k];
                 return emode === 'all' ? (m[flat] || 0) : pick(m[perMode], 0);
             };
-            const allLoved = g('lovedPc'), ownLoved = g('ownLovedPc');
-            let allPc = g('pc'), ownPc = g('ownPc'), allMaps = g('maps'), ownMaps = g('ownMaps');
+            // Only ever guest work, so it comes off the totals and never off the own figures.
+            const ex = leaving ? exGuests[m.osu_id] : null;
+            const x = k => leftOut(ex, HG[k]);
+            const allLoved = g('lovedPc') - x('lovedPc'), ownLoved = g('ownLovedPc');
+            let allPc = g('pc') - x('pc'), ownPc = g('ownPc');
+            let allMaps = g('maps') - x('maps'), ownMaps = g('ownMaps');
             if (!withLoved) {
                 allPc -= allLoved; ownPc -= ownLoved;
-                allMaps -= g('lovedMaps'); ownMaps -= g('ownLovedMaps');
+                allMaps -= g('lovedMaps') - x('lovedMaps'); ownMaps -= g('ownLovedMaps');
             }
 
             // Favourites come straight from the crawl - there is no official figure to prefer
@@ -310,11 +364,14 @@
             let allSets, ownSets;
             if (m.profile_ranked_sets == null
                 || (emode !== 'all' && !mapperData.profile_modes)) {
-                allSets = g('sets'); ownSets = g('ownSets');
+                allSets = g('sets') - x('sets'); ownSets = g('ownSets');
             } else {
                 ownSets = p('profile_ranked_sets', 'profile_ranked_by_mode')
                     + (withLoved ? p('profile_loved_sets', 'profile_loved_by_mode') : 0);
-                allSets = ownSets + p('profile_guest_sets', 'profile_guest_by_mode');
+                // osu! does not split loved out of guest participation, so a left-out host's
+                // sets come out whole, loved or not, the same way they went in.
+                allSets = ownSets + Math.max(0,
+                    p('profile_guest_sets', 'profile_guest_by_mode') - x('sets'));
             }
 
             out.push({
@@ -379,7 +436,7 @@
     let memo = { key: null, rows: [] }, dataVersion = 0;
 
     function built() {
-        const key = [board, scope, emode, withLoved, dataVersion].join('|');
+        const key = [board, scope, emode, withLoved, dataVersion, excludeApplies() && exVersion].join('|');
         if (memo.key !== key) {
             const rows = BUILD[board]();
             rows.forEach((r, i) => r.rank = i + 1);   // rank before filtering, so it stays global
@@ -403,6 +460,7 @@
         $('scope-control').hidden = !(cfg.scope && scopeAvailable);
         $('mode-control').hidden = !cfg.modes;
         $('loved-control').hidden = !cfg.loved;
+        renderExclude();
         $('legend').hidden = emode !== 'all';
         $('list').classList.toggle('duos', board === 'duos');
         $('note-body').innerHTML = cfg.note.map(p => `<p>${p}</p>`).join('');
@@ -460,6 +518,20 @@
             }).join('');
         }
         pager(p, totalPages, rows.length);
+    }
+
+    function renderExclude() {
+        const on = excludeApplies();
+        $('exclude').hidden = !on;
+        if (!on) return;
+        $('exclude-chips').innerHTML = excluded.map(h =>
+            `<span class="chip"${shards[h.id] ? '' : ' aria-busy="true"'}>${esc(h.name)}`
+            + `<button type="button" data-id="${h.id}" aria-label="Count ${esc(h.name)}’s sets again">`
+            + `&times;</button></span>`).join('');
+        const full = excluded.length >= MAX_EXCLUDED;
+        $('exclude-in').disabled = full;
+        $('exclude-in').placeholder = full ? `Up to ${MAX_EXCLUDED} hosts`
+            : excluded.length ? 'Add another host' : 'Type a host’s name';
     }
 
     function podium(three, unit) {
@@ -565,6 +637,115 @@
         $('q').focus();
     };
 
+    /* ---------------- leaving hosts out ---------------- */
+
+    // Anyone who hosted a set on the ladder, by lowercased name and by id. Built on first use:
+    // most visits never open the field, and the list runs to thousands.
+    let hostIndex = null;
+    function hosts() {
+        if (hostIndex || !mapperData) return hostIndex;
+        hostIndex = { byName: new Map(), byId: new Map() };
+        const list = (mapperData.mappers || [])
+            .filter(m => (m.own_sets || 0) > 0 && m.username && !GONE.test(m.username)
+                && !UNKNOWN.test(m.username))
+            .sort((a, b) => (b.own_playcount || 0) - (a.own_playcount || 0));
+        for (const m of list) {
+            const h = { id: m.osu_id, name: m.username };
+            hostIndex.byName.set(m.username.toLowerCase(), h);
+            hostIndex.byId.set(m.osu_id, h);
+        }
+        // Biggest hosts first: they are the ones a guest figure most often leans on.
+        $('exclude-hosts').innerHTML = list.map(m => `<option value="${esc(m.username)}">`).join('');
+        return hostIndex;
+    }
+
+    function recomputeExcluded() {
+        const sum = {};
+        let any = false;
+        for (const h of excluded) {
+            const guests = shards[h.id];
+            if (!guests) continue;
+            any = true;
+            for (const gid in guests) {
+                const into = sum[gid] || (sum[gid] = {});
+                for (const k in guests[gid]) {
+                    const v = guests[gid][k], acc = into[k] || (into[k] = [0, 0, 0, 0, 0]);
+                    // Firebase may hand a short list back as an object keyed "0".."4".
+                    for (let i = 0; i < 5; i++) acc[i] += +(v?.[i] || 0);
+                }
+            }
+        }
+        exGuests = any ? sum : null;
+        exVersion++;
+        pages.mappers = pages.sets = 1;
+    }
+
+    function exclude(h) {
+        if (excluded.some(e => e.id === h.id) || excluded.length >= MAX_EXCLUDED) return;
+        excluded.push(h);
+        $('exclude-msg').textContent = '';
+        const cached = !!shards[h.id];
+        if (cached) recomputeExcluded();
+        syncURL(); render();
+        if (cached) return;
+        fetch(`/api/host_guests/${h.id}`)
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(d => { shards[h.id] = d.guests || {}; })
+            .catch(() => {
+                // Left in place it would read as applied while taking nothing out.
+                excluded = excluded.filter(e => e.id !== h.id);
+                $('exclude-msg').textContent = `Could not read ${h.name}’s sets just now. Try again in a moment.`;
+                syncURL();
+            })
+            .finally(() => { recomputeExcluded(); render(); });
+    }
+
+    function excludeTyped(report) {
+        const idx = hosts();
+        const typed = $('exclude-in').value.trim();
+        if (!idx || !typed) return;
+        const h = idx.byName.get(typed.toLowerCase())
+            || (/^\d+$/.test(typed) ? idx.byId.get(Number(typed)) : null);
+        if (h) {
+            $('exclude-in').value = '';
+            exclude(h);
+        } else if (report) {
+            $('exclude-msg').textContent = `Nobody called “${typed}” hosts a set on this board.`;
+        }
+    }
+
+    $('exclude-in').onfocus = () => hosts();
+    // Picking a suggestion is an input event with no keystroke behind it, and it is a choice:
+    // take it at once. Typing is not, or "Sota" would be left out on the way to "Sotarks".
+    $('exclude-in').oninput = e => {
+        $('exclude-msg').textContent = '';
+        if (!e.inputType || e.inputType === 'insertReplacementText') excludeTyped(false);
+    };
+    $('exclude').onsubmit = e => { e.preventDefault(); excludeTyped(true); };
+    $('exclude-chips').onclick = e => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        excluded = excluded.filter(h => h.id !== Number(b.dataset.id));
+        recomputeExcluded();
+        syncURL(); render();
+        $('exclude-in').focus();
+    };
+
+    // A shared link names its hosts by id; the ladder is what turns them back into names.
+    function restoreExcluded() {
+        const ids = pendingExcluded;
+        if (!ids.length) return;
+        pendingExcluded = [];
+        // A link from a board that carried the shards, opened on one that does not: the
+        // filter is not on offer, so the link should stop claiming it is.
+        const idx = mapperData?.host_guests === true ? hosts() : null;
+        for (const id of ids) {
+            const h = idx?.byId.get(id);
+            if (h) exclude(h);
+        }
+        syncURL();
+    }
+
     render();
 
     fetch('/api/leaderboard_data').then(r => r.json()).then(d => {
@@ -580,6 +761,7 @@
         // fact, and absent figures for the whole scan are not.
         has.subs = d.profile_subs === true;
         dataVersion++; stats(); render();
+        restoreExcluded();
     }).catch(() => { });
 </script>
 {% endblock %}

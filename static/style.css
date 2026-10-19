@@ -356,6 +356,92 @@ a {
     background: var(--sunk);
 }
 
+/* Leaving hosts out: a row of its own, since the hosts picked so far sit beside the field. */
+.exclude {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+    margin-top: -4px;
+    padding-bottom: 18px;
+}
+
+.exclude > label {
+    font-size: 12.5px;
+    color: var(--faint);
+    white-space: nowrap;
+}
+
+.exclude input {
+    width: 220px;
+    max-width: 100%;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--ink);
+    font: inherit;
+    font-size: 13.5px;
+    padding: 6px 14px;
+}
+
+.exclude input::placeholder {
+    color: var(--faint);
+}
+
+.exclude input:focus {
+    border-color: var(--pink);
+}
+
+/* The chips flow in the form's own row, between the label and the field. */
+.chips {
+    display: contents;
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--sunk);
+    border-radius: 999px;
+    padding: 3px 4px 3px 12px;
+    font-size: 13.5px;
+    font-weight: 500;
+}
+
+/* Still waiting on the host's figures, so nothing has been taken out yet. */
+.chip[aria-busy="true"] {
+    color: var(--faint);
+}
+
+.chip button {
+    appearance: none;
+    border: 0;
+    background: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    color: var(--faint);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.chip button:hover {
+    color: var(--ink);
+    background: var(--card);
+}
+
+.exclude-msg {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--mute);
+}
+
+.exclude-msg:empty {
+    display: none;
+}
+
 /* ---------------------------------------------------------------- tabs */
 
 .tabs {

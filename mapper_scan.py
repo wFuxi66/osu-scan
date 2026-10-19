@@ -66,7 +66,9 @@ RATE_PER_MIN = float(os.environ.get('OSU_RATE_PER_MIN', 300))
 # the ladder is never saved at all - the crawl's work thrown away for the optional part.
 PROFILE_BUDGET = float(os.environ.get('PROFILE_BUDGET_MIN', 90)) * 60
 # Bumped whenever the checkpoint layout changes, so an old one is discarded, not misread.
-STATE_VERSION = 7
+# 8: stats gained by_host. A checkpoint without it would resume with the per-host figures of
+# every set before the crash missing, and publish them short.
+STATE_VERSION = 8
 
 
 class AuthRejected(Exception):
@@ -234,7 +236,21 @@ def new_stats():
     # added. The set's own status decides, which files each set in exactly one bucket.
     stats['favs'] = {state: {'total': defaultdict(int), 'modes': defaultdict(_int_dd)}
                      for state in FAV_STATES}
+    # The guest figures again, broken down by whose set they were made on:
+    # {host: {guest: {mode: [plays, difficulties, sets, loved plays, loved difficulties]}}}.
+    # It is what lets a board leave one host's sets out of every guest mapper's total
+    # without a scan per host. Plain dicts and lists, so the checkpoint pickles it as is.
+    stats['by_host'] = {}
     return stats
+
+
+# Positions in a by_host entry. A list rather than a dict because there are tens of
+# thousands of them and the keys would be most of the payload.
+HG_PC, HG_MAPS, HG_SETS, HG_LOVED_PC, HG_LOVED_MAPS = range(5)
+
+
+def host_guest_entry(stats, host, guest, mode):
+    return stats['by_host'].setdefault(host, {}).setdefault(guest, {}).setdefault(mode, [0] * 5)
 
 
 def credited_ids(stats):
@@ -368,8 +384,24 @@ def build_author_index(cache, seen_sets, names, scanned_at):
             'hosts': hosts}
 
 
-def publish_mapper_results(result, author_index):
+def build_host_guests(stats, scanned_at):
+    """One shard per host: what each guest mapper made on that host's sets.
+
+    The board fetches a shard only when someone leaves that host out, so the ladder download
+    stays the size it was. Keys are strings because Firebase stores them that way anyway.
+    """
+    return {'version': 1, 'last_scan': scanned_at,
+            'hosts': {str(host): {'last_scan': scanned_at,
+                                  'guests': {str(guest): modes for guest, modes in guests.items()}}
+                      for host, guests in stats['by_host'].items()}}
+
+
+def publish_mapper_results(result, author_index, host_guests=None):
     if author_index is not None and not save_to_firebase(author_index, path='gd_author_index'):
+        return False
+    # Before the board, which is what tells the site the shards exist: a board published
+    # over shards that failed to land would offer a filter with nothing behind it.
+    if host_guests is not None and not save_to_firebase(host_guests, path='gd_host_guests'):
         return False
     return save_to_firebase(result, path='mappers')
 
@@ -702,6 +734,13 @@ def aggregate_page(beatmapsets, stats, names, owners_by_diff=None):
                 b['mode_pc'][uid][mode] += pc
                 b['mode_maps'][uid][mode] += 1
                 set_modes[(uid, role)][mode] += 1
+                if role == 'guest' and bset.get('user_id'):
+                    e = host_guest_entry(stats, bset['user_id'], uid, mode)
+                    e[HG_PC] += pc
+                    e[HG_MAPS] += 1
+                    if state == 'loved':
+                        e[HG_LOVED_PC] += pc
+                        e[HG_LOVED_MAPS] += 1
 
         # Getting a set ranked makes it yours even when every difficulty on it is a guest's:
         # osu! counts it on your profile, so the mapset ladder counts it too. Playcount and
@@ -724,6 +763,10 @@ def aggregate_page(beatmapsets, stats, names, owners_by_diff=None):
             # one mode on a single set - a hybrid mapper ranked one set, not one of each.
             filed_mode = dominant_mode(modes)
             stats['sets'][role]['modes'][uid][filed_mode] += 1
+            # Filed under the same mode as above, so leaving out every host a guest worked
+            # for takes each of their mode columns to exactly zero.
+            if role == 'guest' and host:
+                host_guest_entry(stats, host, uid, filed_mode)[HG_SETS] += 1
             # `own` is the host and only ever the host, so this runs once per set.
             if role == 'own':
                 f = stats['favs'][set_state]
@@ -1138,6 +1181,9 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
         # subscribers and wrong for a whole scan that never read any - so the board is
         # offered on the strength of this flag rather than on one row happening to carry it.
         'profile_subs': any('profile_mapping_subs' in r for r in profiles.values()),
+        # Published alongside: per-host guest figures, so a board can leave a host's sets
+        # out. A board from before them carries no flag, and the filter is not offered.
+        'host_guests': True,
         # What this pass actually re-read. Playcounts are always 100% fresh - they ride in
         # on the search pages - so these say how much of the *static* half was trusted from
         # cache, which is the only thing that can go stale.
@@ -1150,7 +1196,8 @@ def run_mapper_scan(progress_callback=None, cancel_event=None, max_pages=None, r
     progress("Saving mapper leaderboard to Firebase...")
     author_index = (build_author_index(cache, state['seen'], names, result['last_scan'])
                     if state['owners_mode'] in ('bulk', 'set') else None)
-    if not publish_mapper_results(result, author_index):
+    host_guests = build_host_guests(stats, result['last_scan'])
+    if not publish_mapper_results(result, author_index, host_guests):
         # Everything below this line throws away the work that would let a retry be cheap: the
         # checkpoint that holds the finished crawl, and the owners paid for along the way. A
         # publish that did not happen is not a finished scan, so none of it runs.

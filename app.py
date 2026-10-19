@@ -352,6 +352,33 @@ def mappers_data():
     """Returns the global mapper playcount leaderboard. Client handles filtering/pagination."""
     return gzipped_json(get_leaderboard_data(next_path('mappers')), 'mappers')
 
+
+# The ids on the published ladder, rebuilt when a new scan lands. Every shard read is cached
+# under its own path, so an id nobody can pick from the board would only be a way to fill
+# that cache with misses.
+LADDER_IDS = {'version': None, 'ids': frozenset()}
+
+
+def ladder_ids():
+    data = get_leaderboard_data(next_path('mappers')) or {}
+    if LADDER_IDS['version'] != data.get('last_scan') or not LADDER_IDS['ids']:
+        LADDER_IDS.update(version=data.get('last_scan'),
+                          ids=frozenset(m.get('osu_id') for m in data.get('mappers') or []))
+    return LADDER_IDS['ids']
+
+
+@app.route('/api/host_guests/<int:host_id>')
+def host_guests(host_id):
+    """What every guest mapper made on one host's sets, for the board to leave out."""
+    if host_id not in ladder_ids():
+        return jsonify({'error': 'Not on the mapper ladder'}), 404
+    shard = get_leaderboard_data(next_path(f'gd_host_guests/hosts/{host_id}')) or {}
+    # No shard is a host nobody guested for: nothing to leave out, not an error.
+    response = jsonify({'host_id': host_id, 'last_scan': shard.get('last_scan'),
+                        'guests': shard.get('guests') or {}})
+    response.headers['Cache-Control'] = f'public, max-age={LEADERBOARD_CACHE_TTL}'
+    return response
+
 # The scans run in GitHub Actions ("Site Scan"), which is where they belong: hours of API
 # calls, a checkpoint between attempts, and a cache that survives the run. The web service
 # only ever reads what they publish - it has no trigger of its own, and wants none.
